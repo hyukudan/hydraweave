@@ -1,33 +1,35 @@
 """Heterogeneous DS decode placement across the RTX PRO and the Strix pair: candidate plans and predicted tok/s.
 
 main 20:06: every unit gets a cost on each device and the plan chooses where it lives, minimising link crossings
-per token. This module compares the plan families the engines can run today, each priced by a time model calibrated
-on the measured points of hetero/hdec-report.md (2026-10-21/22, 1 user, R1, greedy, exact, 1 GbE):
+per token. This module compares the plan families the engines can run today, each priced by a time model fitted on
+the measured points of hetero/hdec-report.md (2026-10-21/22, 1 user, R1, greedy, exact, 1 GbE):
 
-- pair only (P15): 27.2 tok/s, every unit on the pair;
-- pipeline split: RTX layers [0, K) with every expert resident, pair [K, 40), one crossing per token; per layer
-  ~0.30 ms on the RTX and ~0.87 ms on the pair, crossing p50 0.78 ms; calibrated at K=22 = 38.4 tok/s;
+- pair only (P15): 27.2 tok/s, every unit on the pair (measured);
+- pipeline split: RTX layers [0, K) with every expert resident, pair [K, 40), one crossing per token;
+  ms/token = a + b K, least squares on the five measured K = 8 / 12 / 16 / 20 / 22 (28.2 / 30.7 / 33.9 / 36.4 /
+  38.4 tok/s); K outside 8..22 is marked extrapolated;
 - dense + hot experts: attention, dense, shared expert and head of all 40 layers on the RTX (9.55 GiB reserve, W1),
   the hottest experts resident, the rest computed by the pair's expert servers; ms/token = 21 + 0.37 x remote
-  layers/token (hdec fit; static 80 GiB: 24.2 remote layers -> 33.6 tok/s; + 16 dynamic copies: 11.0 -> 40.1).
-  Remote layers/token = 40 x (1 - layer_all_local), from the held-out hit-rate curve of the routes
-  (wave4/vramplan/curves: replica mode = experts chosen from all 40 x 384 by frequency).
+  layers/token (hdec fit on static 24.2 remote -> 33.6 tok/s and dynamic 11.0 -> 40.1); remote layers/token =
+  40 x (1 - layer_all_local), from the held-out hit-rate curve of the routes (wave4/vramplan/curves, replica mode);
+  remote layers outside the measured 11.0..24.2 are marked extrapolated.
 
-Every prediction carries its calibration source; families with no measured point are not ranked. The pair's
-weights never move (Strix weights come only from local NVMe, main 18:01): only activations cross the link.
+Every candidate says whether it is a measured point or a model output (`estimate`). The pair's weights never move
+(Strix weights come only from local NVMe, main 18:01): only activations cross the link.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
-from ..vramplan import GIB, PlanError
+from ..vramplan import PlanError
 
 LAYERS = 40
-PAIR_ONLY_MS = 1000 / 27.2
-PIPE = {"rtx_layer_ms": 0.30, "pair_layer_ms": 0.87, "crossing_ms": 0.78, "k": 22, "measured_tok_s": 38.4}
-HOT = {"base_ms": 21.0, "per_remote_layer_ms": 0.37, "reserve_gib": 9.55, "measured": [(24.2, 33.6), (11.0, 40.1)]}
-CROSSING_SAVING_25G_MS = 0.42  # hdec: a 2.5 GbE switch, per pipeline crossing (user decision; not measured on hot)
+PAIR_ONLY_TOK_S = 27.2
+PIPE_MEASURED = ((8, 28.2), (12, 30.7), (16, 33.9), (20, 36.4), (22, 38.4))  # (K, tok/s)
+HOT = {"base_ms": 21.0, "per_remote_layer_ms": 0.37, "reserve_gib": 9.55, "measured_remote": (11.0, 24.2)}
+CROSSING_SAVING_25G_MS = 0.42  # hdec: a 2.5 GbE switch, per pipeline crossing (user decision; not measured)
+LINKS = ("1g", "2.5g")
 
 
 @dataclass
@@ -37,6 +39,9 @@ class Candidate:
     ms_per_token: float
     calibration: str
     detail: dict
+    estimate: bool = True
+    extrapolated: bool = False
+    measured_point: dict | None = field(default=None)
 
     @property
     def tok_s(self):
@@ -44,25 +49,34 @@ class Candidate:
 
     def to_dict(self):
         return {"family": self.family, "flags": self.flags, "ms_per_token": round(self.ms_per_token, 2),
-                "tok_s": round(self.tok_s, 1), "calibration": self.calibration, "detail": self.detail}
+                "tok_s": round(self.tok_s, 1), "estimate": self.estimate, "extrapolated": self.extrapolated,
+                "measured_point": self.measured_point, "calibration": self.calibration, "detail": self.detail}
 
 
-def _pipe_constant():
-    """The per-token time outside the layers, so that K=22 reproduces the measured 38.4 tok/s."""
-    k = PIPE["k"]
-    layers = PIPE["rtx_layer_ms"] * k + PIPE["pair_layer_ms"] * (LAYERS - k) + PIPE["crossing_ms"]
-    return 1000 / PIPE["measured_tok_s"] - layers
+def _pipe_fit():
+    """Least squares ms/token = a + b K over the measured pipeline points."""
+    ks = [k for k, _ in PIPE_MEASURED]
+    ms = [1000 / t for _, t in PIPE_MEASURED]
+    mk, mm = sum(ks) / len(ks), sum(ms) / len(ms)
+    b = sum((k - mk) * (m - mm) for k, m in zip(ks, ms)) / sum((k - mk) ** 2 for k in ks)
+    return mm - b * mk, b
 
 
 def pipeline(k, link="1g"):
-    if not 1 <= k < LAYERS:
-        raise PlanError(f"pipeline split: K must be in 1..{LAYERS - 1}")
-    crossing = PIPE["crossing_ms"] - (CROSSING_SAVING_25G_MS if link == "2.5g" else 0.0)
-    ms = _pipe_constant() + PIPE["rtx_layer_ms"] * k + PIPE["pair_layer_ms"] * (LAYERS - k) + crossing
+    if type(k) is not int or not 1 <= k < LAYERS:
+        raise PlanError(f"pipeline split: K must be an integer in 1..{LAYERS - 1}")
+    if link not in LINKS:
+        raise PlanError(f"pipeline split: link must be one of {LINKS}")
+    a, b = _pipe_fit()
+    ms = a + b * k - (CROSSING_SAVING_25G_MS if link == "2.5g" else 0.0)
+    measured = dict(PIPE_MEASURED).get(k)
+    ks = [x for x, _ in PIPE_MEASURED]
     return Candidate("pipeline", {"--cuts": k, "--layers": k, "--tiers": "D" * k, "tail --first-layer": k}, ms,
-                     "hdec K=22 38.4 tok/s; per-layer RTX 0.30 / pair 0.87 ms, crossing 0.78 ms"
-                     + (" minus 0.42 ms for 2.5 GbE (not measured)" if link == "2.5g" else ""),
-                     {"rtx_layers": k, "pair_layers": LAYERS - k, "crossings_per_token": 1})
+                     f"hdec K=8/12/16/20/22 (least squares ms = {a:.2f} {b:+.3f} K)"
+                     + ("; minus 0.42 ms for 2.5 GbE (not measured)" if link == "2.5g" else ""),
+                     {"rtx_layers": k, "pair_layers": LAYERS - k, "crossings_per_token": 1, "link": link},
+                     extrapolated=not min(ks) <= k <= max(ks) or link != "1g",
+                     measured_point={"tok_s": measured, "link": "1g"} if measured else None)
 
 
 def _interp(curve, x):
@@ -75,32 +89,50 @@ def _interp(curve, x):
     return pts[-1][1]
 
 
-def hot(expert_gib, curve, dynamic_note=False):
+def _check_curve(curve):
+    if not curve or any(len(p) != 2 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in p)
+                        or not 0 <= p[1] <= 1 for p in curve):
+        raise PlanError("hit-rate curve: expected (expert GiB, layer_all_local in 0..1) finite points")
+
+
+def hot(expert_gib, curve):
     """Dense + hot experts with `expert_gib` of statically resident experts; curve = [(expert GiB, layer_all_local)]
     held out from the routes (replica mode)."""
-    if expert_gib < 0:
-        raise PlanError("hot placement: no room for experts after the 9.55 GiB dense reserve")
+    _check_curve(curve)
+    if not isinstance(expert_gib, (int, float)) or not math.isfinite(expert_gib) or expert_gib < 0:
+        raise PlanError("hot placement: expert GiB must be a finite number >= 0 (no room after the 9.55 GiB reserve?)")
     local = _interp(curve, expert_gib)
     remote = LAYERS * (1 - local)
+    low, high = HOT["measured_remote"]
     ms = HOT["base_ms"] + HOT["per_remote_layer_ms"] * remote
     return Candidate("dense+hot", {"expert_gib": round(expert_gib, 2)}, ms,
                      "hdec fit 21 + 0.37 ms x remote layers (static 80 GiB 33.6 tok/s, dynamic 40.1 tok/s)",
                      {"remote_layers_per_token": round(remote, 1), "layer_all_local": round(local, 3),
-                      "dynamic_copies": "not modelled (measured +16 copies/token: 40.1 tok/s at 80 GiB)"
-                      if dynamic_note else None})
+                      "dynamic_copies": "not modelled (measured: 80 GiB static + 10 GiB dynamic, 16 copies/token, "
+                                        "40.1 tok/s)"},
+                     extrapolated=not low <= remote <= high,
+                     measured_point={"tok_s": 33.6, "expert_budget_gib": 80, "placement": "W1 placement-pro80"}
+                     if abs(expert_gib - (80 - HOT["reserve_gib"])) < 0.05 else None)
 
 
 def candidates(vram_cap_gib, *, curve, front_k, margin_gib=None, link="1g"):
-    """Every family at this cap, best first. front_k: the pipeline K that fits the cap (vramplan ds41-rtx-front)."""
-    if not math.isfinite(vram_cap_gib) or vram_cap_gib <= 0:
+    """Every family at this cap, best first. front_k: the pipeline K that fits the cap (vramplan ds41-rtx-front);
+    0 when not even one layer fits. The margin is never below max(2 GiB, 3 % of the cap)."""
+    if not isinstance(vram_cap_gib, (int, float)) or not math.isfinite(vram_cap_gib) or vram_cap_gib <= 0:
         raise PlanError("vram cap must be a positive number of GiB")
-    margin = margin_gib if margin_gib is not None else max(2.0, 0.03 * vram_cap_gib)
-    out = [Candidate("pair-only", {}, PAIR_ONLY_MS, "measured P15 27.2 tok/s", {"rtx": "unused"})]
+    if margin_gib is not None and (not isinstance(margin_gib, (int, float)) or not math.isfinite(margin_gib)
+                                   or margin_gib < 0):
+        raise PlanError("margin must be a finite number of GiB >= 0")
+    if type(front_k) is not int or front_k < 0:
+        raise PlanError("front_k must be an integer >= 0")
+    margin = max(2.0, 0.03 * vram_cap_gib, margin_gib or 0.0)
+    out = [Candidate("pair-only", {}, 1000 / PAIR_ONLY_TOK_S, "measured P15 27.2 tok/s", {"rtx": "unused"},
+                     estimate=False, measured_point={"tok_s": PAIR_ONLY_TOK_S})]
     if front_k >= 1:
-        out.append(pipeline(front_k, link))
+        out.append(pipeline(min(front_k, LAYERS - 1), link))
     expert_gib = vram_cap_gib - margin - HOT["reserve_gib"]
     if expert_gib >= 0:
-        out.append(hot(expert_gib, curve, dynamic_note=True))
+        out.append(hot(expert_gib, curve))
     return sorted(out, key=lambda c: c.ms_per_token)
 
 

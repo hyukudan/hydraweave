@@ -338,6 +338,10 @@ def _vramplan(args):
     if args.blob_cache is not None:
         if args.engine != "minimax-rtx-prefill":
             raise ValueError("--blob-cache is the minimax-rtx-prefill three-tier mode only")
+        if not args.blob_cache.strip():
+            raise ValueError("--blob-cache needs a directory")
+        if args.host_gib is None:
+            raise ValueError("--blob-cache (three-tier mode) needs --host-gib: the pinned count comes from it")
         params["blob_cache"] = args.blob_cache
     if args.placement_out and args.engine not in ("ds41-rtx-hot", "desc-v1"):
         raise ValueError("--placement-out is written for ds41-rtx-hot and desc-v1 only")
