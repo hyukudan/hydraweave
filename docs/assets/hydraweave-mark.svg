@@ -1,24 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="88 52 336 336" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
 <title id="title">Hydraweave mark</title>
-<desc id="desc">Four hydra heads share a base of interlaced threads: many devices weaving one inference.</desc>
-<rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
-<g fill="none" stroke-linecap="round" stroke-linejoin="round">
-<path d="M190 334 C190 290 316 268 316 224 C316 178 132 168 132 105" stroke="#ffffff" stroke-width="36"/>
-<path d="M190 334 C190 290 316 268 316 224 C316 178 132 168 132 105" stroke="#0d9488" stroke-width="24"/>
-<path d="M234 334 C234 290 190 268 190 224 C190 178 214 168 214 105" stroke="#ffffff" stroke-width="36"/>
-<path d="M234 334 C234 290 190 268 190 224 C190 178 214 168 214 105" stroke="#4338ca" stroke-width="24"/>
-<path d="M278 334 C278 290 342 268 342 224 C342 178 298 168 298 105" stroke="#ffffff" stroke-width="36"/>
-<path d="M278 334 C278 290 342 268 342 224 C342 178 298 168 298 105" stroke="#0d9488" stroke-width="24"/>
-<path d="M322 334 C322 290 216 268 216 224 C216 178 380 168 380 105" stroke="#ffffff" stroke-width="36"/>
-<path d="M322 334 C322 290 216 268 216 224 C216 178 380 168 380 105" stroke="#4338ca" stroke-width="24"/>
+<desc id="desc">Three hydra heads rise from interlaced ribbons that converge into one woven result. Original Hydraweave artwork. Manrope wordmark converted to paths.</desc>
+
+<g aria-label="Three hydra necks woven into one braid">
+  <path d="M52 78H84V99Q84 107 94 113L168 156Q190 169 190 186Q190 203 170 215L128 240L112 212L154 188Q161 184 154 180L78 137Q52 122 52 102Z" fill="#078D92"/>
+  <path d="M204 78H172V99Q172 107 162 113L88 156Q66 169 66 186Q66 203 86 215L128 240L144 212L102 188Q95 184 102 180L178 137Q204 122 204 102Z" fill="#3DDBB5"/>
+  <path d="M112 62H144V104Q144 121 128 131L94 152Q87 157 94 161L168 205L140 224L78 187Q56 174 56 155Q56 137 74 126L106 106Q112 102 112 94Z" fill="#5149B9"/>
+  <path d="M204 78H172V99Q172 107 162 113L88 156Q87 157 94 161L114 173L178 137Q204 122 204 102Z" fill="#3DDBB5"/>
+  <!-- Heads share a cut snout, swept brow and a single broad eye aperture. -->
+  <path d="M84 100V76Q84 64 72 58L58 50L62 36L36 47L16 66V82L29 94L35 79L51 77L62 83V100Z" fill="#078D92"/>
+  <path d="M84 100V76Q84 64 72 58L58 50L62 36L36 47L16 66V82L29 94L35 79L51 77L62 83V100Z" fill="#3DDBB5" transform="translate(256 0) scale(-1 1)"/>
+  <path d="M112 76L96 58V40L106 26L120 32L128 18L136 32L150 26L160 40V58L144 76L128 88Z" fill="#5149B9"/>
+  <path d="M29 66L49 58L43 67L32 72Z" fill="#3DDBB5"/>
+  <path d="M29 66L49 58L43 67L32 72Z" fill="#141A36" transform="translate(256 0) scale(-1 1)"/>
+  <path d="M105 45L120 51L123 60L110 55Z M151 45L136 51L133 60L146 55Z" fill="#3DDBB5"/>
 </g>
-<path d="M115 112 V96 Q115 80 132 80 H142 Q156 80 156 94 V101 Q156 112 142 112 Z" fill="#0d9488"/>
-<circle cx="141" cy="94" r="3.5" fill="#ffffff"/>
-<path d="M197 112 V96 Q197 80 214 80 H224 Q238 80 238 94 V101 Q238 112 224 112 Z" fill="#4338ca"/>
-<circle cx="223" cy="94" r="3.5" fill="#ffffff"/>
-<path d="M281 112 V96 Q281 80 298 80 H308 Q322 80 322 94 V101 Q322 112 308 112 Z" fill="#0d9488"/>
-<circle cx="307" cy="94" r="3.5" fill="#ffffff"/>
-<path d="M363 112 V96 Q363 80 380 80 H390 Q404 80 404 94 V101 Q404 112 390 112 Z" fill="#4338ca"/>
-<circle cx="389" cy="94" r="3.5" fill="#ffffff"/>
-<rect x="170" y="330" width="172" height="24" rx="12" fill="#0d9488"/>
 </svg>

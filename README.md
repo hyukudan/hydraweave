@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hydraweave-logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/hydraweave-logo.svg">
-    <img src="docs/assets/hydraweave-logo.svg" alt="Hydraweave — many devices weaving one inference" width="190">
+    <img src="docs/assets/hydraweave-logo.svg" alt="Hydraweave — many devices weaving one inference" width="420">
   </picture>
 </p>
 
