@@ -20,7 +20,7 @@ def _listed(profile, hours_ago):
 
 
 def seed(store, now):
-    from hyperloom.web.features import ledger
+    from hydraweave.web.features import ledger
     ledger._prepared(store)
     end = int(now // 3600) * 3600
     for hours_ago in range(30 * 24, 0, -1):
@@ -64,15 +64,15 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom.telemetry.store import Store
-    from hyperloom.web.features import ledger
+    from hydraweave.telemetry.store import Store
+    from hydraweave.web.features import ledger
     census, runs = Path(directory) / "census", Path(directory) / "runs"
     census.mkdir(exist_ok=True)
     runs.mkdir(exist_ok=True)
     shutil.copy(FIXTURES / "census-qwen.json", census)
     shutil.copy(FIXTURES / "census-v1-ds.json", census)
     shutil.copy(FIXTURES / "rtx-run.log", runs)
-    store = Store(Path(directory) / "hyperloom" / "telemetry.sqlite3")
+    store = Store(Path(directory) / "hydraweave" / "telemetry.sqlite3")
     try:
         for name, path in (("census_dir", census), ("logs_dir", runs)):
             store.put(ledger.PREFS, name, ledger._directory_setting(str(path), name))

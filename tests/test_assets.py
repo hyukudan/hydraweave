@@ -11,15 +11,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hyperloom import assets, cli, orchestrate as orch, secrets
-from hyperloom.render import ProcessSpec
+from hydraweave import assets, cli, orchestrate as orch, secrets
+from hydraweave.render import ProcessSpec
 from tests.test_orchestrate import cluster_fixture, FakeRemote
 from tests.test_node_assets import node
 
 
 class AssetTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-manifest-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-manifest-")
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name).resolve()
         self.cluster = cluster_fixture()
@@ -69,7 +69,7 @@ class AssetTests(unittest.TestCase):
     def processes(self, cluster, profile):
         _, kind, mids = orch._profile(cluster, profile)
         return [ProcessSpec(mid, "replica" if kind == "qwen-replicas" else f"rank{i}",
-                            ["/opt/hyperloom/bin/engine", "--http-port", "18501"], {}, "qwen-stderr")
+                            ["/opt/hydraweave/bin/engine", "--http-port", "18501"], {}, "qwen-stderr")
                 for i, mid in enumerate(mids)]
 
     def entry(self, mid):

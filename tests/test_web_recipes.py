@@ -1,4 +1,4 @@
-"""Portal recipe endpoints (hyperloom/web/recipes.py): every answer is the `hyperloom recipe ...` command line's own
+"""Portal recipe endpoints (hydraweave/web/recipes.py): every answer is the `hydraweave recipe ...` command line's own
 (same exit code, stdout JSON and refusal text), the transport rules of the other mutations, bounded children whose
 whole process tree is removed, the field editor's one-layer edits, `up` with a recipe and the server-side deploy job.
 No machine is contacted: hardware facts are saved records."""
@@ -14,12 +14,12 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, config, orchestrate, render
-from hyperloom.recipes import commands, launch, service, session
-from hyperloom.recipes.reader import RecipeError
-from hyperloom.web import recipes as recipe_web
-from hyperloom.web.api import API, APIError
-from hyperloom.web.server import create_server
+from hydraweave import cli, config, orchestrate, render
+from hydraweave.recipes import commands, launch, service, session
+from hydraweave.recipes.reader import RecipeError
+from hydraweave.web import recipes as recipe_web
+from hydraweave.web.api import API, APIError
+from hydraweave.web.server import create_server
 from tests.recipe_fixtures import builtin_text, copy_of, isolated
 from tests.test_recipes_service import DS, DS_FIXTURE, QWEN, run_cli, user_ds
 
@@ -46,8 +46,8 @@ class Portal:
             headers.update({"Origin": "http://" + self.host, "Content-Type": "application/json",
                             "Content-Length": str(len(payload or b""))})
             if csrf:
-                headers["X-Hyperloom-CSRF"] = self.server.csrf_token
-        connection.request(method, "/hyperloom/api/" + endpoint, body=payload, headers=headers)
+                headers["X-Hydraweave-CSRF"] = self.server.csrf_token
+        connection.request(method, "/hydraweave/api/" + endpoint, body=payload, headers=headers)
         response = connection.getresponse()
         data = response.read()
         connection.close()
@@ -61,15 +61,15 @@ class Portal:
 # This PC's free RAM, pinned for the portal's children and for the in-process CLI alike: plan answers (the RTX service
 # plan, the free-RAM checks) depend on it, and a live value can change between the two runs.
 PINNED_MEMORY = {"free_physical_gib": 61.25, "free_commit_gib": 127.75}
-PINNED_CHILD = [sys.executable, "-c", "import sys; from hyperloom import rtx; "
+PINNED_CHILD = [sys.executable, "-c", "import sys; from hydraweave import rtx; "
                 f"rtx.memory_status = lambda: dict({PINNED_MEMORY!r}); "
-                "from hyperloom.cli import main; raise SystemExit(main(sys.argv[1:]))"]
+                "from hydraweave.cli import main; raise SystemExit(main(sys.argv[1:]))"]
 
 
 def pinned_memory():
     """Pin rtx.memory_status here and in the portal's recipe children (a context manager)."""
     from contextlib import ExitStack
-    from hyperloom import rtx
+    from hydraweave import rtx
     stack = ExitStack()
     stack.enter_context(mock.patch.object(rtx, "memory_status", lambda: dict(PINNED_MEMORY)))
     stack.enter_context(mock.patch.object(recipe_web, "COMMAND", PINNED_CHILD))
@@ -98,13 +98,13 @@ class ContractTests(unittest.TestCase):
         if result is not None:
             self.assertEqual(json.loads(json.dumps(document["result"])), result)
         if code:
-            self.assertEqual(document["error"] or "", err.strip().removeprefix("hyperloom: "))
+            self.assertEqual(document["error"] or "", err.strip().removeprefix("hydraweave: "))
 
     def test_get_documents(self):
         status, listing = self.portal.request("GET", "recipes")
-        self.assertEqual((status, listing["schema"], listing["exit_code"]), (200, "hyperloom/recipes-list-v1", 0))
+        self.assertEqual((status, listing["schema"], listing["exit_code"]), (200, "hydraweave/recipes-list-v1", 0))
         self.assertIn(QWEN, {r["id"] for r in listing["result"]["recipes"]})
-        self.assertTrue(listing["cli"].startswith("hyperloom recipe list --config "))
+        self.assertTrue(listing["cli"].startswith("hydraweave recipe list --config "))
         self.assertSameAsCli(listing)
         status, one = self.portal.request("GET", "recipes/" + QWEN)
         self.assertEqual(status, 200)
@@ -135,7 +135,7 @@ class ContractTests(unittest.TestCase):
             with self.subTest(operation=operation, body=body), pinned_memory():
                 status, document = self.portal.request("POST", "recipes/" + operation, body)
                 self.assertIn(status, (200,), document)
-                self.assertEqual(document["schema"], f"hyperloom/recipes-{operation}-v1")
+                self.assertEqual(document["schema"], f"hydraweave/recipes-{operation}-v1")
                 self.assertSameAsCli(document)
                 if operation == "plan" and body["recipe"] == "ds-user":
                     # The child planned with the pinned free RAM (61.25 GiB free -> 41 GiB host pinned allowed).
@@ -271,7 +271,7 @@ class ContractTests(unittest.TestCase):
         status, document = self.portal.request("GET", "recipes/" + QWEN)
         when = next(r["when"] for r in document["result"]["structure"]["routes"] if r["id"] == "prefill_rtx")
         self.assertEqual(when["prompt_tokens_min"], 1024)                   # a measurement is not a secret
-        from hyperloom.web.api import redact
+        from hydraweave.web.api import redact
         self.assertEqual(redact({"password": 123456, "api_key": 7, "token": 5, "secret": None, "prompt_tokens_min": 1,
                                  "prompt_tokens_max": None, "max_copies_per_token": 2, "api_key_per_token": 3,
                                  "password_tokens_min": 4, "secret_tokens": None, "private_key_tokens": 5}),
@@ -288,7 +288,7 @@ class ContractTests(unittest.TestCase):
                           "access_tokens": "[redacted]", "refresh_tokens": "[redacted]", "flag_tokens": "[redacted]"})
         self.assertSameAsCli(document)
         with mock.patch.object(recipe_web, "COMMAND", [sys.executable, "-c", (
-                "import sys; sys.stderr.write('hyperloom: refused: Authorization: Bearer abc.def\\n'); sys.exit(1)")]):
+                "import sys; sys.stderr.write('hydraweave: refused: Authorization: Bearer abc.def\\n'); sys.exit(1)")]):
             status, document = self.portal.request("POST", "recipes/validate", {"recipe": QWEN})
         self.assertEqual((status, document["exit_code"]), (200, 1))
         self.assertNotIn("abc.def", document["error"])
@@ -364,7 +364,7 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(result.why, "output overflow")
             self.assertEqual(recipe_web.document("list", [], result, now=0)[0], 502)
         with mock.patch.object(recipe_web, "COMMAND", self.script(
-                "import sys; sys.stderr.write('hyperloom: refusé ✓\\n'); sys.exit(1)")):
+                "import sys; sys.stderr.write('hydraweave: refusé ✓\\n'); sys.exit(1)")):
             result = runner.run([], deadline_s=30)
             status, document = recipe_web.document("validate", [], result, now=0)
             self.assertEqual((status, document["error"]), (200, "refusé ✓"))
@@ -650,7 +650,7 @@ class JobTests(unittest.TestCase):
         # A recipe launch's refusal keeps the CLI's whole explanation; the other actions keep their short tail.
         child = mock.Mock(returncode=1)
         child.communicate.return_value = (b"", b"y" + b"x" * 20000)
-        with mock.patch("hyperloom.web.api.subprocess.Popen", return_value=child):
+        with mock.patch("hydraweave.web.api.subprocess.Popen", return_value=child):
             for action, args, size in (("down", {"profile": "qwen-replicas"}, 400),
                                        ("recipes/deploy", {"inputs": "0" * 64, "_job": "ab12cd34"}, 16384),
                                        ("up", {"recipe": QWEN, "profile": "qwen-replicas"}, 16384)):
@@ -973,9 +973,9 @@ class DeployCancelTests(unittest.TestCase):
             host = f"127.0.0.1:{server.server_port}"
             body = json.dumps({"job": finished["job"]}).encode()
             connection = HTTPConnection(host, timeout=30)
-            connection.request("POST", "/hyperloom/api/cancel", body=body, headers={
+            connection.request("POST", "/hydraweave/api/cancel", body=body, headers={
                 "Host": host, "Origin": "http://" + host, "Content-Type": "application/json",
-                "Content-Length": str(len(body)), "X-Hyperloom-CSRF": server.csrf_token})
+                "Content-Length": str(len(body)), "X-Hydraweave-CSRF": server.csrf_token})
             response = connection.getresponse()
             self.assertEqual(response.status, 409, response.read())
             connection.close()
@@ -1039,13 +1039,13 @@ if __name__ == "__main__":
     unittest.main()
 
 
-@unittest.skipUnless(os.environ.get("HYPERLOOM_TM_SRC"), "set HYPERLOOM_TM_SRC to a TensorMeld src/ with per-request "
+@unittest.skipUnless(os.environ.get("HYDRAWEAVE_TM_SRC"), "set HYDRAWEAVE_TM_SRC to a TensorMeld src/ with per-request "
                      "route records (branch router/recipe-routes-recent)")
 class RouterRecordTests(unittest.TestCase):
     """`recipe routes` against the real TensorMeld router (fake engine and prefill service from its own tests)."""
 
     def test_routes_reads_the_routers_per_request_records(self):
-        source = Path(os.environ["HYPERLOOM_TM_SRC"])
+        source = Path(os.environ["HYDRAWEAVE_TM_SRC"])
         # This TensorMeld, not the pinned one another test may already have imported.
         names = ("tensormeld", "test_prefill_routes", "test_replica_router")
         saved = {k: v for k, v in sys.modules.items() if k.split(".")[0] in names}

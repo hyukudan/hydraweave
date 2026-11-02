@@ -7,7 +7,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 global.document = {addEventListener() {}};
 global.window = {
-  Hyperloom: {
+  Hydraweave: {
     state: {docs: {"ledger/rtx": input.doc}}, esc,
     card: (title, body, sub) => `<section><h3>${esc(title)}</h3>${body}${sub ? `<small>${esc(sub)}</small>` : ""}</section>`,
     unavailable: why => `<span class="unavailable">unavailable · ${esc(why)}</span>`,
@@ -16,7 +16,7 @@ global.window = {
     button: label => `<button>${esc(label)}</button>`,
     mutationReason: () => "",
   },
-  HyperloomTS: {fmt: (value, unit) => `${value} ${unit}`},
+  HydraweaveTS: {fmt: (value, unit) => `${value} ${unit}`},
 };
-require(path.resolve(__dirname, "../../../hyperloom/web/static/pages/rtx.js"));
-process.stdout.write(window.HyperloomPages.rtx.render());
+require(path.resolve(__dirname, "../../../hydraweave/web/static/pages/rtx.js"));
+process.stdout.write(window.HydraweavePages.rtx.render());

@@ -1,7 +1,7 @@
 # Redaction
 
-The portal (`hyperloom.web.api.redact`: documents, job messages, audits, log lines) and the node's log search
-(`node/hyperloom_logsearch.py`) mask credentials with one set of rules, `hyperloom/redaction.py`. The node keeps a
+The portal (`hydraweave.web.api.redact`: documents, job messages, audits, log lines) and the node's log search
+(`node/hydraweave_logsearch.py`) mask credentials with one set of rules, `hydraweave/redaction.py`. The node keeps a
 verbatim copy of the rules block; `tests/test_redaction.py` asserts the copies are identical, runs one case table
 against every implementation and measures that redaction time stays linear (64 KB worst cases included).
 

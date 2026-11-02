@@ -1,4 +1,4 @@
-# Recipes in hyperloom
+# Recipes in Hydraweave
 
 Status: `hl/recipes`, 2026-10-24. Unit-tested on Windows and WSL; not yet run on the cluster.
 
@@ -7,26 +7,26 @@ one set of hardware: which hardware it is for (`match`), which devices serve a r
 each route keeps the weights (`placement`), and what to do when a route cannot run (`fallback`, `limits`). Exactness
 is never a recipe option: every route computes the same bits.
 
-hyperloom applies a recipe to a profile. strix-stream's recipe core owns the rules (schema, layers, match, select,
-plan). hyperloom probes the hardware, binds the recipe to the profile's machines, decides what `up` starts, and has the
+Hydraweave applies a recipe to a profile. strix-stream's recipe core owns the rules (schema, layers, match, select,
+plan). Hydraweave probes the hardware, binds the recipe to the profile's machines, decides what `up` starts, and has the
 router apply the prefill routes to every request.
 
 ## Commands
 
 ```text
-hyperloom up <profile> --recipe FILE|auto [--recipe-profile P] [--recipe-overrides O]... [--recipe-set PATH=VALUE]...
+hydraweave up <profile> --recipe FILE|auto [--recipe-profile P] [--recipe-overrides O]... [--recipe-set PATH=VALUE]...
                        [--recipe-workload NAME] [--recipe-dir DIR]...
-hyperloom recipe probe    <profile> [--disks] [--descriptors] [--evidence NODE=RECEIPT]...
+hydraweave recipe probe    <profile> [--disks] [--descriptors] [--evidence NODE=RECEIPT]...
                           [--describe-command] [--declaration NODE=RECEIPT]... [--out FACTS.json]
-hyperloom recipe validate FILE [<profile>] [--facts FACTS.json] [layers]
-hyperloom recipe explain  FILE [<profile>] [--facts FACTS.json] [layers] [--all] [--prompt-tokens N]
+hydraweave recipe validate FILE [<profile>] [--facts FACTS.json] [layers]
+hydraweave recipe explain  FILE [<profile>] [--facts FACTS.json] [layers] [--all] [--prompt-tokens N]
                           [--unavailable DEVICE_ID]... [--link-down LINK]... [--free-ram HOST=GIB]...
-hyperloom recipe diff     A B [--a-set PATH=VALUE]... [--b-set PATH=VALUE]...
-hyperloom recipe pick     <profile> [--dir DIR]... [--facts FACTS.json] [layers]
-hyperloom recipe ready    ID|FILE [<profile>] [--facts NAME|FILE] [--format json|text]
-hyperloom recipe matrix   [--format json|text]
-hyperloom recipe export   ID|FILE [--layer NAME]... [--out BUNDLE.json]
-hyperloom recipe import   BUNDLE.json|- [--id ID] [--replace SHA256]
+hydraweave recipe diff     A B [--a-set PATH=VALUE]... [--b-set PATH=VALUE]...
+hydraweave recipe pick     <profile> [--dir DIR]... [--facts FACTS.json] [layers]
+hydraweave recipe ready    ID|FILE [<profile>] [--facts NAME|FILE] [--format json|text]
+hydraweave recipe matrix   [--format json|text]
+hydraweave recipe export   ID|FILE [--layer NAME]... [--out BUNDLE.json]
+hydraweave recipe import   BUNDLE.json|- [--id ID] [--replace SHA256]
 ```
 
 - **ready** is the place to start. It lists, in order, what `up --recipe` needs and whether this machine has it: the
@@ -48,7 +48,7 @@ hyperloom recipe import   BUNDLE.json|- [--id ID] [--replace SHA256]
 ids (like `list` or `plan`): a user recipe saved under one of them before is listed with that error and must be
 renamed.
 
-- **export / import** share a recipe with its overrides layers as one data-only bundle (`hyperloom/recipe-bundle-v1`):
+- **export / import** share a recipe with its overrides layers as one data-only bundle (`hydraweave/recipe-bundle-v1`):
   the recipe text and the chosen layers' texts, each with its sha256. A bundle carries no hardware facts, disk
   receipts, host names, device ids or paths, and nothing that runs; tuning profiles, which carry one machine's
   identity, are not bundled. It is at most 500 KiB with at most 16 layers (export refuses what import would). Import
@@ -78,7 +78,7 @@ renamed.
   `--out` saves the facts so `validate`, `explain` and `pick` can run offline with `--facts`.
   `--describe-command` prints, for each node process, its launch sha256 and the exact command that makes the engine
   declare its memory for that launch (the launch line plus `--describe-capabilities-json`; DS only today).
-  hyperloom only renders it and never runs it. The engine opens the GPU to describe itself, so on lab nodes the
+  Hydraweave only renders it and never runs it. The engine opens the GPU to describe itself, so on lab nodes the
   command must run inside a GPU turn, with the installed release binary and the node's key file path.
   `--declaration NODE=RECEIPT` stores that declaration (see *Node placements*).
 
@@ -88,13 +88,13 @@ stale. A stale profile is not applied: the run uses the recipe alone and is mark
 ## What `up --recipe` does, in order
 
 1. **Resolve** the recipe with its layers: the autotuner profile first, then override files, then `--recipe-set`.
-   This runs through the strix-stream core (`ss-recipe`: `pc.recipe_core`, `HYPERLOOM_SS_RECIPE` or `ss-recipe` on
-   `PATH`). The project is being renamed tierstream: `ts-recipe` and `HYPERLOOM_TS_RECIPE` are tried first, a
+   This runs through the strix-stream core (`ss-recipe`: `pc.recipe_core`, `HYDRAWEAVE_SS_RECIPE` or `ss-recipe` on
+   `PATH`). The project is being renamed tierstream: `ts-recipe` and `HYDRAWEAVE_TS_RECIPE` are tried first, a
    `pc.recipe_core` that does not exist is looked up as its sibling `ts-recipe` / `ss-recipe`, and recipe, profile
    and overrides files are read with `tierstream/*` schema ids too (outputs and hashes keep the `strix-stream/*`
    ids). The core's effective document, hardware match and route selection are used throughout. A stale profile
    is dropped and the run is marked `untuned`. Without the core, `up --recipe` is refused unless
-   `HYPERLOOM_RECIPE_STUB=1` is set; that uses hyperloom's offline reader and records the run as not production.
+   `HYDRAWEAVE_RECIPE_STUB=1` is set; that uses Hydraweave's offline reader and records the run as not production.
    `up --recipe` needs the local router, because the router reads the route state written on the control machine.
 2. **Probe and bind.** The hip set binds to the profile's nodes in rank order. The cuda set binds to the profile's
    prefill-service GPU (by UUID). The probe report contains exactly those devices, so the core can only match the
@@ -111,7 +111,7 @@ stale. A stale profile is not applied: the run uses the recipe alone and is mark
      contract (`import-state-parked`: an imported state waits in a free slot and only a prompt that starts with its
      tokens takes it).
    - **Admission at `up`** (core §7). A device set must be available, its links up, and its RAM must fit. Each member
-     is charged hyperloom's conservative cap model: the pinned tier, the staging ring, the process overhead and, on
+     is charged hydraweave's conservative cap model: the pinned tier, the staging ring, the process overhead and, on
      unified-memory nodes, the whole device budget. The charge must leave `free_ram_gib` above the recipe's floor.
      The RTX service's charge must also fit within free commit minus the reservation's commit floor.
    - **Fallbacks.** If the RTX PRO is busy, the reservation is missing or about to expire, the PC-to-node link is
@@ -125,7 +125,7 @@ stale. A stale profile is not applied: the run uses the recipe alone and is mark
    - **Bounds.** Each route's `max_context_tokens` and `max_batch` must fit what the launch allocates. The service
      runs one prompt at a time, up to its positions. The nodes run up to their engine's context and concurrent
      sequences: `--context`/`--slots` for DeepSeek (engine defaults 4096/4), `--context`/`--http-batch` for Qwen,
-     `--capacity`/`--slots` for MiniMax, profile overrides included. A bound hyperloom cannot resolve is refused.
+     `--capacity`/`--slots` for MiniMax, profile overrides included. A bound hydraweave cannot resolve is refused.
      Routes that run on the same processes must have the same placement.
 5. **After the node engines are ready** (their allocations are done), each node's free RAM, read with the node tool's
    `gpu` verb, must still be above the recipe's floor. If not, `up` fails and the leases are stopped.
@@ -145,7 +145,7 @@ stale. A stale profile is not applied: the run uses the recipe alone and is mark
 
    A measurement that is missing or too old fails closed.
 
-`hyperloom status` shows the recipe under `recipe`: the file and its sha256, the reader, the effective sha256, the
+`hydraweave status` shows the recipe under `recipe`: the file and its sha256, the reader, the effective sha256, the
 binding, the match, availability, the decision, and the service decision with its reason.
 
 ## Request time: the router's route table
@@ -192,15 +192,15 @@ refreshes it.
 
 - **TensorMeld.** Every recipe launch needs TensorMeld with `prefill.policy = "routes"` (branch
   `router/recipe-routes`). `up --recipe` is refused while the pinned TensorMeld does not have it.
-- **Admission charges.** hyperloom's engines do not read strix-stream plans yet, so admission charges each member
-  hyperloom's conservative cap model instead of a compiled plan: the pinned budget, the staging ring and the process
+- **Admission charges.** Hydraweave's engines do not read strix-stream plans yet, so admission charges each member
+  Hydraweave's conservative cap model instead of a compiled plan: the pinned budget, the staging ring and the process
   overhead, plus the device budget on unified-memory nodes. The commit charge is the host bytes plus the device bytes
   of a discrete device.
 - **Node placements.** No node preset takes a placement from recipes yet. A node placement field that is not at its
   default is refused until the engines read strix-stream plan-v1, except:
   - `workspace_gib` is **checked, not applied**: the native engines size their runtime themselves. It must equal,
     within 0.05 GiB, the runtime the engine declares for the exact launch on every member (workspace + state per
-    slot x slots + KV pool). The declaration is a receipt: `hyperloom/engine-describe-v1` `{machine, rank,
+    slot x slots + KV pool). The declaration is a receipt: `hydraweave/engine-describe-v1` `{machine, rank,
     launch_sha256, output}`, where `output` is the engine's `strix/engine-capabilities-v1` JSON. A changed flag,
     engine build or asset is another launch, and its old receipt no longer counts. No receipt = refused. At its
     default, `workspace_gib` is not checked and saved receipts play no part in the launch.
@@ -221,7 +221,7 @@ refreshes it.
 - **Node RAM charge.** Still the conservative model above: the device budget (`memory_min_gib` when `device_gib` is
   absent) + overhead. That refuses today's DS and Qwen lab examples on the nodes. A measured or enforced charge is
   waiting for a decision.
-- **Hetero decode.** `execute = "hetero"` decode routes are refused: no hyperloom profile runs one.
+- **Hetero decode.** `execute = "hetero"` decode routes are refused: no Hydraweave profile runs one.
 - **Batch on prefill routes.** Batch predicates on prefill routes are refused: the router cannot see how many
   sequences are in a step.
 - **MiniMax.** The MiniMax pair binds loopback, so its router must run on rank 0. Because recipes need the local
@@ -233,10 +233,10 @@ refreshes it.
 
 ## Portal and catalog
 
-Every `hyperloom recipe` operation is also a portal API call that runs the same command line (docs/api.md), and the
+Every `hydraweave recipe` operation is also a portal API call that runs the same command line (docs/api.md), and the
 portal's **Recipes & profiles** page uses them. Recipes are named by id (the file name without extension,
-`qwen3.8-flash-next.lab`) from the catalog: the vendored strix-stream examples (`hyperloom/recipes/examples/`, read-only;
+`qwen3.8-flash-next.lab`) from the catalog: the vendored strix-stream examples (`hydraweave/recipes/examples/`, read-only;
 `pending/` never launches), `pc.recipe_dirs`, and the user directory `<config dir>/recipes/`, the only one
-`hyperloom recipe save` writes. `hyperloom up --recipe ID` (profile optional when one profile serves the recipe's
+`hydraweave recipe save` writes. `hydraweave up --recipe ID` (profile optional when one profile serves the recipe's
 model) snapshots every input (recipe, layers, configuration, launch arguments) and launches the snapshot;
-`hyperloom recipe plan` creates the same snapshot and `hyperloom recipe deploy DIGEST` launches exactly it.
+`hydraweave recipe plan` creates the same snapshot and `hydraweave recipe deploy DIGEST` launches exactly it.

@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom import gpu_counters, placement_supervision as supervision, rtx
+from hydraweave import gpu_counters, placement_supervision as supervision, rtx
 from tests.test_recipes_grants import NOW, window
 from tests import test_rtx
 from tests.test_rtx import _binary_spec
@@ -250,7 +250,7 @@ class PlacementHelperTests(unittest.TestCase):
             gates.append(argv)
             return "operator refused" if len(gates) == 2 else None
         spec = replace(_binary_spec(), placement_supervision=data, pro_uuid=data["grants"][0]["uuid"])
-        with mock.patch("hyperloom.placement_supervision.validate", return_value=(
+        with mock.patch("hydraweave.placement_supervision.validate", return_value=(
                 {g["uuid"].lower(): g for g in data["grants"]}, {u.lower(): v for u, v in data["caps_gib"].items()})):
             observer = mock.Mock()
             observer.sample.return_value = {u.lower(): 0 for u in data["caps_gib"]}

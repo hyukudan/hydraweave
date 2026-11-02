@@ -4,8 +4,8 @@ import math
 from pathlib import Path
 import unittest
 
-from hyperloom.adapters import AdapterError
-from hyperloom.adapters import engine, prefill, prom, router
+from hydraweave.adapters import AdapterError
+from hydraweave.adapters import engine, prefill, prom, router
 from tests.portable_fixtures import read_fixture
 
 

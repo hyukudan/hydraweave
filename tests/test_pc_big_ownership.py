@@ -17,9 +17,9 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import device_policy, gpu_counters, pc_big, placement_supervision, procs, rtx
-from hyperloom.recipes import grants, measurements, preflight, reader, service
-from hyperloom.web.api import API, APIError
+from hydraweave import device_policy, gpu_counters, pc_big, placement_supervision, procs, rtx
+from hydraweave.recipes import grants, measurements, preflight, reader, service
+from hydraweave.web.api import API, APIError
 from tests.test_placement_supervision import policy
 from tests.test_recipes_grants import NOW, window
 from tests import test_rtx

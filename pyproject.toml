@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hyperloom"
+name = "hydraweave"
 version = "0.1.0"
 description = "Cluster integration and control"
 requires-python = ">=3.11"
@@ -13,18 +13,19 @@ dependencies = []
 test = ["pytest==8.4.2"]
 
 [project.scripts]
-hyperloom = "hyperloom.cli:main"
-hloom = "hyperloom.cli:main"
+hydraweave = "hydraweave.cli:main"
+hyperloom = "hydraweave.cli:main"
+hloom = "hydraweave.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["hyperloom*"]
+include = ["hydraweave*", "hyperloom*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["third_party", ".*"]
 
 [tool.setuptools.package-data]
-hyperloom = ["presets/*.json", "data/*.json", "web/static/*", "web/static/pages/*", "web/static/assets/*", "bench/data/*.json", "recipes/builtin.json", "recipes/examples/*.toml", "recipes/examples/pending/*.toml"]
+hydraweave = ["presets/*.json", "data/*.json", "web/static/*", "web/static/pages/*", "web/static/assets/*", "bench/data/*.json", "recipes/builtin.json", "recipes/examples/*.toml", "recipes/examples/pending/*.toml"]
 
 [tool.setuptools.data-files]
-"share/hyperloom/node" = ["node/hyperloom-node"]
+"share/hydraweave/node" = ["node/hydraweave-node"]

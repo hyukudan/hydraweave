@@ -13,14 +13,14 @@ from unittest.mock import Mock, patch
 
 
 spec = importlib.util.spec_from_file_location(
-    "node_assets_under_test", Path(__file__).resolve().parents[1] / "node/hyperloom_install.py")
+    "node_assets_under_test", Path(__file__).resolve().parents[1] / "node/hydraweave_install.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 
 
 class NodeAssetTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-assets-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-assets-")
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name).resolve()
         self.model = self.directory / "model"

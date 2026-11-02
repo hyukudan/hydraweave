@@ -11,15 +11,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from hyperloom import cli, config, orchestrate as orch
-from hyperloom.config import ConfigError, parse
-from hyperloom.render import render_processes
+from hydraweave import cli, config, orchestrate as orch
+from hydraweave.config import ConfigError, parse
+from hydraweave.render import render_processes
 from tests import test_orchestrate, test_render
 from tests.test_render import FIXTURES
 
 
 REPO = Path(__file__).resolve().parents[1]
-loader = importlib.util.spec_from_file_location("lease_diag_under_test", REPO / "node" / "hyperloom_lease.py")
+loader = importlib.util.spec_from_file_location("lease_diag_under_test", REPO / "node" / "hydraweave_lease.py")
 lease = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(lease)
 

@@ -7,8 +7,8 @@ import sqlite3
 import tempfile
 import unittest
 
-from hyperloom.telemetry.store import Store
-from hyperloom.web.features import events, health
+from hydraweave.telemetry.store import Store
+from hydraweave.web.features import events, health
 from tests.test_health_engine import Clock, FakeAPI, T0
 
 
@@ -214,7 +214,7 @@ class MirrorTests(Base):
         self.assertEqual(self.mirrored(), [])
 
     def test_registration(self):
-        from hyperloom.web import features
+        from hydraweave.web import features
         reg = features.Registry()
         events.register(reg)
         self.assertEqual((list(reg.gets), list(reg.posts), reg.audited), (["events"], ["events/clear"], set()))

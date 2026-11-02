@@ -3,7 +3,7 @@
   "ok": true,
   "error": null,
   "host": {
-    "schema": "hyperloom/node-v1",
+    "schema": "hydraweave/node-v1",
     "verb": "host",
     "checks": {
       "boot_id": {"status": "ok", "value": "00000000-0000-0000-0000-000000000000"},

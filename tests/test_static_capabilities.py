@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-NODE = Path(__file__).resolve().parents[1] / "node" / "hyperloom_install.py"
-spec = importlib.util.spec_from_file_location("hyperloom_install_static", NODE)
+NODE = Path(__file__).resolve().parents[1] / "node" / "hydraweave_install.py"
+spec = importlib.util.spec_from_file_location("hydraweave_install_static", NODE)
 install = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(install)
 

@@ -11,8 +11,8 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom.recipes import probe, sysmem, topology
-from hyperloom.recipes.reader import RecipeError
+from hydraweave.recipes import probe, sysmem, topology
+from hydraweave.recipes.reader import RecipeError
 
 
 class LinuxTopologyTests(unittest.TestCase):
@@ -174,7 +174,7 @@ class PassiveInventoryTests(unittest.TestCase):
         self.assertIn("--query-gpu=", run.call_args.args[0][1])
 
     def test_fact_and_candidate_bridge_preserves_topology_and_store_provenance(self):
-        from hyperloom.recipes import apply, devices, facts
+        from hydraweave.recipes import apply, devices, facts
         ident = "GPU-" + str(uuid.uuid4())
         ctx = apply.Context("synthetic", "synthetic", "single", [], "local")
         cluster = SimpleNamespace(machines={"local": SimpleNamespace(devices=[{

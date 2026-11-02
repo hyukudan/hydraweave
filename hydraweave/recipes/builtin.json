@@ -1,0 +1,20 @@
+{
+ "schema": "hydraweave/builtin-recipes-v1",
+ "source": {
+  "repo": "strix-stream",
+  "path": "recipes/examples",
+  "commit": "4f95e1dded949c5212d6f5685ae890673c67edd1"
+ },
+ "note": "Vendored read-only copies of strix-stream recipes/examples at the commit below, line endings normalized to LF (hydraweave stores text as LF); local provenance references are scrubbed for distribution. Update by copying from strix-stream, retaining the privacy scrub and re-recording the hashes; tests check them and compare executable content with upstream when available.",
+ "files": {
+  "deepseek-v4.1-flash.lab-hetero.toml": "7348b428a6bed42fefc86aea4ecf02ba2db74958fa21e497bdf413bde3412c93",
+  "deepseek-v4.1-flash.lab.toml": "a4292825f27c5fe219d2d39d8503f95397c118cb0ead9460a43285f8c3b52b53",
+  "minimax-m3.1-flash.lab.toml": "d07eaca6e9d64d2fb902d5db012ca599d4f8fb44197523b5d984f9403ea4369a",
+  "pending/deepseek-v4.1-flash.card32.toml": "3c419a293ff8be653ca2c03a871a9ac49d28643335e2be62e9ef442dfe9f15bf",
+  "pending/deepseek-v4.1-flash.lab-rtx-replica.toml": "cb62cfd7eaad9f106ceafd8616cc29f1d48b219b1c513b4dddb4c3be007e9c7f",
+  "pending/glm-5.3-flash.lab.toml": "e5abb381065512d1079da8772aab58f29de8c88c7e54a8b98a673ce26b5fd437",
+  "pending/minimax-m3.1-flash.card32.toml": "3208b578922ac508b610b2bc87d0d93a96e2801d610bc3f3ae261f4d2afd9a1d",
+  "pending/minimax-m3.1-flash.morehostram.toml": "981e4e2f8ad7d66a7a3e2e615dbee442aeb8c3790cfcb6bb8b35acd93a7f418b",
+  "qwen3.8-flash-next.lab.toml": "edc5eefa91cd3c729b6eece9303843d9ea0c16714d6b9b3c7432a647a73273c7"
+ }
+}

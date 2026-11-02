@@ -9,8 +9,8 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom.recipes import runtime
-from hyperloom.recipes.reader import RecipeError
+from hydraweave.recipes import runtime
+from hydraweave.recipes.reader import RecipeError
 
 
 @pytest.mark.parametrize("matching", [False, True])

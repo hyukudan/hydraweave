@@ -1,6 +1,6 @@
 # Build the engine's CUDA apps for a prefill service preset (SPEC section 4, "CUDA build").
 # vswhere -> vcvars64 -> CUDA 13.0 check -> CMake + Ninja at low priority -> MANIFEST.json with every binary's sha256.
-# The source must be a clean checkout at the pinned commit; the output directory is created and owned by hyperloom.
+# The source must be a clean checkout at the pinned commit; the output directory is created and owned by hydraweave.
 param(
     [Parameter(Mandatory)][string]$Source,
     [Parameter(Mandatory)][string]$Output,
@@ -60,7 +60,7 @@ foreach ($target in $targets) {
     $binaries[$exe.Name] = -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 $manifest = [ordered]@{
-    schema = 'hyperloom/cuda-release-v1'
+    schema = 'hydraweave/cuda-release-v1'
     engine_commit = $Commit
     configure = $configure
     targets = $targets

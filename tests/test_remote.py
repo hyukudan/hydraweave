@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from hyperloom import remote
+from hydraweave import remote
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ssh" / "fake_ssh.py"
@@ -42,7 +42,7 @@ class OpenSshToolTests(unittest.TestCase):
 
 class RemoteTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="hyperloom ssh ")
+        self.temp = tempfile.TemporaryDirectory(prefix="hydraweave ssh ")
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
         self.log = self.directory / "calls.jsonl"
@@ -54,9 +54,9 @@ class RemoteTests(unittest.TestCase):
         paths = patch.dict(remote._NODE_PATHS, clear=True)
         paths.start()
         self.addCleanup(paths.stop)
-        self.env = patch.dict(os.environ, {"HYPERLOOM_FAKE_KEY": self.key.key_b64,
-                                          "HYPERLOOM_FAKE_LOG": str(self.log),
-                                          "HYPERLOOM_FAKE_MODE": "ok"})
+        self.env = patch.dict(os.environ, {"HYDRAWEAVE_FAKE_KEY": self.key.key_b64,
+                                          "HYDRAWEAVE_FAKE_LOG": str(self.log),
+                                          "HYDRAWEAVE_FAKE_MODE": "ok"})
         self.env.start()
         self.addCleanup(self.env.stop)
         original = subprocess.Popen
@@ -88,7 +88,7 @@ class RemoteTests(unittest.TestCase):
 
     def test_keyscan_empty_and_malformed(self):
         for mode in ("empty", "malformed_scan"):
-            with self.subTest(mode=mode), patch.dict(os.environ, HYPERLOOM_FAKE_MODE=mode):
+            with self.subTest(mode=mode), patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE=mode):
                 with self.assertRaises(remote.RemoteError):
                     remote.keyscan("192.0.2.1", 2222)
 
@@ -167,7 +167,7 @@ class RemoteTests(unittest.TestCase):
         reply = self.client.call("doctor", payload, 3)
         self.assertEqual(reply, {"verb": "doctor", "payload": payload})
         command = self.calls()[-1]["argv"][-1]
-        self.assertEqual(shlex.split(command), ["/opt/operator space ' Ω/.hyperloom-boot/hyperloom-node", "doctor"])
+        self.assertEqual(shlex.split(command), ["/opt/operator space ' Ω/.hydraweave-boot/hydraweave-node", "doctor"])
         self.assertNotIn("雪", command)
         self.assertNotIn("$", command)
 
@@ -183,7 +183,7 @@ class RemoteTests(unittest.TestCase):
         for word in ("mkdir", "scp", "mv", "chmod", "rm", "umask"):
             self.assertNotIn(word, commands[0].split())
         self.assertEqual([shlex.split(command) for command in commands[1:]],
-                         [["/opt/operator space ' Ω/.hyperloom-boot/hyperloom-node", verb]
+                         [["/opt/operator space ' Ω/.hydraweave-boot/hydraweave-node", verb]
                           for verb in ("gpu", "doctor", "version")])
         other = SimpleNamespace(id="halo-2", http_address="192.0.2.2", ssh_target="operator@halo-2", ssh_port=2222)
         self.known.pin(other.id, other.http_address, other.ssh_port, self.key)
@@ -191,7 +191,7 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(self.calls()[-2]["argv"][-1], remote.LOOKUP)     # another node: its own lookup
 
     def test_ssh_config_is_written_once_and_never_rewritten_under_readers(self):
-        # Concurrent hyperloom processes (and their ssh children) read the config file; rewriting it on every call
+        # Concurrent hydraweave processes (and their ssh children) read the config file; rewriting it on every call
         # raced them (a Windows sharing violation aborted a queued up). It is written once, then left alone.
         self.pin()
         self.client.call("gpu", {}, 3)
@@ -251,7 +251,7 @@ class RemoteTests(unittest.TestCase):
         self.assertIn("StrictHostKeyChecking=yes", scp)
         self.assertIn("HostKeyAlias=[halo-1]:2222", scp)
         self.assertEqual(scp[-1 - len(remote.NODE_FILES):-1], [str((source / name).absolute()) for name in remote.NODE_FILES])
-        self.assertEqual(scp[-1], f"operator@halo-1:.hyperloom-boot/{stage}/")
+        self.assertEqual(scp[-1], f"operator@halo-1:.hydraweave-boot/{stage}/")
         move = calls[3]["argv"][-1]
         self.assertTrue(move.startswith("cd -- " + shlex.quote(str(boot)) + " && chmod 700 -- "))
         for name in remote.NODE_FILES:
@@ -263,7 +263,7 @@ class RemoteTests(unittest.TestCase):
         self.pin()
         source = self.directory / "incomplete"
         source.mkdir()
-        (source / "hyperloom-node").write_text("fixture", encoding="utf-8")
+        (source / "hydraweave-node").write_text("fixture", encoding="utf-8")
         with self.assertRaisesRegex(remote.RemoteError, "bootstrap files"):
             self.client.bootstrap(source, timeout=3)
         self.mock_popen.assert_not_called()
@@ -274,7 +274,7 @@ class RemoteTests(unittest.TestCase):
         source.mkdir()
         for name in remote.NODE_FILES:
             (source / name).write_text("fixture", encoding="utf-8")
-        with patch.dict(os.environ, HYPERLOOM_FAKE_KEY=hostkey(b"b").key_b64):
+        with patch.dict(os.environ, HYDRAWEAVE_FAKE_KEY=hostkey(b"b").key_b64):
             with self.assertRaises(remote.RemoteError):
                 self.client.bootstrap(source, timeout=3)
         self.assertEqual(len(self.calls()), 1)
@@ -308,22 +308,22 @@ class RemoteTests(unittest.TestCase):
 
     def test_bad_replies_and_connection_failure(self):
         self.pin()
-        self.client.node_path = "/opt/hyperloom/hyperloom-node"
+        self.client.node_path = "/opt/hydraweave/hydraweave-node"
         for mode in ("eof", "malformed", "wrongtype", "duplicate", "nonutf8", "badexit"):
-            with self.subTest(mode=mode), patch.dict(os.environ, HYPERLOOM_FAKE_MODE=mode):
+            with self.subTest(mode=mode), patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE=mode):
                 with self.assertRaises(remote.RemoteError):
                     self.client.call("gpu", {}, 3)
 
     def test_bounded_stdout_and_stderr(self):
         self.pin()
         for mode in ("huge", "stderr_huge"):
-            with self.subTest(mode=mode), patch.dict(os.environ, HYPERLOOM_FAKE_MODE=mode):
+            with self.subTest(mode=mode), patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE=mode):
                 with self.assertRaisesRegex(remote.RemoteError, "size limit"):
                     self.client.call("gpu", {}, 3)
 
     def test_timeout_kills_child_and_closes_threads(self):
         self.pin()
-        with patch.dict(os.environ, HYPERLOOM_FAKE_MODE="sleep"):
+        with patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE="sleep"):
             with self.assertRaisesRegex(remote.RemoteError, "timed out"):
                 self.client.call("gpu", {}, 0.2)
         self.assertFalse(any(t.name.startswith("Thread-") and t.is_alive()
@@ -335,7 +335,7 @@ class RemoteTests(unittest.TestCase):
     def test_timeout_kills_ssh_descendant_too(self):
         self.pin()
         child_log = self.directory / "descendant.json"
-        with patch.dict(os.environ, HYPERLOOM_FAKE_MODE="descendant", HYPERLOOM_FAKE_CHILD_LOG=str(child_log)):
+        with patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE="descendant", HYDRAWEAVE_FAKE_CHILD_LOG=str(child_log)):
             with self.assertRaisesRegex(remote.RemoteError, "timed out"):
                 self.client.call("doctor", {}, 1)
         self.assertTrue(child_log.exists(), "fixture did not start the descendant")
@@ -364,7 +364,7 @@ class RemoteTests(unittest.TestCase):
         timer = threading.Timer(0.2, cancelled.set)
         timer.start()
         try:
-            with patch.dict(os.environ, HYPERLOOM_FAKE_MODE="sleep"):
+            with patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE="sleep"):
                 with self.assertRaisesRegex(remote.RemoteError, "cancelled"):
                     self.client.call("doctor", {}, 3, cancel_event=cancelled)
         finally:
@@ -379,7 +379,7 @@ class RemoteTests(unittest.TestCase):
             original_sleep(seconds)
             raise KeyboardInterrupt
 
-        with patch.dict(os.environ, HYPERLOOM_FAKE_MODE="sleep"):
+        with patch.dict(os.environ, HYDRAWEAVE_FAKE_MODE="sleep"):
             with patch.object(remote.time, "sleep", side_effect=interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     self.client.call("gpu", {}, 3)

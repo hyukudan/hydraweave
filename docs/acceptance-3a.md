@@ -2,9 +2,9 @@
 
 Branch `hl/phase3a`, 2026-10-23. Engine pin `9211b07e`. RTX PRO 6000 (WDDM), CUDA 13.0.88, MSVC 14.44.
 
-## W1: CUDA build through hyperloom (CPU only)
+## W1: CUDA build through Hydraweave (CPU only)
 
-`hyperloom prefill build ds41-rtx --source <clean 9211b07e checkout>`:
+`hydraweave prefill build ds41-rtx --source <clean 9211b07e checkout>`:
 - runs in a Job Object under the reservation's free-commit watchdog, at Idle priority, with `-j8`;
 - builds `strix-cuda-ds41-prefill-service.exe`, sha256 `93af46dd56dd96997b5f1b5c2565cae9647cf52514503982f6fda4a226d98788`;
 - publishes the release once to `<install_root>\cuda\9211b07e13c6`.
@@ -20,7 +20,7 @@ A file committed with CRLF under `eol=lf` makes every clean engine checkout look
 
 | Check | Result |
 |---|---|
-| A. Service launched by hyperloom (render, helper, Job Object, watchdog, keys redacted), fidelity gate `ds41-rtx-exact-v1` | **PASS**: state sha256, next token, logits FNV and state size equal the exact-arm oracle at 512 / 2K / 8K / 32K; `fast` all false |
+| A. Service launched by Hydraweave (render, helper, Job Object, watchdog, keys redacted), fidelity gate `ds41-rtx-exact-v1` | **PASS**: state sha256, next token, logits FNV and state size equal the exact-arm oracle at 512 / 2K / 8K / 32K; `fast` all false |
 | 1. Visible only on the PRO | **PASS**: the driver's per-process rows show the service only on the PRO's UUID |
 | 4. Launch-equivalence: the same executable with the lab window's own command line | **PASS**: the same four states |
 | Engine branch `--overlay c-u6` (pair prefill identity) | 12 states captured (oracle 2K/8K + the 10 quality cells); repeatable byte for byte; the 8K logits FNV starts `50e7381b`, the pair's own 8K prefill FNV in the numbers ledger |
@@ -30,4 +30,4 @@ Timings in this window are not measurements: the PC was shared and the pinned ti
 ## Pending
 
 - W3a (pair turn): the pair's own prefill states for the bitwise comparison with the `--overlay` service.
-- W3 (pair + PRO): `prefill placement` (8K offload with no fallback, short prompt local) through `hyperloom up ds41-rtx`.
+- W3 (pair + PRO): `prefill placement` (8K offload with no fallback, short prompt local) through `hydraweave up ds41-rtx`.

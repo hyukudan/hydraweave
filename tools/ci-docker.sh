@@ -10,7 +10,7 @@ src=$(cd -- "${1:-$(dirname -- "$0")/..}" && pwd)
 }
 echo "== node tool, Python 3.10"
 docker run --rm -v "$src:/src:ro" -w /src python:3.10-slim sh -c \
-    'python -c "import py_compile, sys; [py_compile.compile(p, doraise=True, cfile=\"/tmp/c.pyc\") for p in sys.argv[1:]]" node/hyperloom-node node/*.py && echo {} | python node/hyperloom-node version'
+    'python -c "import py_compile, sys; [py_compile.compile(p, doraise=True, cfile=\"/tmp/c.pyc\") for p in sys.argv[1:]]" node/hydraweave-node node/*.py && echo {} | python node/hydraweave-node version'
 status=0
 for version in 3.11 3.12 3.13; do
     echo "== unit, Python $version"

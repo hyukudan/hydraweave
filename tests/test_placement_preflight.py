@@ -16,10 +16,10 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import admission, cli, orchestrate, procs, rtx
-from hyperloom.recipes import apply, commands, core, launch, measurements, preflight, reader, service, session
-from hyperloom.recipes.reader import RecipeError
-from hyperloom.web.api import API, APIError
+from hydraweave import admission, cli, orchestrate, procs, rtx
+from hydraweave.recipes import apply, commands, core, launch, measurements, preflight, reader, service, session
+from hydraweave.recipes.reader import RecipeError
+from hydraweave.web.api import API, APIError
 from tests import test_recipes
 from tests.test_recipes_grants import NOW, window
 
@@ -132,7 +132,7 @@ class PreflightTests(unittest.TestCase):
         def missing_descriptor():
             self.inputs["routes"].clear()
         def stale_manifest():
-            self.cache.load.side_effect = RecipeError("PL_E_STALE run hyperloom probe --manifest")
+            self.cache.load.side_effect = RecipeError("PL_E_STALE run hydraweave probe --manifest")
         def budget():
             self.backend.place.side_effect = RecipeError("PL_E_BUDGET authoritative core refusal")
         def capability():

@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Find-HyperloomPython {
+function Find-HydraweavePython {
     $candidates = @()
     $launcher = Get-Command py -ErrorAction SilentlyContinue
     if ($launcher) {
@@ -36,18 +36,18 @@ function Find-HyperloomPython {
     throw 'Python 3.11 or newer was not found (py -3.13, -3.12, -3.11, or python).'
 }
 
-function Invoke-HyperloomPython {
+function Invoke-HydraweavePython {
     param([string]$Executable, [string[]]$Arguments)
     & $Executable @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Python command failed with exit code $LASTEXITCODE" }
 }
 
 # Every file of a release must match RELEASE.json, and nothing may be added.
-function Test-HyperloomRelease {
+function Test-HydraweaveRelease {
     param([string]$Root)
     $manifest = Get-Content -LiteralPath (Join-Path $Root 'RELEASE.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($manifest.schema -ne 'hyperloom/release-v1' -or $manifest.name -notmatch '^hyperloom-[0-9A-Za-z.]+-g[0-9a-f]{12}$') {
-        throw 'RELEASE.json is not a hyperloom/release-v1 manifest with a valid name.'
+    if ($manifest.schema -ne 'hydraweave/release-v1' -or $manifest.name -notmatch '^hydraweave-[0-9A-Za-z.]+-g[0-9a-f]{12}$') {
+        throw 'RELEASE.json is not a hydraweave/release-v1 manifest with a valid name.'
     }
     $expected = @{}
     foreach ($entry in $manifest.files.PSObject.Properties) { $expected[$entry.Name] = $entry.Value }
@@ -70,7 +70,7 @@ function Test-HyperloomRelease {
     return $manifest
 }
 
-function Set-HyperloomActive {
+function Set-HydraweaveActive {
     param([string]$Base, [string]$Name, [string]$Programs, [string]$ShortcutPath)
     $python = Join-Path $Base "venvs\$Name\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $python)) { throw "Release is not installed: $Name" }
@@ -83,16 +83,16 @@ function Set-HyperloomActive {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($ShortcutPath)
     $shortcut.TargetPath = $python
-    $shortcut.Arguments = '-P -m hyperloom ui'
+    $shortcut.Arguments = '-P -m hydraweave ui'
     $shortcut.WorkingDirectory = $Base
     $shortcut.Save()
 }
 
 if (-not $env:LOCALAPPDATA -or -not $env:APPDATA) { throw 'LOCALAPPDATA and APPDATA must be set.' }
 $repository = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$base = Join-Path $env:LOCALAPPDATA 'hyperloom'
+$base = Join-Path $env:LOCALAPPDATA 'hydraweave'
 $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$shortcutPath = Join-Path $programs 'Hyperloom.lnk'
+$shortcutPath = Join-Path $programs 'Hydraweave.lnk'
 $currentFile = Join-Path $base 'current.txt'
 $current = if (Test-Path -LiteralPath $currentFile) { (Get-Content -LiteralPath $currentFile -Raw).Trim() } else { $null }
 
@@ -109,14 +109,14 @@ if ($List) {
 }
 if ($Activate) {
     if ($PSCmdlet.ShouldProcess($Activate, 'Activate installed release')) {
-        Set-HyperloomActive -Base $base -Name $Activate -Programs $programs -ShortcutPath $shortcutPath
+        Set-HydraweaveActive -Base $base -Name $Activate -Programs $programs -ShortcutPath $shortcutPath
         Write-Output "Active release: $Activate"
     }
     return
 }
 if ($Remove) {
     if ($Remove -eq $current) { throw "Refusing to remove the active release $Remove; activate another first." }
-    if ($Remove -notmatch '^hyperloom-[0-9A-Za-z.]+-g[0-9a-f]{12}$') { throw "Not a release name: $Remove" }
+    if ($Remove -notmatch '^hydraweave-[0-9A-Za-z.]+-g[0-9a-f]{12}$') { throw "Not a release name: $Remove" }
     foreach ($directory in @((Join-Path $base "releases\$Remove"), (Join-Path $base "venvs\$Remove"))) {
         if ((Test-Path -LiteralPath $directory) -and $PSCmdlet.ShouldProcess($directory, 'Remove')) {
             Remove-Item -LiteralPath $directory -Recurse -Force
@@ -125,7 +125,7 @@ if ($Remove) {
     return
 }
 
-$interpreter = Find-HyperloomPython
+$interpreter = Find-HydraweavePython
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Required command missing: git' }
 # Windows ships OpenSSH in System32\OpenSSH, which is not always on PATH.
 $sshExe = (Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
@@ -136,7 +136,7 @@ if (-not $sshExe) {
 $release = $null
 if (Test-Path -LiteralPath (Join-Path $repository 'RELEASE.json')) {
     # Release mode: a verified copy per version, each with its own venv; older ones stay for rollback.
-    $release = Test-HyperloomRelease -Root $repository
+    $release = Test-HydraweaveRelease -Root $repository
     $source = Join-Path $base "releases\$($release.name)"
     $venv = Join-Path $base "venvs\$($release.name)"
     Write-Output "Release: $($release.name) (commit $($release.commit)), verified $(@($release.files.PSObject.Properties).Count) files"
@@ -155,30 +155,30 @@ $pipArguments += @((Join-Path $source 'third_party\tensormeld'), '-e', $source)
 Write-Output "Python: $interpreter"
 Write-Output "Venv: $venv"
 Write-Output ("Pip arguments: " + ($pipArguments | ConvertTo-Json -Compress))
-Write-Output "Shortcut: $shortcutPath -> $venvPython -P -m hyperloom ui (Phase 1b)"
-Write-Output "Launcher: $(Join-Path $base 'hyperloom.cmd')"
-if ($PSCmdlet.ShouldProcess($base, 'Create venv, install TensorMeld and hyperloom, record interpreter, create shortcut and launcher')) {
+Write-Output "Shortcut: $shortcutPath -> $venvPython -P -m hydraweave ui (Phase 1b)"
+Write-Output "Launcher: $(Join-Path $base 'hydraweave.cmd')"
+if ($PSCmdlet.ShouldProcess($base, 'Create venv, install TensorMeld and hydraweave, record interpreter, create shortcut and launcher')) {
     New-Item -ItemType Directory -Path $base -Force | Out-Null
     if ($release) {
         if (Test-Path -LiteralPath $source) {
             # An earlier install of the same release must still verify before it is reused.
-            Test-HyperloomRelease -Root $source | Out-Null
+            Test-HydraweaveRelease -Root $source | Out-Null
         } else {
             $staging = "$source.$PID.tmp"
             New-Item -ItemType Directory -Path $staging -Force | Out-Null
             Get-ChildItem -LiteralPath $repository -Force | Copy-Item -Destination $staging -Recurse -Force
-            Test-HyperloomRelease -Root $staging | Out-Null
+            Test-HydraweaveRelease -Root $staging | Out-Null
             Move-Item -LiteralPath $staging -Destination $source
         }
     }
-    Invoke-HyperloomPython -Executable $interpreter -Arguments @('-m', 'venv', $venv)
+    Invoke-HydraweavePython -Executable $interpreter -Arguments @('-m', 'venv', $venv)
     Set-Content -LiteralPath (Join-Path $base 'python-path.txt') -Value $interpreter -Encoding UTF8
-    Invoke-HyperloomPython -Executable $venvPython -Arguments $pipArguments
-    foreach ($launcher in @('hyperloom.cmd', 'hloom.cmd')) {
+    Invoke-HydraweavePython -Executable $venvPython -Arguments $pipArguments
+    foreach ($launcher in @('hydraweave.cmd', 'hloom.cmd', 'hyperloom.cmd')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $launcher) -Destination (Join-Path $base $launcher) -Force
     }
     if ($release) {
-        Set-HyperloomActive -Base $base -Name $release.name -Programs $programs -ShortcutPath $shortcutPath
+        Set-HydraweaveActive -Base $base -Name $release.name -Programs $programs -ShortcutPath $shortcutPath
         Write-Output "Active release: $($release.name) (previous: $(if ($current) { $current } else { 'none' }))"
     } else {
         # A checkout install is the unversioned venv; it takes over from any active release.
@@ -187,7 +187,7 @@ if ($PSCmdlet.ShouldProcess($base, 'Create venv, install TensorMeld and hyperloo
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $venvPython
-        $shortcut.Arguments = '-P -m hyperloom ui'
+        $shortcut.Arguments = '-P -m hydraweave ui'
         $shortcut.WorkingDirectory = $base
         $shortcut.Save()
     }

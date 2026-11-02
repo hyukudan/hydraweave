@@ -11,9 +11,9 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom import cli, rtx
-from hyperloom.recipes import content_cache, core, measurements as m, placement
-from hyperloom.recipes.reader import RecipeError
+from hydraweave import cli, rtx
+from hydraweave.recipes import content_cache, core, measurements as m, placement
+from hydraweave.recipes.reader import RecipeError
 from tests.test_recipes_grants import NOW, window
 
 

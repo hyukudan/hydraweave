@@ -54,11 +54,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.10"
-      # hyperloom-node runs on the nodes' system python3 (>= 3.10).
+      # hydraweave-node runs on the nodes' system python3 (>= 3.10).
       - name: Compile and run the read-only verbs
         run: |
-          python -c "import py_compile, sys; [py_compile.compile(p, doraise=True) for p in sys.argv[1:]]" node/hyperloom-node node/*.py
-          echo '{}' | python node/hyperloom-node version
+          python -c "import py_compile, sys; [py_compile.compile(p, doraise=True) for p in sys.argv[1:]]" node/hydraweave-node node/*.py
+          echo '{}' | python node/hydraweave-node version
 
   install:
     name: install (${{ matrix.os }})
@@ -76,9 +76,9 @@ jobs:
         with:
           persist-credentials: false
           # A path with spaces, as the install acceptance requires.
-          path: "hyper loom src"
+          path: "hydra weave src"
       - name: Fetch the pinned TensorMeld submodule
-        working-directory: "hyper loom src"
+        working-directory: "hydra weave src"
         run: bash tools/ci-fetch-tensormeld.sh
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
@@ -87,12 +87,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & "./hyper loom src/windows/install.ps1"
-          & "$env:LOCALAPPDATA\hyperloom\hyperloom.cmd" config validate "hyper loom src/examples/cluster.example.json"
+          & "./hydra weave src/windows/install.ps1"
+          & "$env:LOCALAPPDATA\hydraweave\hydraweave.cmd" config validate "hydra weave src/examples/cluster.example.json"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Linux venv install
         if: runner.os == 'Linux'
         run: |
           python -m venv "$RUNNER_TEMP/hl venv"
-          "$RUNNER_TEMP/hl venv/bin/python" -m pip install "./hyper loom src/third_party/tensormeld" -e "./hyper loom src"
-          "$RUNNER_TEMP/hl venv/bin/hyperloom" config validate "hyper loom src/examples/cluster.example.json"
+          "$RUNNER_TEMP/hl venv/bin/python" -m pip install "./hydra weave src/third_party/tensormeld" -e "./hydra weave src"
+          "$RUNNER_TEMP/hl venv/bin/hydraweave" config validate "hydra weave src/examples/cluster.example.json"

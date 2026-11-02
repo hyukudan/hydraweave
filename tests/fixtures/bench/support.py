@@ -13,10 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_server import FakeServer  # noqa: E402
 
-from hyperloom import admission, secrets  # noqa: E402
-from hyperloom.telemetry.store import Store  # noqa: E402
-from hyperloom.web import features  # noqa: E402
-from hyperloom.web.api import API  # noqa: E402
+from hydraweave import admission, secrets  # noqa: E402
+from hydraweave.telemetry.store import Store  # noqa: E402
+from hydraweave.web import features  # noqa: E402
+from hydraweave.web.api import API  # noqa: E402
 
 
 KEY = "ab" * 32
@@ -53,7 +53,7 @@ class Bench:
         patcher = mock.patch.object(secrets, "get", lambda name: KEY if name == "key-router-fixture" else None)
         patcher.start()
         test.addCleanup(patcher.stop)
-        from hyperloom.bench import targets
+        from hydraweave.bench import targets
         # The fake server listens on loopback: the control machine's address, so the target holds it like up.
         targets.save(self.api, {"id": "fake", "scheme": "http", "host": "127.0.0.1", "port": self.server.port,
                                 "context_tokens": 65536})

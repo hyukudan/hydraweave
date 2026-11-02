@@ -14,9 +14,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from hyperloom import downloads
-from hyperloom.config import parse
-from hyperloom.telemetry.store import Store
+from hydraweave import downloads
+from hydraweave.config import parse
+from hydraweave.telemetry.store import Store
 from tests.test_config import example
 
 
@@ -27,8 +27,8 @@ POSIX = os.name == "posix"
 
 def known_homes(case, cluster, home="/home/op"):
     """The nodes' homes as the portal's first node read learns them (no ssh in tests)."""
-    from hyperloom import remote
-    paths = {(m.id, m.ssh_target, m.ssh_port): home + "/.hyperloom-boot/hyperloom-node"
+    from hydraweave import remote
+    paths = {(m.id, m.ssh_target, m.ssh_port): home + "/.hydraweave-boot/hydraweave-node"
              for m in cluster.machines.values() if m.access == "ssh"}
     patcher = patch.dict(remote._NODE_PATHS, paths)
     patcher.start()
@@ -49,18 +49,18 @@ class RootsTests(unittest.TestCase):
     def test_a_save_learns_the_node_home_first_and_refuses_when_it_cannot(self):
         """An asset kept directly in a home anywhere (here /srv/accounts/researcher, not named after the ssh
         user) never authorizes that home: the save learns the node's home first, or is refused."""
-        from hyperloom import remote
+        from hydraweave import remote
         halo = self.cluster.machines["halo-1"]
         self.cluster.assets["halo-1"]["odd"] = {"path": "/srv/accounts/researcher/odd.gguf", "bytes": 1}
         client = SimpleNamespace(_tool_path=lambda timeout, cancel: remote._NODE_PATHS.__setitem__(
-            (halo.id, halo.ssh_target, halo.ssh_port), "/srv/accounts/researcher/.hyperloom-boot/hyperloom-node"))
-        with patch.dict(remote._NODE_PATHS, clear=True),                 patch("hyperloom.orchestrate._client", return_value=client) as made:
+            (halo.id, halo.ssh_target, halo.ssh_port), "/srv/accounts/researcher/.hydraweave-boot/hydraweave-node"))
+        with patch.dict(remote._NODE_PATHS, clear=True),                 patch("hydraweave.orchestrate._client", return_value=client) as made:
             with self.assertRaises(ValueError):
                 downloads.set_roots(self.cluster, self.store, "halo-1", ["/srv/accounts/researcher/runs"])
             made.assert_called_once_with(halo)
             downloads.set_roots(self.cluster, self.store, "halo-1", ["/opt/assets/x"])     # learned once
             self.assertEqual(made.call_count, 1)
-        with patch.dict(remote._NODE_PATHS, clear=True),                 patch("hyperloom.orchestrate._client", side_effect=remote.RemoteError("unknown host key")):
+        with patch.dict(remote._NODE_PATHS, clear=True),                 patch("hydraweave.orchestrate._client", side_effect=remote.RemoteError("unknown host key")):
             with self.assertRaisesRegex(ValueError, "home could not be checked"):
                 downloads.set_roots(self.cluster, self.store, "halo-1", ["/opt/assets/x"])
             # Before the home is known no asset directory is a base: a saved root inside one is not used.
@@ -70,14 +70,14 @@ class RootsTests(unittest.TestCase):
                              [r["path"] for r in downloads.library_roots(self.cluster, self.store)["halo-1"]])
         # Another ssh account under the same machine id is another identity: its home is learned again.
         moved = dataclasses.replace(halo, ssh_target="other@halo-1")
-        with patch.dict(remote._NODE_PATHS, {(halo.id, halo.ssh_target, halo.ssh_port): "/opt/x/.hyperloom-boot/n"}):
+        with patch.dict(remote._NODE_PATHS, {(halo.id, halo.ssh_target, halo.ssh_port): "/opt/x/.hydraweave-boot/n"}):
             self.assertIsNone(remote.known_home(moved))
             self.assertEqual(remote.known_home(halo), "/opt/x")
 
     def test_config_and_prefs_roots(self):
         roots = downloads.library_roots(self.cluster)
         self.assertEqual(roots["halo-1"], [{"path": "/opt/assets", "source": "config"}])
-        self.assertEqual(roots["workstation"], [{"path": "C:\\hyperloom\\assets", "source": "config"}])
+        self.assertEqual(roots["workstation"], [{"path": "C:\\hydraweave\\assets", "source": "config"}])
         self.store.put("prefs", "library/roots", {"halo-1": ["/opt/assets/extra", "relative", "/opt/assets",
                                                              "/srv/models", "/opt/assets/.cache"],
                                                   "nobody": ["/x"], "halo-2": "not a list"})
@@ -93,20 +93,20 @@ class RootsTests(unittest.TestCase):
         self.cluster.assets["halo-1"]["top"] = {"path": "/top.gguf", "bytes": 1}
         roots = downloads.library_roots(self.cluster)
         self.assertEqual(roots["halo-1"], [{"path": "/opt/assets", "source": "config"}])
-        self.assertEqual(roots["workstation"], [{"path": "C:\\hyperloom\\assets", "source": "config"}])
+        self.assertEqual(roots["workstation"], [{"path": "C:\\hydraweave\\assets", "source": "config"}])
         for machine, value in (("halo-1", "/home/someone"), ("halo-1", "/home/someone/models"), ("halo-1", "/top"),
                                ("workstation", "C:\\Users\\someone\\Documents")):
             with self.subTest(value), self.assertRaises(ValueError):
                 downloads.set_roots(self.cluster, self.store, machine, [value])
         # A node's home elsewhere: named after its ssh account, or learned from the node tool's path.
-        from hyperloom import remote
+        from hydraweave import remote
         import dataclasses
         halo = dataclasses.replace(self.cluster.machines["halo-1"], ssh_target="op@halo-1")
         self.assertTrue(downloads.too_wide(halo, "/srv/accounts/op"))
         self.assertFalse(downloads.too_wide(halo, "/srv/accounts/op/models"))
         halo = self.cluster.machines["halo-1"]
         with patch.dict(remote._NODE_PATHS, {(halo.id, halo.ssh_target, halo.ssh_port):
-                                             "/data/people/op/.hyperloom-boot/hyperloom-node"}):
+                                             "/data/people/op/.hydraweave-boot/hydraweave-node"}):
             for value in ("/data/people/op", "/data/people"):
                 self.assertTrue(downloads.too_wide(halo, value), value)
             self.assertFalse(downloads.too_wide(halo, "/data/people/op/models"))
@@ -134,9 +134,9 @@ class RootsTests(unittest.TestCase):
                 downloads.set_roots(self.cluster, self.store, machine, [value])
         with self.assertRaises(LookupError):
             downloads.set_roots(self.cluster, self.store, "nobody", [])
-        downloads.set_roots(self.cluster, self.store, "workstation", ["C:\\hyperloom\\assets\\more"])
+        downloads.set_roots(self.cluster, self.store, "workstation", ["C:\\hydraweave\\assets\\more"])
         downloads.set_roots(self.cluster, self.store, "halo-1", [])
-        self.assertEqual(self.store.get("prefs", "library/roots"), {"workstation": ["C:\\hyperloom\\assets\\more"]})
+        self.assertEqual(self.store.get("prefs", "library/roots"), {"workstation": ["C:\\hydraweave\\assets\\more"]})
 
 
 class RecordedReplyTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 """Operations fixtures for the browser smoke: the turn queues of halo-1/halo-2 rebuilt from the recorded turn files
 (clock times shifted to now) over a fake /proc, a big-job ledger, log files to search, node tool digests, a MAC
-and a shutdown helper path. Node verbs of this package go through hyperloom.web.features.ops._node_call, which
+and a shutdown helper path. Node verbs of this package go through hydraweave.web.features.ops._node_call, which
 these patches replace; nothing leaves the fixture process."""
 
 import dataclasses
@@ -93,7 +93,7 @@ def _install_roots(directory):
     for mid in ("halo-1", "halo-2"):
         root = directory / "ops-install" / mid
         (root / "log").mkdir(parents=True, exist_ok=True)
-        (root / ".hyperloom-root").write_text("fixture\n")
+        (root / ".hydraweave-root").write_text("fixture\n")
         for name, lines in LOGS.items():
             (root / "log" / name).write_text("\n".join(f"{mid} {line}" for line in lines) + "\n")
         roots[mid] = root
@@ -103,14 +103,14 @@ def _install_roots(directory):
     return roots, lab
 
 
-CONFIG = {"schema": "hyperloom/cluster-v1",
+CONFIG = {"schema": "hydraweave/cluster-v1",
           "machines": [{"id": "workstation", "os": "windows", "access": "local", "http_address": "192.0.2.20",
-                        "install_root": "C:/hyperloom", "lab_mode": True},
+                        "install_root": "C:/hydraweave", "lab_mode": True},
                        {"id": "halo-1", "os": "linux", "access": "ssh", "http_address": "192.0.2.10", "ssh_target": "halo-1",
-                        "ssh_port": 22, "install_root": "/opt/hyperloom/halo-1", "lab_mode": True, "lab_dir": "/opt/lab",
+                        "ssh_port": 22, "install_root": "/opt/hydraweave/halo-1", "lab_mode": True, "lab_dir": "/opt/lab",
                         "devices": [{"id": "gpu"}]},
                        {"id": "halo-2", "os": "linux", "access": "ssh", "http_address": "192.0.2.11", "ssh_target": "halo-2",
-                        "ssh_port": 22, "install_root": "/opt/hyperloom/halo-2", "lab_mode": True, "lab_dir": "/opt/lab",
+                        "ssh_port": 22, "install_root": "/opt/hydraweave/halo-2", "lab_mode": True, "lab_dir": "/opt/lab",
                         "devices": [{"id": "gpu"}]}],
           "assets": {}, "profiles": {"qwen-replicas": {"nodes": ["halo-1"]},
                                      "qwen-two": {"preset": "qwen-replicas", "nodes": ["halo-1", "halo-2"]}},
@@ -138,10 +138,10 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom import remote
-    from hyperloom.web.features import ops, turns
-    turns_node = _module("hyperloom_turns_fixture", "hyperloom_turns.py")
-    search_node = _module("hyperloom_logsearch_fixture", "hyperloom_logsearch.py")
+    from hydraweave import remote
+    from hydraweave.web.features import ops, turns
+    turns_node = _module("hydraweave_turns_fixture", "hydraweave_turns.py")
+    search_node = _module("hydraweave_logsearch_fixture", "hydraweave_logsearch.py")
     trees, proc, boot = _lab(directory, now)
     installs, lab = _install_roots(directory)
     expected = remote.tool_digest()
@@ -161,12 +161,12 @@ def patches(directory, now):
             local.pop("exclude", None)
             return search_node.run("logs-search", local)
         if verb == "version":
-            return {"schema": "hyperloom/node-v1", "verb": "version",
+            return {"schema": "hydraweave/node-v1", "verb": "version",
                     "checks": {"tool": {"status": "ok", "value": expected if machine.id == "halo-1" else "0" * 64}}}
         if verb == "host":
-            return {"schema": "hyperloom/node-v1", "verb": "host", "interfaces": [{"name": "eth0", "mac": "02:00:5e:10:00:01"}]}
+            return {"schema": "hydraweave/node-v1", "verb": "host", "interfaces": [{"name": "eth0", "mac": "02:00:5e:10:00:01"}]}
         if verb == "status":
-            return {"schema": "hyperloom/node-v1", "verb": "status", "leases": []}
+            return {"schema": "hydraweave/node-v1", "verb": "status", "leases": []}
         return api.node(machine, verb, payload)
 
     real_eligible = turns.eligible

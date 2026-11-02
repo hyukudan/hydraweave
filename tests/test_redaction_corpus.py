@@ -15,8 +15,8 @@ import re
 import unittest
 from unittest import mock
 
-from hyperloom import redaction
-from hyperloom.web.api import redact
+from hydraweave import redaction
+from hydraweave.web.api import redact
 from tests.redaction_corpus_metric import (Rules, UnknownTransformation, argv_hidden, hides_more, merged, render,
                                              secret_positions, shows, substitution_hidden)
 
@@ -31,7 +31,7 @@ def load(path, name):
     return module
 
 
-node = load(ROOT / "node" / "hyperloom_logsearch.py", "hyperloom_logsearch_corpus_under_test")
+node = load(ROOT / "node" / "hydraweave_logsearch.py", "hydraweave_logsearch_corpus_under_test")
 base = load(FIXTURE / "rules_2a7c803.py", "redaction_rules_2a7c803")
 previous = load(FIXTURE / "rules_65f2fe5.py", "redaction_rules_65f2fe5")
 HEAD = Rules(lambda text: merged(redaction._hidden(text, 0, redaction.BASE_PORTAL_RULES)),

@@ -14,9 +14,9 @@ import types
 import unittest
 from unittest import mock
 
-from hyperloom import secrets
-from hyperloom.telemetry.store import Store
-from hyperloom.web.features import alerts, health
+from hydraweave import secrets
+from hydraweave.telemetry.store import Store
+from hydraweave.web.features import alerts, health
 from tests.test_health_engine import Clock, FakeAPI, T0
 
 REAL_CONFIGURED = alerts.configured_ports
@@ -517,7 +517,7 @@ class DeliveryTests(Base):
         paths = [path for path, _, _ in self.receiver.received]
         self.assertEqual(sorted(p.split("/")[1] for p in paths), ["fail", "hook", "moved"])      # nothing followed the redirect
         body = json.loads(next(b for p, _, b in self.receiver.received if p.startswith("/hook")))
-        self.assertEqual((body["schema"], body["kind"], body["items"][0]["state"]), ("hyperloom/alert-v1", "alert", "firing"))
+        self.assertEqual((body["schema"], body["kind"], body["items"][0]["state"]), ("hydraweave/alert-v1", "alert", "firing"))
         self.assertTrue(body["message_id"])
         events = self.store.events(category="alerts")
         self.assertNotIn(TOKEN, json.dumps(events))
@@ -566,7 +566,7 @@ class DeliveryTests(Base):
         _, content_type, body = self.receiver.received[0]
         self.assertTrue(content_type.startswith("text/plain"))
         first, second = body.decode().split("\n")[:2]
-        self.assertTrue(first.startswith("hyperloom alert ") and len(first.split()[-1]) == 32)    # the stable message id
+        self.assertTrue(first.startswith("hydraweave alert ") and len(first.split()[-1]) == 32)    # the stable message id
         self.assertTrue(second.startswith("FIRING · critical · GPU hot"))
 
     def test_total_deadline_against_a_slow_receiver(self):
@@ -641,7 +641,7 @@ class DeliveryTests(Base):
         self.assertEqual(states, ["firing", "resolved"])
 
     def test_registration(self):
-        from hyperloom.web import features
+        from hydraweave.web import features
         reg = features.Registry()
         alerts.register(reg)
         self.assertEqual(sorted(reg.posts), ["alerts/channels", "alerts/channels/delete", "alerts/test"])

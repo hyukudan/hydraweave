@@ -1,4 +1,4 @@
-"""`hyperloom whatif` (cliext/planner.py): variants of one recipe evaluated by the recipe command lines on saved
+"""`hydraweave whatif` (cliext/planner.py): variants of one recipe evaluated by the recipe command lines on saved
 hardware facts. No machine is contacted: facts are saved records and the stub reader is used."""
 from contextlib import redirect_stdout
 import io
@@ -9,9 +9,9 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, render
-from hyperloom.cliext import planner
-from hyperloom.recipes import service
+from hydraweave import cli, render
+from hydraweave.cliext import planner
+from hydraweave.recipes import service
 from tests.recipe_fixtures import isolated
 
 DS_FIXTURE = (Path(__file__).parent / "fixtures" / "recipes" / "ds41-lab.toml").read_text(encoding="utf-8")
@@ -26,7 +26,7 @@ def user_ds(name="ds-user"):
 
 
 def run_cli(*argv, stdin=None):
-    """(exit code, stdout JSON or None, stderr) of `hyperloom ARGV` in this process."""
+    """(exit code, stdout JSON or None, stderr) of `hydraweave ARGV` in this process."""
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), mock.patch("sys.stderr", err), mock.patch("sys.stdin", io.StringIO(stdin or "")):
         code = cli.main(list(argv))
@@ -151,7 +151,7 @@ class WhatifRunTests(unittest.TestCase):
     def test_variants_side_by_side(self):
         code, out, err = self.whatif("--vary", f"{FLOOR}=8,200", "--prompt-tokens", "9000")
         self.assertEqual(code, 0, err)
-        self.assertEqual(out["schema"], "hyperloom/planner-whatif-v1")
+        self.assertEqual(out["schema"], "hydraweave/planner-whatif-v1")
         self.assertEqual(out["facts"]["name"], "ds-now")
         self.assertEqual(out["facts"]["label"], "saved facts, not live")
         base, low, high = out["variants"]
@@ -185,7 +185,7 @@ class WhatifRunTests(unittest.TestCase):
         self.assertEqual(high["layer"]["save_cli"].split(" --set ")[1], f"{FLOOR}=200")
 
     def test_each_variant_is_the_recipe_command_line(self):
-        """One code path: a variant's answer equals `hyperloom recipe explain` run by hand with the same layer."""
+        """One code path: a variant's answer equals `hydraweave recipe explain` run by hand with the same layer."""
         code, out, _ = self.whatif("--vary", f"{FLOOR}=200")
         variant = out["variants"][1]
         layer = planner.layer_directory() / (variant["layer"]["sha256"] + ".json")
@@ -253,7 +253,7 @@ class WhatifRunTests(unittest.TestCase):
     def test_recipe_command_lines_name_the_catalog_id(self):
         argv = planner._argv("plan", {"recipe": "ds-user", "profile": "ds41-rtx"}, "cfg.json", ["--facts", "f.json"])
         self.assertEqual(argv[:4], ["recipe", "plan", "ds-user", "ds41-rtx"])
-        # A FILE reference (`hyperloom whatif FILE`, command line only) takes the recipe positional's place.
+        # A FILE reference (`hydraweave whatif FILE`, command line only) takes the recipe positional's place.
         argv = planner._argv("show", {"recipe": str(Path("x", "r.toml"))}, "cfg.json")
         self.assertEqual(argv[:3], ["recipe", "show", str(Path("x", "r.toml"))])
 

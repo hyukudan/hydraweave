@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import config
-from hyperloom.web.features import endpoints
+from hydraweave import config
+from hydraweave.web.features import endpoints
 from tests.test_endpoints_feature import MODELS, Base, json_route
 
 
@@ -20,10 +20,10 @@ def lab_cluster(router=None, pc=None, profiles=None):
     for mid, system, access, address in (("workstation", "windows", "local", "127.0.0.1"),
                                           ("halo-1", "linux", "ssh", "192.0.2.10"),
                                           ("halo-2", "linux", "ssh", "192.0.2.11")):
-        machines[mid] = config.Machine(mid, system, access, address, mid, 22, "/opt/hyperloom", True, [{"id": "gpu"}])
+        machines[mid] = config.Machine(mid, system, access, address, mid, 22, "/opt/hydraweave", True, [{"id": "gpu"}])
     if profiles is None:
         profiles = {"qwen-replicas": {"nodes": ["halo-1", "halo-2"], "port": 18501,
-                                      "api_key_files": {"halo-1": "/opt/hyperloom/secrets/engine.key"}},
+                                      "api_key_files": {"halo-1": "/opt/hydraweave/secrets/engine.key"}},
                     "minimax-pair": {"rank0": "halo-1", "rank1": "halo-2"}}
     return config.Cluster(machines, {}, profiles, router or {}, pc or {}, {})
 
@@ -33,7 +33,7 @@ def host_doc(now, listeners, ok=True, status="ok"):
     if status != "ok":
         section["why"] = "proc not readable"
     return {"ts": now, "ok": ok, "error": None if ok else "ssh failed",
-            "host": {"schema": "hyperloom/node-v1", "verb": "host", "checks": {"listeners": section}}}
+            "host": {"schema": "hydraweave/node-v1", "verb": "host", "checks": {"listeners": section}}}
 
 
 class ConfiguredRowsTests(unittest.TestCase):
@@ -66,13 +66,13 @@ class ConfiguredRowsTests(unittest.TestCase):
     def test_a_key_file_release_is_lan_and_keyed(self):
         # A release whose preset declares serve_auth "key-file" (and passes the key file) binds the LAN with its key;
         # its row says so, not the family's loopback default. A release refused at launch does not render here either.
-        from hyperloom import engines
+        from hydraweave import engines
         real = engines.load_preset
         keyed = lambda name: (dict(real(name), serve_auth="key-file",
                                    argv=real(name)["argv"] + ["--api-key-file", "{key_file}"])
                               if name == "minimax-pair" else real(name))
         profiles = {"minimax-pair": {"rank0": "halo-1", "rank1": "halo-2",
-                                     "api_key_files": {"halo-1": "/opt/hyperloom/secrets/engine.key"}}}
+                                     "api_key_files": {"halo-1": "/opt/hydraweave/secrets/engine.key"}}}
         with mock.patch.object(engines, "load_preset", side_effect=keyed):
             rows = {row["id"]: row for row in endpoints.configured(lab_cluster(profiles=profiles), [])}
         row = rows["engine/minimax-pair/halo-1"]
@@ -89,7 +89,7 @@ class ConfiguredRowsTests(unittest.TestCase):
         self.assertEqual(endpoints.router_listen(remote), ("halo-1", {"address": "192.0.2.10", "port": 18600}))
         explicit = lab_cluster(router={"machine": "halo-1", "listen": "192.0.2.10:18700"})
         self.assertEqual(endpoints.router_listen(explicit)[1]["port"], 18700)
-        from hyperloom import render
+        from hydraweave import render
         cluster = lab_cluster(router={"machine": "halo-1", "api_key_file": "/opt/k", "replica_api_key_files": {"halo-1": "/k", "halo-2": "/k"}},
                               pc={"router_listen": "192.0.2.20:18610"},
                               profiles={"qwen-replicas": {"nodes": ["halo-1", "halo-2"], "port": 18501}})

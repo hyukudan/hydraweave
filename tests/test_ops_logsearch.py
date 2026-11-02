@@ -10,11 +10,11 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom.web.features import logsearch, ops
+from hydraweave.web.features import logsearch, ops
 from tests.test_ops_turns import APIFixture
 
 ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("hyperloom_logsearch_under_test", ROOT / "node" / "hyperloom_logsearch.py")
+spec = importlib.util.spec_from_file_location("hydraweave_logsearch_under_test", ROOT / "node" / "hydraweave_logsearch.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 
@@ -90,13 +90,13 @@ class NodeSearchTests(unittest.TestCase):
         install = self.tree.base / "install"
         (install / "etc").mkdir(parents=True)
         (install / "log").mkdir()
-        (install / ".hyperloom-root").write_text("x\n")
+        (install / ".hydraweave-root").write_text("x\n")
         (install / "etc" / "notes.log").write_text("ERROR in etc\n")
         (install / "log" / "lease-x.log").write_text("ERROR in log\n")
         result = node.run("logs-search", {"text": "ERROR", "roots": [str(install)]})
         self.assertEqual([r["file"] for r in result["results"]], ["log/lease-x.log"])
         result = node.run("logs-search", {"text": "ERROR", "root": str(install)})
-        self.assertEqual([(r["root"], r["file"]) for r in result["results"]], [("hyperloom log", "lease-x.log")])
+        self.assertEqual([(r["root"], r["file"]) for r in result["results"]], [("hydraweave log", "lease-x.log")])
         unmarked = node.run("logs-search", {"text": "ERROR", "root": str(self.tree.root)})
         self.assertIn("marked", unmarked["report"]["roots"][0]["error"])
         excluded = node.run("logs-search", {"text": "line", "roots": [str(self.tree.root)], "exclude": [str(self.tree.root / "a")]})
@@ -171,7 +171,7 @@ class NodeSearchTests(unittest.TestCase):
     def test_roots_are_the_configured_paths(self):
         install = self.tree.base / "install"
         (install / "log").mkdir(parents=True)
-        (install / ".hyperloom-root").write_text("x\n")
+        (install / ".hydraweave-root").write_text("x\n")
         self.assertEqual(node.install_log(str(install)), str(install / "log"))
         if hasattr(os, "symlink"):
             try:
@@ -290,13 +290,13 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
         patcher = mock.patch.object(ops, "_node_call", fake)
         patcher.start()
         self.addCleanup(patcher.stop)
-        from hyperloom import downloads
+        from hydraweave import downloads
         learned = mock.patch.object(downloads, "learn_home")
         self.learned = learned.start()
         self.addCleanup(learned.stop)
 
     def test_a_save_learns_the_node_home_first(self):
-        from hyperloom import downloads
+        from hydraweave import downloads
         self.learned.side_effect = ValueError("halo-1: its home could not be checked")
         with self.assertRaisesRegex(Exception, "home could not be checked"):
             self.api.feature_post("logsearch/roots", {"machine": "halo-1", "roots": ["/opt/lab/runs"]})
@@ -306,7 +306,7 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
     def test_document_lists_root_ids_not_client_paths(self):
         doc = self.api.read("logsearch", {})
         halo = next(m for m in doc["machines"] if m["machine"] == "halo-1")
-        self.assertEqual([r["id"] for r in halo["roots"]], ["hyperloom"])
+        self.assertEqual([r["id"] for r in halo["roots"]], ["hydraweave"])
         with self.assertRaises(Exception):
             self.api.read("logsearch", {"path": "/etc"})
 
@@ -335,7 +335,7 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
         doc = self.api.read("logsearch", {})
         halo = next(m for m in doc["machines"] if m["machine"] == "halo-1")
         self.assertEqual(halo["configured"], ["/opt/lab/runs"])
-        self.assertEqual([r["id"] for r in halo["roots"]], ["hyperloom", "root-0"])
+        self.assertEqual([r["id"] for r in halo["roots"]], ["hydraweave", "root-0"])
         _, result = self.api.feature_post("logsearch/query", {"text": "alpha", "machines": ["halo-1"], "roots": ["root-0"]})
         self.assertEqual(self.calls[-1][2]["roots"], ["/opt/lab/runs"])
         self.assertNotIn("root", self.calls[-1][2])
@@ -349,13 +349,13 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
             self.assertNotIn("/home/someone", logsearch.allowed_bases(self.api, cluster.machines["halo-1"]))
             # While this process does not know the node's home, no asset directory is a base (a saved root inside
             # one is not searched); the lab directory and the install root still are.
-            from hyperloom import remote
+            from hydraweave import remote
             cluster.assets["halo-1"]["data"] = {"path": "/srv/data/m.gguf", "bytes": 1}
             machine = cluster.machines["halo-1"]
             with mock.patch.dict(remote._NODE_PATHS, clear=True):
                 self.assertNotIn("/srv/data", logsearch.allowed_bases(self.api, machine))
             with mock.patch.dict(remote._NODE_PATHS, {(machine.id, machine.ssh_target, machine.ssh_port):
-                                                      "/home/op/.hyperloom-boot/hyperloom-node"}):
+                                                      "/home/op/.hydraweave-boot/hydraweave-node"}):
                 self.assertIn("/srv/data", logsearch.allowed_bases(self.api, machine))
             for roots in (["/home/someone"], ["/home/someone/runs"]):
                 with self.subTest(roots=roots), self.assertRaises(Exception):
@@ -368,7 +368,7 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
         def slow(api, machine, verb, payload):
             entered.set()
             gate.wait(5)
-            return {"schema": "hyperloom/node-v1", "verb": verb, "results": [], "report": {"files": 0}}
+            return {"schema": "hydraweave/node-v1", "verb": verb, "results": [], "report": {"files": 0}}
         with mock.patch.object(ops, "_node_call", slow):
             first = threads.Thread(target=self.api.feature_post, args=("logsearch/query", {"text": "x", "machines": ["halo-1"]}))
             first.start()
@@ -380,12 +380,12 @@ class PortalSearchTests(APIFixture, unittest.TestCase):
         self.assertIn("still running", second["machines"][0]["error"])
 
     def test_cli_runs_the_same_query(self):
-        from hyperloom.cliext import logsearch as cli
+        from hydraweave.cliext import logsearch as cli
         args = mock.Mock(pattern="ERROR", regex=False, ignore_case=False, machine=["halo-1"], root=None, since="1h",
                          process=None, level=None, context=None, max_results=None, json=True)
-        with mock.patch("hyperloom.cliext.ops.cli_api", return_value=self.api), mock.patch("builtins.print") as printed:
+        with mock.patch("hydraweave.cliext.ops.cli_api", return_value=self.api), mock.patch("builtins.print") as printed:
             self.assertEqual(cli.search(args), 0)
-        self.assertEqual(json.loads(printed.call_args[0][0])["schema"], "hyperloom/ui-logsearch-results-v1")
+        self.assertEqual(json.loads(printed.call_args[0][0])["schema"], "hydraweave/ui-logsearch-results-v1")
 
 
 if __name__ == "__main__":

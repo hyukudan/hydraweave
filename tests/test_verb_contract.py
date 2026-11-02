@@ -10,29 +10,29 @@ import sys
 import tempfile
 import unittest
 
-from hyperloom import orchestrate, remote
+from hydraweave import orchestrate, remote
 
 
 class VerbContractTests(unittest.TestCase):
     def test_the_node_tool_writes_no_bytecode_beside_itself(self):
-        """A verb that imports an extension leaves no __pycache__ in the tool's directory (~/.hyperloom-boot)."""
+        """A verb that imports an extension leaves no __pycache__ in the tool's directory (~/.hydraweave-boot)."""
         node = Path(__file__).resolve().parents[1] / "node"
         with tempfile.TemporaryDirectory() as directory:
             for name in os.listdir(node):
-                if name == "hyperloom-node" or name.endswith(".py"):
+                if name == "hydraweave-node" or name.endswith(".py"):
                     shutil.copy2(node / name, Path(directory) / name)
             environment = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
-            subprocess.run([sys.executable, str(Path(directory) / "hyperloom-node"), "turns"], input="{}",
+            subprocess.run([sys.executable, str(Path(directory) / "hydraweave-node"), "turns"], input="{}",
                            capture_output=True, text=True, timeout=60, env=environment)
             self.assertEqual(sorted(p.name for p in Path(directory).iterdir() if not p.name.endswith(".py")
-                                    and p.name != "hyperloom-node"), [])
+                                    and p.name != "hydraweave-node"), [])
 
 
     def test_orchestrator_transport_and_node_verbs_agree(self):
         node = Path(__file__).resolve().parents[1] / "node"
-        tool = runpy.run_path(str(node / "hyperloom-node"))
+        tool = runpy.run_path(str(node / "hydraweave-node"))
         supported = set(tool["VERBS"])
-        self.assertTrue({"hyperloom_install", "hyperloom_lease", "hyperloom_download", "hyperloom_service"}
+        self.assertTrue({"hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service"}
                         <= set(tool["EXTENSIONS"]))
         for name in tool["EXTENSIONS"]:
             spec = importlib.util.spec_from_file_location(name + "_contract", node / (name + ".py"))

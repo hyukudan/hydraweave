@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the hyperloom release archives from a clean checkout (stdlib only).
+"""Build the hydraweave release archives from a clean checkout (stdlib only).
 
 The release is the product tree at HEAD plus the pinned TensorMeld source (the
 router runs from it), with RELEASE.json listing the sha256 of every file. The
@@ -9,7 +9,7 @@ engine and strix-trellis are built on the nodes from their pinned SHAs; add
     python tools/make_release.py [--out dist] [--wheels] [--node-sources]
 
 Writes <name>.zip (Windows), <name>.tar.gz (Linux) and SHA256SUMS, where
-<name> is hyperloom-<version>-g<12-hex commit>. The release tree and
+<name> is hydraweave-<version>-g<12-hex commit>. The release tree and
 RELEASE.json are reproducible from the commit: sorted entries, the commit time
 as every mtime, fixed modes, and git archive with fixed line-ending settings
 (TensorMeld's `* text=auto` has no eol, so the local core.autocrlf would
@@ -34,10 +34,10 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMA = "hyperloom/release-v1"
+SCHEMA = "hydraweave/release-v1"
 COMPONENTS = ("tensormeld", "engine", "strix-trellis")
 # Executable inside the release (git tracks no mode bits on Windows checkouts).
-EXECUTABLE = {"node/hyperloom-node", "node/build-node.sh", "tools/make_release.py", "tools/ci-docker.sh"}
+EXECUTABLE = {"node/hydraweave-node", "node/build-node.sh", "tools/make_release.py", "tools/ci-docker.sh"}
 # git archive applies text/eol conversion; pin it so a Windows core.autocrlf=true cannot add CRLF.
 ARCHIVE = ("-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive")
 
@@ -133,7 +133,7 @@ def main(argv=None):
         print("warning: uncommitted changes are not in the release; it contains HEAD only", file=sys.stderr)
     commit = git("rev-parse", "HEAD")
     components = pins()
-    name = f"hyperloom-{version()}-g{commit[:12]}"
+    name = f"hydraweave-{version()}-g{commit[:12]}"
     stamp = int(git("show", "-s", "--format=%ct", "HEAD"))
     args.out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as temporary:

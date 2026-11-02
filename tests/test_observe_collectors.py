@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom.web.features import observe
+from hydraweave.web.features import observe
 from tests.fixtures.observe.fakes import NODE1, NODE2, LOOPBACK, ROUTER, KEY, Env, fixture
 
 
@@ -41,7 +41,7 @@ class RouterCollectorTests(unittest.TestCase):
         self.assertIn(observe.NEEDS_LOG, document["why"]["requests"])
 
     def test_router_reads_are_paced_and_pause_for_another_holders_turn(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         env = self.env
         env.launch("qwen", QWEN)
         env.router()
@@ -374,14 +374,14 @@ class EngineCollectorTests(unittest.TestCase):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

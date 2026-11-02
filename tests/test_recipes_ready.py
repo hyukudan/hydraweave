@@ -1,13 +1,13 @@
-"""`hyperloom recipe ready` and `hyperloom recipe matrix` (hyperloom/recipes/ready.py): the offline checklist before
+"""`hydraweave recipe ready` and `hydraweave recipe matrix` (hydraweave/recipes/ready.py): the offline checklist before
 `up --recipe`, with the same refusal texts as plan/up, and the model x hardware class table. No machine is contacted:
 hardware facts are saved records."""
 import json
 import unittest
 from unittest import mock
 
-from hyperloom import orchestrate, render
-from hyperloom.recipes import ready, reader, service, session
-from hyperloom.web import recipes as recipe_web
+from hydraweave import orchestrate, render
+from hydraweave.recipes import ready, reader, service, session
+from hydraweave.web import recipes as recipe_web
 from tests.recipe_fixtures import isolated
 from tests.test_recipes_service import DS, MM, QWEN, run_cli, user_ds
 from tests.test_web_recipes import pinned_memory
@@ -33,12 +33,12 @@ class ReadyTests(unittest.TestCase):
             self.assertIn(states(result)["service"], ("ok", "warn"))         # warn: the fixture caps the host budget
             self.assertEqual(states(result)["hardware"], "ok")
             self.assertEqual(states(result)["core"], "warn")                # the stub reader: not production
-            self.assertEqual(result["commands"]["up"], "hyperloom up ds41-rtx --recipe ds-user")
-            self.assertEqual(result["next"], {"step": "plan", "fix": "hyperloom recipe plan ds-user ds41-rtx"})
+            self.assertEqual(result["commands"]["up"], "hydraweave up ds41-rtx --recipe ds-user")
+            self.assertEqual(result["next"], {"step": "plan", "fix": "hydraweave recipe plan ds-user ds41-rtx"})
             self.assertIn("prelaunch", " ".join(result["checked_at_start"]))
 
     def test_a_service_the_planner_declines_falls_back_to_the_nodes(self):
-        from hyperloom import rtx
+        from hydraweave import rtx
         with isolated() as env:
             cluster = orchestrate.load_cluster(env.config)
             env.save_facts("ds", "deepseek-v4.1-flash", "ds41-rtx")
@@ -61,7 +61,7 @@ class ReadyTests(unittest.TestCase):
             self.assertEqual(result["next"]["step"], "router")
             router = next(s for s in result["steps"] if s["step"] == "router")
             with self.assertRaises(reader.RecipeError) as refused:
-                from hyperloom.recipes import launch
+                from hydraweave.recipes import launch
                 launch.check_router()
             self.assertEqual(router["detail"], str(refused.exception))
 
@@ -81,7 +81,7 @@ class ReadyTests(unittest.TestCase):
             result = ready.check(cluster, "ds-user", "ds41-rtx")
             hardware = next(s for s in result["steps"] if s["step"] == "hardware")
             self.assertEqual(hardware["state"], "todo")
-            self.assertTrue(hardware["fix"].startswith("hyperloom recipe probe ds41-rtx --out "))
+            self.assertTrue(hardware["fix"].startswith("hydraweave recipe probe ds41-rtx --out "))
             self.assertIn(str(service.facts_dir()), hardware["fix"])
 
     def test_a_refused_match_has_the_same_text_as_plan(self):
@@ -109,8 +109,8 @@ class ReadyTests(unittest.TestCase):
             self.assertIn("the pinned TensorMeld router refuses the route table: no such field", hardware["detail"])
 
     def test_a_configuration_error_is_a_blocked_step(self):
-        from hyperloom.config import ConfigError
-        from hyperloom.recipes import launch
+        from hydraweave.config import ConfigError
+        from hydraweave.recipes import launch
         with isolated() as env:
             cluster = orchestrate.load_cluster(env.config)
             env.save_facts("ds", "deepseek-v4.1-flash", "ds41-rtx")
@@ -151,7 +151,7 @@ class ReadyTests(unittest.TestCase):
             if len(serving) > 1:
                 self.assertEqual(profile["state"], "todo")
                 for name in serving:
-                    self.assertIn(f"hyperloom recipe ready {QWEN} {name}", profile["fix"])
+                    self.assertIn(f"hydraweave recipe ready {QWEN} {name}", profile["fix"])
             wrong = ready.check(cluster, QWEN, "ds41-rtx")
             self.assertIn('does not serve "qwen3.8-flash-next"',
                           next(s for s in wrong["steps"] if s["step"] == "profile")["detail"])
@@ -172,7 +172,7 @@ class ReadyTests(unittest.TestCase):
             self.assertEqual((code, result["ready"]), (1, False))
             from contextlib import redirect_stdout
             import io
-            from hyperloom import cli
+            from hydraweave import cli
             out = io.StringIO()
             with redirect_stdout(out):
                 code = cli.main(["recipe", "ready", "ds-user", "ds41-rtx", "--format", "text"])
@@ -196,7 +196,7 @@ class MatrixTests(unittest.TestCase):
             self.assertEqual({c["class"] for c in result["cells"]}, set(ready.HARDWARE))
             rows = {r["id"]: r for c in result["cells"] for r in c["recipes"]}
             self.assertIsNone(rows["glm-5.3-flash.lab"]["command"])                  # pending: never launched
-            self.assertTrue(rows[QWEN]["command"].startswith("hyperloom up "))
+            self.assertTrue(rows[QWEN]["command"].startswith("hydraweave up "))
             self.assertTrue(rows[QWEN]["command"].endswith(f"--recipe {QWEN}"))
 
     def test_a_figure_is_measured_only_with_resolved_sources(self):

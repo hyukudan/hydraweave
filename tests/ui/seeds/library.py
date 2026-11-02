@@ -14,7 +14,7 @@ def _unit(name, kind, size, files, status, newest, **manifest):
 
 
 def seed(store, now):
-    store.put("prefs", "library/roots", {"halo-2": ["/opt/hyperloom/halo-2/models"]})
+    store.put("prefs", "library/roots", {"halo-2": ["/opt/hydraweave/halo-2/models"]})
     store.put("library/inventory", "halo-1", {"machine": "halo-1", "scanned_at": now - 420, "cache": "direct", "roots": [
         {"path": "/opt/models", "source": "config", "free_bytes": 612_000_000_000, "other_files": 2, "truncated": [],
          "units": [_unit("qwen-flash", "dir", 52_400_000_000, 5, "complete", now - 86400 * 3),
@@ -24,7 +24,7 @@ def seed(store, now):
     store.put("library/inventory", "halo-2", {"machine": "halo-2", "scanned_at": now - 400, "cache": "direct", "roots": [
         {"path": "/opt/models", "source": "config", "free_bytes": 701_000_000_000, "other_files": 0, "truncated": [],
          "units": [_unit("qwen-flash", "dir", 52_400_000_000, 5, "complete", now - 86400 * 3)]},
-        {"path": "/opt/hyperloom/halo-2/models", "source": "prefs", "free_bytes": 1_400_000_000_000, "other_files": 0,
+        {"path": "/opt/hydraweave/halo-2/models", "source": "prefs", "free_bytes": 1_400_000_000_000, "other_files": 0,
          "truncated": ["files"], "units": [
              {"name": "large-archive", "kind": "dir", "bytes": None, "files": None, "newest_mtime": None, "links": None,
               "manifest": {"status": "unknown", "why": "scan bound reached: files"}}]}]})
@@ -52,8 +52,8 @@ def seed(store, now):
                                                      "name": "draft-small.gguf",
                                                      "node_job": "c" * 32,
                                                      "reason": "the node job could not be read for 10 minutes; it may "
-                                                               "still be running: follow it with hyperloom models job",
-                                                     "node": {"state": "paused", "paused": {"reason": "a hyperloom lease "
+                                                               "still be running: follow it with hydraweave models job",
+                                                     "node": {"state": "paused", "paused": {"reason": "a hydraweave lease "
                                                                                                       "is active"}}})
     store.put("library/jobs", "fixture-verify", {"id": "fixture-verify", "kind": "verify", "state": "succeeded",
                                                  "started": now - 7300, "finished": now - 7200, "machine": "halo-1",
@@ -61,16 +61,16 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom.telemetry.store import Store
+    from hydraweave.telemetry.store import Store
     ledger = Path(directory) / "coordination.md"
     ledger.write_text("- 01:00 fixture: PC-BIG start (sample)\n- 01:20 fixture: PC-BIG end (rc 0)\n", encoding="utf-8")
-    store = Store(str(Path(directory) / "hyperloom" / "telemetry.sqlite3"))
+    store = Store(str(Path(directory) / "hydraweave" / "telemetry.sqlite3"))
     try:
         store.put("prefs", "turns/ledger_path", str(ledger))
     finally:
         store.close()
     data = ledger.read_bytes()
-    state = Path(directory) / "hyperloom" / "library-ledger.json"
+    state = Path(directory) / "hydraweave" / "library-ledger.json"
     state.write_text(json.dumps({"identity": [0, 0], "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                                  "accepted_at": now - 1800}), encoding="utf-8")
     return []

@@ -12,7 +12,7 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import gpu_counters, placement_supervision, procs, rtx
+from hydraweave import gpu_counters, placement_supervision, procs, rtx
 
 from tests import test_rtx
 from tests.test_placement_supervision import policy
@@ -124,7 +124,7 @@ def test_3_cleanup_faults_cannot_skip_child_locks_or_terminal_state(tmp_path, mo
             step("child", lambda: super(Child, self).stop(grace_s))
     spool = mock.Mock(ready=lambda: {"event": "READY"}, health=lambda: True,
                       shutdown=lambda **kw: step("spool"))
-    monkeypatch.setattr("hyperloom.replica_spool.Client", lambda *a, **kw: spool)
+    monkeypatch.setattr("hydraweave.replica_spool.Client", lambda *a, **kw: spool)
     def sleep(_):
         assert json.loads((tmp_path / "state.json").read_bytes())["state"] == "ready"
         (tmp_path / "stop").touch()

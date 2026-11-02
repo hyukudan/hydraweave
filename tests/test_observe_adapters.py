@@ -4,7 +4,7 @@ import json
 import math
 import unittest
 
-from hyperloom.adapters import AdapterError, engine, minimax, prom, router
+from hydraweave.adapters import AdapterError, engine, minimax, prom, router
 from tests.fixtures.observe.fakes import HERE, fixture
 
 

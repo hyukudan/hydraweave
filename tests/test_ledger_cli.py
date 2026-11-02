@@ -10,10 +10,10 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.features import ledger
+from hydraweave import cli
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.features import ledger
 from tests.test_ledger_documents import full_record
 
 
@@ -62,7 +62,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(json.loads(out)["kpis"]["total"], 110)
         code, out, _ = self.run_cli("tokens", "export", "--range", "all")
         self.assertIn("\"'=evil\"", out)
-        self.assertEqual(self.run_cli("tokens", "reset")[0], "hyperloom: tokens reset deletes every ledger record; repeat with --yes")
+        self.assertEqual(self.run_cli("tokens", "reset")[0], "hydraweave: tokens reset deletes every ledger record; repeat with --yes")
         code, out, _ = self.run_cli("tokens", "reset", "--yes")
         self.assertEqual(json.loads(out)["records_deleted"], 4)
         audit = [json.loads(line) for line in (self.config.parent / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -106,7 +106,7 @@ class CliTests(unittest.TestCase):
 
     def test_engine_key_never_reaches_output_or_audit(self):
         secret = "f" * 64
-        with mock.patch("hyperloom.secrets.get", return_value=secret):
+        with mock.patch("hydraweave.secrets.get", return_value=secret):
             for argv in (("tokens", "--json"), ("census", "--json"), ("rtx-cache", "--json"), ("token-value", "--json")):
                 code, out, err = self.run_cli(*argv)
                 self.assertNotIn(secret, out + err)

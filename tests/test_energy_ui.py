@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _smoke():
-    spec = importlib.util.spec_from_file_location("hyperloom_ui_smoke_for_energy", ROOT / "tests" / "ui" / "smoke.py")
+    spec = importlib.util.spec_from_file_location("hydraweave_ui_smoke_for_energy", ROOT / "tests" / "ui" / "smoke.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -38,7 +38,7 @@ class EnergyPagesInBrowser(unittest.TestCase):
                 if attempt == 2:
                     raise
         cls.host = urlsplit(cls.server.origin).hostname        # the fixture's own loopback address
-        cls.profile = tempfile.TemporaryDirectory(prefix="hyperloom-browser-", ignore_cleanup_errors=True)
+        cls.profile = tempfile.TemporaryDirectory(prefix="hydraweave-browser-", ignore_cleanup_errors=True)
         port = smoke.free_port()
         command = [smoke.find_chrome(), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
                    "--disable-background-networking", "--disable-component-update", "--disable-sync",
@@ -105,7 +105,7 @@ class EnergyPagesInBrowser(unittest.TestCase):
         self.js("new Promise(resolve => setTimeout(resolve, 2600))")
 
     def api(self, path):
-        status, _, body = self.server.request("GET", "/hyperloom/api/" + path, headers={"Host": f"{self.host}:{self.server.port}"})
+        status, _, body = self.server.request("GET", "/hydraweave/api/" + path, headers={"Host": f"{self.host}:{self.server.port}"})
         self.assertEqual(status, 200)
         return json.loads(body)
 
@@ -131,15 +131,15 @@ class EnergyPagesInBrowser(unittest.TestCase):
         self.js("document.querySelector('[data-page-action=\"energy-reset-cancel\"]').click()")
         self.assertFalse(self.js("!!document.querySelector('[data-page-action=\"energy-reset-confirm\"]')"))
         # Without authoritative state the controls are disabled and say why.
-        self.assertEqual(self.js("window.Hyperloom.state.fresh = false; window.Hyperloom.render(); "
+        self.assertEqual(self.js("window.Hydraweave.state.fresh = false; window.Hydraweave.render(); "
                                  "document.querySelector('[data-page-action=\"energy-price-save\"]').title"),
                          "Waiting for authoritative state")
         # Another portal action holds the shell's mutation state: the page's controls say so.
-        self.assertEqual(self.js("window.Hyperloom.state.fresh = true; window.Hyperloom.state.busy = true; "
-                                 "window.Hyperloom.render(); "
+        self.assertEqual(self.js("window.Hydraweave.state.fresh = true; window.Hydraweave.state.busy = true; "
+                                 "window.Hydraweave.render(); "
                                  "document.querySelector('[data-page-action=\"energy-price-save\"]').title"),
                          "Another action is running")
-        self.js("window.Hyperloom.state.busy = false; window.Hyperloom.render();")
+        self.js("window.Hydraweave.state.busy = false; window.Hydraweave.render();")
         self.assertEqual(self.client.errors, [])
 
     def test_a_slow_poll_started_before_a_save_never_shows_stale_data_after_it(self):
@@ -150,16 +150,16 @@ class EnergyPagesInBrowser(unittest.TestCase):
           // Polls of the energy document issued from now on answer late, the write itself is not delayed.
           window.fetch = (url, options) => String(url).includes('/api/energy?') && !(options && options.method === 'POST')
             ? new Promise(r => setTimeout(r, 1500)).then(() => real(url, options)) : real(url, options);
-          window.Hyperloom.refresh();                       // a poll in flight before the save
+          window.Hydraweave.refresh();                       // a poll in flight before the save
           const input = document.getElementById('energy-price');
           input.value = '0.42'; input.dispatchEvent(new Event('input', {bubbles: true}));
           document.querySelector('[data-page-action="energy-price-save"]').click();
           const started = Date.now();
           const check = () => {
             const button = document.querySelector('[data-page-action="energy-price-save"]');
-            if (button && !button.disabled && !window.Hyperloom.state.busy) {
+            if (button && !button.disabled && !window.Hydraweave.state.busy) {
               window.fetch = real;
-              resolve(window.Hyperloom.state.docs['energy?range=24h'].price);
+              resolve(window.Hydraweave.state.docs['energy?range=24h'].price);
             } else if (Date.now() - started > 15000) { window.fetch = real; resolve('timeout'); }
             else setTimeout(check, 50);
           };
@@ -190,14 +190,14 @@ class EnergyPagesInBrowser(unittest.TestCase):
             ? new Promise(r => setTimeout(r, 2000)).then(() => real(url, options)) : real(url, options);
           location.hash = '#/energy';
           return new Promise(r => setTimeout(() => r({price: document.getElementById('energy-price')?.value ?? null,
-            doc: window.Hyperloom.state.docs['energy?range=24h']?.price ?? null}), 300));
+            doc: window.Hydraweave.state.docs['energy?range=24h']?.price ?? null}), 300));
         })()""")
         self.assertIn(held["price"], (None, "0.47"))
         self.assertIn(held["doc"], (None, {"price_per_kwh": 0.47, "currency": "EUR"}))
         self.js("window.fetch = window.__energyRealFetch;")
-        smoke.eventually(lambda: self.js("!!window.Hyperloom.state.docs['energy?range=24h'] && "
+        smoke.eventually(lambda: self.js("!!window.Hydraweave.state.docs['energy?range=24h'] && "
                                          "document.getElementById('energy-price')?.value === '0.47'"), timeout=20)
-        self.assertEqual(self.js("window.Hyperloom.state.docs['energy?range=24h'].price"),
+        self.assertEqual(self.js("window.Hydraweave.state.docs['energy?range=24h'].price"),
                          {"price_per_kwh": 0.47, "currency": "EUR"})
         self.assertEqual(self.client.errors, [])
 

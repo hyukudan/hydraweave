@@ -471,7 +471,7 @@
   },
   "status": "ok"
  },
- "schema": "hyperloom/node-v1",
+ "schema": "hydraweave/node-v1",
  "verb": "usb4",
  "why": {}
 }

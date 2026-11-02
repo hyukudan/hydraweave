@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hyperloom.web.features import observe, sessioncache
+from hydraweave.web.features import observe, sessioncache
 
 
 def seed(store, now):
@@ -35,7 +35,7 @@ def seed(store, now):
 
 def patches(directory, now):
     # Retain seeded responses; never let the browser fixture contact engine endpoints.
-    from hyperloom.web.api import API
+    from hydraweave.web.api import API
     real_cluster = API.cluster
     def cluster(api):
         value = real_cluster(api)

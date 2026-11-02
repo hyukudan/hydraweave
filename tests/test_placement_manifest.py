@@ -11,7 +11,7 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom.recipes import commands, content_cache, core, measurements, reader
+from hydraweave.recipes import commands, content_cache, core, measurements, reader
 
 from tests.placement_fixtures import files, identity
 from tests.test_recipes_grants import NOW, window
