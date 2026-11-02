@@ -1,4 +1,4 @@
-"""CI workflow hygiene: actions pinned by SHA, private submodule fetched with a scoped read-only secret."""
+"""CI workflow hygiene: actions pinned by SHA, no secrets, the public TensorMeld submodule fetched by one script."""
 from pathlib import Path
 import re
 import unittest
@@ -22,21 +22,13 @@ class WorkflowTests(unittest.TestCase):
     def test_checkout_never_persists_credentials(self):
         self.assertEqual(self.text.count("uses: actions/checkout@"), self.text.count("persist-credentials: false"))
 
-    def test_secret_only_in_the_submodule_fetch_steps(self):
-        steps = re.split(r"\n\s*- ", self.text)
-        with_secret = [step for step in steps if "secrets." in step]
-        self.assertTrue(with_secret)
-        for step in with_secret:
-            self.assertIn("TENSORMELD_TOKEN: ${{ secrets.TENSORMELD_TOKEN }}", step)
-            self.assertIn("run: bash tools/ci-fetch-tensormeld.sh", step)
+    def test_no_secrets_and_submodule_fetched_by_the_script(self):
+        self.assertNotIn("secrets.", self.text)
+        self.assertEqual(self.text.count("run: bash tools/ci-fetch-tensormeld.sh"), 2)
         self.assertNotIn("git submodule update", self.text)
 
-    def test_fetch_fails_clearly_without_the_secret_and_keeps_it_off_argv(self):
+    def test_fetch_takes_only_the_tensormeld_submodule(self):
         script = FETCH.read_text(encoding="utf-8")
-        self.assertIn('if [[ -z "${TENSORMELD_TOKEN:-}" ]]', script)
-        self.assertIn("exit 1", script)
-        self.assertIn("fine-grained", script)
-        self.assertIn("GIT_CONFIG_KEY_0=", script)
         command = [line for line in script.splitlines() if line.startswith("git ")]
         self.assertEqual(command, ["git submodule update --init --depth 1 third_party/tensormeld"])
 
