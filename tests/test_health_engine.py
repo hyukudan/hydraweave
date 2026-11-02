@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import admission
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.features import health
+from hydraweave import admission
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.features import health
 
 
 T0 = 1_800_000_000.0
@@ -48,7 +48,7 @@ class FakeAPI:
         return SimpleNamespace(machines=self.machines, profiles=self.profiles)
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
 
     def audit(self, action, arguments, result):
         self.audits.append((action, arguments, result))
@@ -406,7 +406,7 @@ class RuleTests(Base):
         runtime.mkdir()
         state = runtime / "route-state.json"
         state.write_text(json.dumps({"at": self.clock.now - 45}), encoding="utf-8")
-        from hyperloom import orchestrate, secrets
+        from hydraweave import orchestrate, secrets
         record = {"profile": "qwen-replicas", "recipe": {"route_table": {"state_file": str(state)}}}
         with mock.patch.object(secrets, "runtime_dir", lambda: runtime), \
                 mock.patch.object(orchestrate, "_state_path", lambda profile: runtime / ("up-" + profile + ".json")):
@@ -481,7 +481,7 @@ class RuleTests(Base):
                                     "halo-5/turn": False, "halo-6/turn": None})
 
     def test_node_tool_from_the_operations_records_without_node_calls(self):
-        from hyperloom import remote
+        from hydraweave import remote
         self.assertIsNone(self.verdicts("node-tool-stale"))
         self.store.put("ops", "node_tool", {
             "halo-1": {"checked_at": self.clock.now - 60, "deployed": "0" * 64},

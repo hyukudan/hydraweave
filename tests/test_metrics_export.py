@@ -9,8 +9,8 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, metrics_export
-from hyperloom.adapters import prom
+from hydraweave import cli, metrics_export
+from hydraweave.adapters import prom
 from tests.portable_fixtures import read_fixture
 
 
@@ -48,7 +48,7 @@ class ExportTests(unittest.TestCase):
     def setUp(self):
         # collect() reads saved launch states for build info and engine families: never the machine's real ones.
         import tempfile
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom metrics run ")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave metrics run ")
         self.addCleanup(temporary.cleanup)
         self.run_dir = Path(temporary.name)
         patcher = mock.patch.object(metrics_export.secrets, "runtime_dir", return_value=self.run_dir)
@@ -73,7 +73,7 @@ class ExportTests(unittest.TestCase):
             return fake_fetch(documents)(endpoint, suffix, text)
         reason = "unavailable: engine bound to loopback on its node"
         self.assertEqual(reason, metrics_export.LOOPBACK_UNAVAILABLE)
-        from hyperloom.web import api
+        from hydraweave.web import api
         self.assertEqual(reason, api.LOOPBACK_UNAVAILABLE)  # the same wording as the web view
         # From the saved launch record (family), and from the families argument.
         (self.run_dir / "up-mm.json").write_text(json.dumps({"launch": {"family": "minimax-pair"}}), encoding="utf-8")
@@ -86,12 +86,12 @@ class ExportTests(unittest.TestCase):
                 samples = prom.parse(metrics_export.collect(routers, fetch, launches={}, families=families))
                 self.assertEqual(probed, [])
                 for name in routers:
-                    self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile=name))], 1)
+                    self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile=name))], 1)
                     for source in ("engine_metrics", "engine_status"):
                         for node in ("halo-1", "halo-2"):
                             key = labels(source=source, profile=name, replica=node, machine=node, reason=reason)
-                            self.assertEqual(samples[("hyperloom_source_up", key)], 0)
-                self.assertFalse(any(key[0].startswith("hyperloom_engine_") for key in samples))
+                            self.assertEqual(samples[("hydraweave_source_up", key)], 0)
+                self.assertFalse(any(key[0].startswith("hydraweave_engine_") for key in samples))
         # A LAN-bound family is still probed.
         probed.clear()
         metrics_export.collect({"qwen": ROUTER}, fetch, launches={}, families={"qwen": "qwen-replicas"})
@@ -99,7 +99,7 @@ class ExportTests(unittest.TestCase):
 
     def test_a_key_file_release_of_a_loopback_family_is_probed(self):
         # The launched release decides the bind: a key-file MiniMax release serves the LAN, the family row does not.
-        from hyperloom import engines
+        from hydraweave import engines
         real = engines.load_preset
         keyed = dict(real("minimax-pair"), serve_auth="key-file",
                      argv=real("minimax-pair")["argv"] + ["--api-key-file", "{key_file}"])
@@ -120,18 +120,18 @@ class ExportTests(unittest.TestCase):
         text = metrics_export.collect({"qwen": ROUTER}, fake_fetch(healthy()))
         samples = prom.parse(text)
         one = labels(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_router_replica_assigned_total", one)], 59)
-        self.assertEqual(samples[("hyperloom_router_prefill_placements_total", labels(profile="qwen", placement="cache"))], 9)
-        self.assertEqual(samples[("hyperloom_engine_generated_tokens_total", one)], 30)
-        self.assertEqual(samples[("hyperloom_engine_waiting", one)], 1)
-        self.assertEqual(samples[("hyperloom_engine_context_tokens", one)], 12288)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile="qwen"))], 1)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_status", profile="qwen",
+        self.assertEqual(samples[("hydraweave_router_replica_assigned_total", one)], 59)
+        self.assertEqual(samples[("hydraweave_router_prefill_placements_total", labels(profile="qwen", placement="cache"))], 9)
+        self.assertEqual(samples[("hydraweave_engine_generated_tokens_total", one)], 30)
+        self.assertEqual(samples[("hydraweave_engine_waiting", one)], 1)
+        self.assertEqual(samples[("hydraweave_engine_context_tokens", one)], 12288)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile="qwen"))], 1)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_status", profile="qwen",
                                                                  replica="halo-2", machine="halo-2"))], 1)
-        self.assertIn("# TYPE hyperloom_engine_generated_tokens_total counter", text)
-        self.assertIn("# TYPE hyperloom_engine_waiting gauge", text)
-        self.assertEqual(text.count("# TYPE hyperloom_source_up "), 1)
-        build = [key for key in samples if key[0] == "hyperloom_build_info"]
+        self.assertIn("# TYPE hydraweave_engine_generated_tokens_total counter", text)
+        self.assertIn("# TYPE hydraweave_engine_waiting gauge", text)
+        self.assertEqual(text.count("# TYPE hydraweave_source_up "), 1)
+        build = [key for key in samples if key[0] == "hydraweave_build_info"]
         self.assertEqual(len(build), 1)
         self.assertIn("engine_commit", dict(build[0][1]))
 
@@ -140,13 +140,13 @@ class ExportTests(unittest.TestCase):
         launches = {"w5": {"engine_commit": "9" * 40}}
         samples = prom.parse(metrics_export.collect({"w5": ROUTER, "lockonly": ROUTER, "down": None}, fake_fetch({}),
                                                     launches=launches))
-        build = {dict(key[1])["profile"]: dict(key[1]) for key in samples if key[0] == "hyperloom_build_info"}
+        build = {dict(key[1])["profile"]: dict(key[1]) for key in samples if key[0] == "hydraweave_build_info"}
         self.assertEqual(sorted(build), ["lockonly", "w5"])  # a down profile gets no sample
         self.assertEqual(build["w5"]["engine_commit"], "9" * 40)
         self.assertEqual(build["w5"]["tensormeld_commit"], lock["tensormeld"]["commit"])
         self.assertEqual(build["lockonly"]["engine_commit"], lock["engine"]["commit"])
         samples = prom.parse(metrics_export.collect({"down": None}, fake_fetch({}), launches={}))
-        build = [dict(key[1]) for key in samples if key[0] == "hyperloom_build_info"]
+        build = [dict(key[1]) for key in samples if key[0] == "hydraweave_build_info"]
         self.assertEqual(len(build), 1)
         self.assertNotIn("profile", build[0])
         self.assertEqual(build[0]["engine_commit"], lock["engine"]["commit"])
@@ -168,8 +168,8 @@ class ExportTests(unittest.TestCase):
     def test_deepseek_memory_and_identity(self):
         samples = prom.parse(metrics_export.collect({"ds": ROUTER}, fake_fetch(healthy("deepseek-status.json"))))
         one = dict(profile="ds", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_engine_memory_bytes", labels(kind="trellis_bytes", **one))], 20000)
-        info = [dict(key[1]) for key in samples if key[0] == "hyperloom_engine_info"]
+        self.assertEqual(samples[("hydraweave_engine_memory_bytes", labels(kind="trellis_bytes", **one))], 20000)
+        info = [dict(key[1]) for key in samples if key[0] == "hydraweave_engine_info"]
         self.assertTrue(all(row["trellis_identity"] == "quality-gated" for row in info))
 
     def test_missing_sources_are_not_fabricated(self):
@@ -177,23 +177,23 @@ class ExportTests(unittest.TestCase):
         del documents[("192.0.2.2", "/metrics")]
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER, "down": None}, fake_fetch(documents)))
         two = dict(profile="qwen", replica="halo-2", machine="halo-2")
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_metrics", **two))], 0)
-        self.assertNotIn(("hyperloom_engine_generated_tokens_total", labels(**two)), samples)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile="down"))], 0)
-        self.assertFalse(any(dict(key[1]).get("profile") == "down" and key[0] != "hyperloom_source_up" for key in samples))
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_metrics", **two))], 0)
+        self.assertNotIn(("hydraweave_engine_generated_tokens_total", labels(**two)), samples)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile="down"))], 0)
+        self.assertFalse(any(dict(key[1]).get("profile") == "down" and key[0] != "hydraweave_source_up" for key in samples))
 
     def test_router_down_exports_no_engines(self):
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER}, fake_fetch({})))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile="qwen"))], 0)
-        self.assertFalse(any(key[0].startswith(("hyperloom_engine", "hyperloom_router")) for key in samples))
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile="qwen"))], 0)
+        self.assertFalse(any(key[0].startswith(("hydraweave_engine", "hydraweave_router")) for key in samples))
 
     def test_unsupported_schema_is_source_down(self):
         documents = healthy()
         documents[("192.0.2.1", "/api/status")] = json.dumps({"schema": "other"})
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER}, fake_fetch(documents)))
         one = dict(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_status", **one))], 0)
-        self.assertNotIn(("hyperloom_engine_uptime_seconds", labels(**one)), samples)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_status", **one))], 0)
+        self.assertNotIn(("hydraweave_engine_uptime_seconds", labels(**one)), samples)
 
     def test_bad_upstream_marks_only_that_source_down(self):
         base = fake_fetch(healthy())
@@ -206,22 +206,22 @@ class ExportTests(unittest.TestCase):
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER}, fetch))
         two = dict(profile="qwen", replica="halo-2", machine="halo-2")
         one = dict(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_metrics", **two))], 0)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_status", **two))], 0)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_status", **one))], 1)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_metrics", **two))], 0)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_status", **two))], 0)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_status", **one))], 1)
 
     def test_router_endpoint_without_port_or_address_is_source_down(self):
         # The real fetcher raises KeyError / TypeError for such endpoints; neither escapes the scrape.
         routers = {"noport": {"address": "127.0.0.1"}, "noaddr": {"port": 1}, "badaddr": {"address": 5, "port": 1}}
         samples = prom.parse(metrics_export.collect(routers))
         for name in routers:
-            self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile=name))], 0)
+            self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile=name))], 0)
 
     def test_unexpected_fetch_exception_is_source_down(self):
         def fetch(endpoint, suffix, text=False):
             raise ZeroDivisionError()
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER}, fetch))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="router", profile="qwen"))], 0)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="router", profile="qwen"))], 0)
 
     def test_overall_deadline_reports_unfinished_sources_down(self):
         base = fake_fetch(healthy())
@@ -239,9 +239,9 @@ class ExportTests(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 3)
         two = dict(profile="qwen", replica="halo-2", machine="halo-2")
         one = dict(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_metrics", **two))], 0)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="engine_metrics", **one))], 1)
-        self.assertNotIn(("hyperloom_engine_generated_tokens_total", labels(**two)), samples)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_metrics", **two))], 0)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="engine_metrics", **one))], 1)
+        self.assertNotIn(("hydraweave_engine_generated_tokens_total", labels(**two)), samples)
 
     def test_routers_are_fetched_in_parallel(self):
         def fetch(endpoint, suffix, text=False):
@@ -252,18 +252,18 @@ class ExportTests(unittest.TestCase):
         samples = prom.parse(metrics_export.collect(routers, fetch))
         self.assertLess(time.monotonic() - start, 1.5)
         self.assertEqual(sum(v == 0 for k, v in samples.items()
-                             if k[0] == "hyperloom_source_up" and dict(k[1])["source"] == "router"), 6)
+                             if k[0] == "hydraweave_source_up" and dict(k[1])["source"] == "router"), 6)
 
     def test_slot_units_and_state_are_separate_families(self):
         samples = prom.parse(metrics_export.collect({"ds": ROUTER}, fake_fetch(healthy("deepseek-status.json"))))
         one = dict(profile="ds", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_engine_slots", labels(kind="total", **one))], 2)
-        self.assertEqual(samples[("hyperloom_engine_slot_positions", labels(kind="pool_positions", **one))], 65536)
-        self.assertEqual(samples[("hyperloom_engine_slot_pool_bytes", labels(**one))], 2000)
-        self.assertFalse(any(key[0] == "hyperloom_engine_slots" and dict(key[1])["kind"] in ("pool_bytes", "context_tokens")
+        self.assertEqual(samples[("hydraweave_engine_slots", labels(kind="total", **one))], 2)
+        self.assertEqual(samples[("hydraweave_engine_slot_positions", labels(kind="pool_positions", **one))], 65536)
+        self.assertEqual(samples[("hydraweave_engine_slot_pool_bytes", labels(**one))], 2000)
+        self.assertFalse(any(key[0] == "hydraweave_engine_slots" and dict(key[1])["kind"] in ("pool_bytes", "context_tokens")
                              for key in samples))
-        self.assertEqual(samples[("hyperloom_engine_state", labels(state="ready", **one))], 1)
-        info = [dict(key[1]) for key in samples if key[0] == "hyperloom_engine_info"]
+        self.assertEqual(samples[("hydraweave_engine_state", labels(state="ready", **one))], 1)
+        info = [dict(key[1]) for key in samples if key[0] == "hydraweave_engine_info"]
         self.assertTrue(info and all("state" not in row for row in info))
 
     def test_prefill_services_from_router_view(self):
@@ -275,9 +275,9 @@ class ExportTests(unittest.TestCase):
         documents[("127.0.0.1", "/api/status")] = json.dumps(status)
         samples = prom.parse(metrics_export.collect({"ds": ROUTER}, fake_fetch(documents)))
         svc = labels(profile="ds", service="rtx", machine="workstation")
-        self.assertEqual(samples[("hyperloom_router_prefill_service_up", svc)], 1)
-        self.assertEqual(samples[("hyperloom_router_prefill_service_assigned_total", svc)], 7)
-        self.assertEqual(samples[("hyperloom_router_prefill_service_inflight", svc)], 1)
+        self.assertEqual(samples[("hydraweave_router_prefill_service_up", svc)], 1)
+        self.assertEqual(samples[("hydraweave_router_prefill_service_assigned_total", svc)], 7)
+        self.assertEqual(samples[("hydraweave_router_prefill_service_inflight", svc)], 1)
         # The service itself is not fetched (no /metrics until R13).
         self.assertFalse(any(dict(key[1]).get("replica") == "rtx" for key in samples))
 
@@ -287,20 +287,20 @@ class ExportTests(unittest.TestCase):
         status["replicas"].append(dict(status["replicas"][1], id="halo-1", assigned=999))
         documents[("127.0.0.1", "/api/status")] = json.dumps(status)
         samples = prom.parse(metrics_export.collect({"qwen": ROUTER}, fake_fetch(documents)))
-        self.assertEqual(samples[("hyperloom_router_duplicate_ids", labels(profile="qwen", kind="replica"))], 1)
-        self.assertEqual(samples[("hyperloom_router_duplicate_ids", labels(profile="qwen", kind="prefill_service"))], 0)
+        self.assertEqual(samples[("hydraweave_router_duplicate_ids", labels(profile="qwen", kind="replica"))], 1)
+        self.assertEqual(samples[("hydraweave_router_duplicate_ids", labels(profile="qwen", kind="prefill_service"))], 0)
         one = labels(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_router_replica_assigned_total", one)], 59)
+        self.assertEqual(samples[("hydraweave_router_replica_assigned_total", one)], 59)
         clean = prom.parse(metrics_export.collect({"qwen": ROUTER}, fake_fetch(healthy())))
-        self.assertEqual(clean[("hyperloom_router_duplicate_ids", labels(profile="qwen", kind="replica"))], 0)
+        self.assertEqual(clean[("hydraweave_router_duplicate_ids", labels(profile="qwen", kind="replica"))], 0)
 
     def test_label_escaping(self):
         out = metrics_export.Exposition()
-        out.add("hyperloom_engine_info", "gauge", {"model": 'a"b\\c\nd'}, 1)
-        out.add("hyperloom_engine_info", "gauge", {"model": "nan"}, float("nan"))
+        out.add("hydraweave_engine_info", "gauge", {"model": 'a"b\\c\nd'}, 1)
+        out.add("hydraweave_engine_info", "gauge", {"model": "nan"}, float("nan"))
         text = out.text()
         self.assertIn('model="a\\"b\\\\c\\nd"', text)
-        self.assertEqual(prom.parse(text), {("hyperloom_engine_info", (("model", 'a"b\\c\nd'),)): 1.0})
+        self.assertEqual(prom.parse(text), {("hydraweave_engine_info", (("model", 'a"b\\c\nd'),)): 1.0})
 
 
 class ServerTests(unittest.TestCase):
@@ -308,7 +308,7 @@ class ServerTests(unittest.TestCase):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        self.server = metrics_export.MetricsServer(f"127.0.0.1:{port}", collector=lambda: "hyperloom_up 1\n")
+        self.server = metrics_export.MetricsServer(f"127.0.0.1:{port}", collector=lambda: "hydraweave_up 1\n")
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .05}, daemon=True)
         self.thread.start()
 
@@ -330,7 +330,7 @@ class ServerTests(unittest.TestCase):
         response, body = self.request("GET")
         self.assertEqual(response.status, 200)
         self.assertEqual(response.getheader("Content-Type"), metrics_export.CONTENT_TYPE)
-        self.assertEqual(body, b"hyperloom_up 1\n")
+        self.assertEqual(body, b"hydraweave_up 1\n")
 
     def test_foreign_host_rejected(self):
         self.assertEqual(self.request("GET", host="attacker.example:80")[0].status, 403)
@@ -350,7 +350,7 @@ class ServerTests(unittest.TestCase):
         response, body = self.request("GET")
         self.assertEqual(response.status, 500)
         self.assertIn(b"KeyError", body)
-        self.server.collector = lambda: "hyperloom_up 1\n"
+        self.server.collector = lambda: "hydraweave_up 1\n"
         self.assertEqual(self.request("GET")[0].status, 200)
 
     def test_concurrent_scrapes_are_bounded(self):
@@ -359,7 +359,7 @@ class ServerTests(unittest.TestCase):
         def slow():
             entered.set()
             release.wait(10)
-            return "hyperloom_up 1\n"
+            return "hydraweave_up 1\n"
         self.server.collector = slow
         self.server.scrapes = threading.BoundedSemaphore(1)
         first = {}
@@ -383,11 +383,11 @@ class ServerTests(unittest.TestCase):
 class CliTests(unittest.TestCase):
     def test_dump_prints_exposition(self):
         stream = io.StringIO()
-        with mock.patch.object(metrics_export, "collect", return_value="hyperloom_up 1\n") as collect, \
+        with mock.patch.object(metrics_export, "collect", return_value="hydraweave_up 1\n") as collect, \
                 contextlib.redirect_stdout(stream):
             self.assertEqual(cli.main(["metrics", "dump", "qwen"]), 0)
         collect.assert_called_once_with(profile="qwen", config_path=cli.config_path())   # this configuration's
-        self.assertEqual(stream.getvalue(), "hyperloom_up 1\n")
+        self.assertEqual(stream.getvalue(), "hydraweave_up 1\n")
 
     def test_serve_refuses_lan_listen(self):
         with contextlib.redirect_stderr(io.StringIO()):

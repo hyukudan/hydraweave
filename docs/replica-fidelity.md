@@ -4,16 +4,16 @@ An owned placement service uses the native replica serve spool. The legacy prefi
 HTTP `/v1/prefill` oracle (state SHA256, next token, logits FNV, state size and exact-mode checks). These are
 different engine protocols and different references.
 
-`hyperloom prefill gate PROFILE --prompts DIRECTORY` uses `DIRECTORY/replica-oracle.json` for a running placement
-replica. This is a Hyperloom reference-bundle manifest, not a new replica request format. It pins a reference
-captured independently of the candidate run. It must be supplied locally; Hyperloom never creates expected tokens
+`hydraweave prefill gate PROFILE --prompts DIRECTORY` uses `DIRECTORY/replica-oracle.json` for a running placement
+replica. This is a Hydraweave reference-bundle manifest, not a new replica request format. It pins a reference
+captured independently of the candidate run. It must be supplied locally; Hydraweave never creates expected tokens
 from the candidate or treats a successful ping as fidelity evidence. The adapter preset must publish
 `fidelity.oracle_sha256`, the SHA256 of the bundle manifest's exact bytes. An arbitrary self-pinned bundle cannot
 replace that release-owned oracle; a missing published oracle pin refuses before a request is queued.
 
 ```json
 {
-  "schema": "hyperloom/replica-oracle-v1",
+  "schema": "hydraweave/replica-oracle-v1",
   "engine_sha": "<published 40-digit release SHA>",
   "chat_prompt": 96,
   "chat_steps": 128,
@@ -39,7 +39,7 @@ numerical configuration; file hashes alone do not establish that provenance.
 The gate checks ready PID/load identity and `--ping`, then submits one native request with `--import-state`,
 `--seqs-file`, `--chats`, `--chat-prompt`, `--chat-steps`, `--phases`, `--qual` and a fresh `--json` output path.
 The phases are `chats0` for plain workers and `chats0,schats0` when the launch includes `--draft`. In the latter
-case the replica also applies its own canonical plain/speculative token comparison. Hyperloom requires every
+case the replica also applies its own canonical plain/speculative token comparison. Hydraweave requires every
 plain arm and every `spec:schats0#0-INDEX` arm to match the pinned tokens and canonical end state in full. Missing, repeated, short,
 foreign or mismatching arms fail. Request rejection, nonzero native failures, fatal replies, a changed load,
 missing output, native failed-gate events or a failed final ping fail too. It does not retry an ambiguous request.
@@ -60,4 +60,4 @@ the release SHA that the release owner publishes. The adapter must also publish 
 `fidelity.oracle_sha256`. No new native HTTP endpoint or expected-token flag is needed.
 Placement flags/components/receipts support and native placement qualification remain separate release blockers.
 Until those inputs exist, the gate refuses a missing or invalid oracle; the CPU fake-protocol tests qualify only
-Hyperloom's integration and failure handling.
+Hydraweave's integration and failure handling.

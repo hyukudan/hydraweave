@@ -15,9 +15,9 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import cli, device_policy, orchestrate, rtx
-from hyperloom.recipes import apply, commands, core, facts, probe, reader, service, launch, session
-from hyperloom.web import api, recipes as recipe_web
+from hydraweave import cli, device_policy, orchestrate, rtx
+from hydraweave.recipes import apply, commands, core, facts, probe, reader, service, launch, session
+from hydraweave.web import api, recipes as recipe_web
 
 from tests import test_web_summaries, test_recipes
 from tests.recipe_fixtures import isolated
@@ -82,7 +82,7 @@ def test_legacy_facts_do_not_collect_host_topology(monkeypatch):
     monkeypatch.setattr(facts, "node_runtime", lambda *a: {})
     ctx = SimpleNamespace(pc="local", model="test", nodes=[], service=None)
     cluster = SimpleNamespace(assets={})
-    with mock.patch("hyperloom.recipes.topology.host", side_effect=AssertionError("legacy topology walk")):
+    with mock.patch("hydraweave.recipes.topology.host", side_effect=AssertionError("legacy topology walk")):
         result = facts.gather(cluster, ctx, call=mock.Mock(), gpus=lambda: [],
                               memory=lambda: {"total_gib": 128, "free_gib": 90, "free_commit_gib": 100})
     assert result == baseline(facts, "gather")(cluster, ctx, call=mock.Mock(), gpus=lambda: [],
@@ -142,7 +142,7 @@ def test_legacy_context_error_precedes_reading_recipe_or_layers(tmp_path, monkey
 @pytest.mark.parametrize("invalid", ["missing", "malformed"])
 @pytest.mark.parametrize("backend_kind", ["stub", "core"])
 def test_legacy_unreadable_input_matches_main_baseline(tmp_path, operation, input_kind, invalid, backend_kind):
-    from hyperloom.recipes import core
+    from hydraweave.recipes import core
     recipes = tmp_path / "recipes"
     recipes.mkdir()
     path = recipes / "legacy.toml"
@@ -195,7 +195,7 @@ def test_configured_exclusion_reason_matches_legacy_default():
 
 
 def test_engine_dependent_ingestion_has_no_dead_launch_wrappers():
-    from hyperloom.recipes import launch
+    from hydraweave.recipes import launch
     assert not hasattr(launch, "ingest_context")
     assert not hasattr(commands, "manifest_store")
     document = (Path(__file__).resolve().parents[1] / "docs/placement-render.md").read_text(encoding="utf-8")
@@ -251,7 +251,7 @@ def test_portal_foreign_target_deploy_matches_hardened_base(recorded):
                     ["recipe", "deploy", digest, "--config", str(env.config)], orchestrate.load_cluster)
             assert old.code == 4
             expected = (recipe_web.STATUS[old.code],
-                        {"error": old.stderr.decode("utf-8").removeprefix("hyperloom: ")})
+                        {"error": old.stderr.decode("utf-8").removeprefix("hydraweave: ")})
             assert expected[0] == 409
             if recorded:
                 assert expected[1] == {"error": "qwen-replicas has a saved launch state of another configuration: "

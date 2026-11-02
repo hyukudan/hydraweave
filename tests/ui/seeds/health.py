@@ -67,12 +67,12 @@ def seed(store, now):
 
 def patches(directory, now):
     """The channel's URL in the fixture's secret directory, and a sender that never opens a connection."""
-    from hyperloom.web.features import alerts
+    from hydraweave.web.features import alerts
     path = directory / "secrets" / "alert-urls" / "ch-0a1b2c3d.0123456789abcdef"
     path.parent.mkdir(parents=True, exist_ok=True)
     data = f"https://{HOST}/fixture-topic".encode("ascii")
     if os.name == "nt":
-        from hyperloom import secrets
+        from hydraweave import secrets
         data = secrets._dpapi(data)
     path.write_bytes(data)
 

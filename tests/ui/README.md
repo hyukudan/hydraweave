@@ -44,7 +44,7 @@ files. It replaces config loading, orchestration mutations/status/logs, remote
 doctor/GPU calls, secret rotation, and engine telemetry at their source
 boundaries. Adapter JSON comes from `tests/fixtures/adapters/`, with request
 timestamps rebased to fixture startup so the ten-minute quantile window has
-samples. Node replies use the `hyperloom/node-v1` contract and a synthetic
+samples. Node replies use the `hydraweave/node-v1` contract and a synthetic
 accelerator. A temporary all-zero public-key blob supplies the pinned-machine
 state without a private key or SSH peer. These are synthetic/replayed test sources, not
 observations of machines. The real portal API still creates all seven documents
@@ -166,7 +166,7 @@ by the link list on narrow screens.
 The default run ends with an automated walkthrough of `#/recipes` (desktop): open the built-in Qwen recipe, type an
 out-of-range value (the field shows its inline error and is described by it), make the recipe invalid (the reader's
 refusal is shown), reset and change a value (no error; the explain answer and its CLI line appear), preview the
-placement (the answer and its `hyperloom recipe plan` line appear; Deploy is then either enabled or disabled with the
+placement (the answer and its `hydraweave recipe plan` line appear; Deploy is then either enabled or disabled with the
 preview's refusal as its reason, and an enabled Deploy is confirmed and its job shown), and save a copy into the user
 directory (it appears in the list). In the fixture, recipe requests run the CLI's parser and `commands.run` in the
 fixture process (subprocesses are refused there) on the stub reader; the API tests (`tests/test_web_recipes.py`)

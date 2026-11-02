@@ -13,18 +13,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import cli, config
-from hyperloom.web.api import API, APIError, SCREENS, redact
-from hyperloom.web.server import create_server
+from hydraweave import cli, config
+from hydraweave.web.api import API, APIError, SCREENS, redact
+from hydraweave.web.server import create_server
 
 
 def fixture():
     machine = config.Machine("halo-1", "linux", "ssh", "192.0.2.10", "halo-1", 22,
-                             "/opt/hyperloom/halo-1", True, [{"id": "gpu"}])
+                             "/opt/hydraweave/halo-1", True, [{"id": "gpu"}])
     profiles = {"qwen-replicas": {"nodes": ["halo-1"]}}
     return config.Cluster({machine.id: machine}, {"halo-1": {"model": {
         "path": "/opt/assets/model.gguf", "bytes": 64, "sha256": "a" * 64}}},
-        profiles, {}, {}, {"schema": "hyperloom/cluster-v1", "profiles": profiles})
+        profiles, {}, {}, {"schema": "hydraweave/cluster-v1", "profiles": profiles})
 
 
 def wait_job(api, job):
@@ -39,7 +39,7 @@ def wait_job(api, job):
 
 class APITests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-web-api-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-web-api-")
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         self.cluster = fixture()
@@ -66,11 +66,11 @@ class APITests(unittest.TestCase):
                       "disk": {"status": "ok", "value": {"free_bytes": 1234}}} if verb == "doctor" else {
                           "ram": {"status": "ok", "value": {"total_bytes": 4096}},
                           "amd": {"status": "ok", "value": []}}
-            return {"schema": "hyperloom/node-v1", "verb": verb, "checks": checks}
+            return {"schema": "hydraweave/node-v1", "verb": verb, "checks": checks}
         self.remote.Remote.return_value.call.side_effect = node
         # The inventory's doctor and gpu reads are separate pollers that the budget spaces 5 s apart; these tests
         # read both at once (the pacing itself: test_concurrent_tabs... and tests/test_pollbudget.py).
-        spacing = patch("hyperloom.pollbudget.NODE_SPACING_S", 0.0)
+        spacing = patch("hydraweave.pollbudget.NODE_SPACING_S", 0.0)
         spacing.start()
         self.addCleanup(spacing.stop)
         self.api = API(self.directory / "cluster.json", orchestrator=self.orch,
@@ -81,7 +81,7 @@ class APITests(unittest.TestCase):
         for screen in SCREENS:
             with self.subTest(screen=screen):
                 document = self.api.read(screen)
-                self.assertEqual(document["schema"], "hyperloom/ui-" + screen + "-v1")
+                self.assertEqual(document["schema"], "hydraweave/ui-" + screen + "-v1")
                 self.assertEqual(document["server_time"], self.now)
                 self.assertEqual(document["poll_interval_s"], 2)
                 self.assertIsInstance(document["why"], dict)
@@ -108,7 +108,7 @@ class APITests(unittest.TestCase):
             self.api.read("devices")
         self.assertEqual(self.calls, ["doctor", "gpu"])
         self.assertEqual(self.orch.status.call_count, 1)
-        with patch("hyperloom.pollbudget.NODE_SPACING_S", 5.0):           # the real spacing: never a burst
+        with patch("hydraweave.pollbudget.NODE_SPACING_S", 5.0):           # the real spacing: never a burst
             self.now += 2
             self.api.read("devices")
             self.assertEqual(self.calls, ["doctor", "gpu", "doctor"])
@@ -121,7 +121,7 @@ class APITests(unittest.TestCase):
             self.assertEqual(self.calls, ["doctor", "gpu", "doctor", "gpu"])
 
     def test_status_and_node_logs_skip_a_node_a_gpu_turn_holds(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         self.orch.status.return_value = {"qwen-replicas": {"nodes": {"halo-1": {"leases": []}}}}
         pollbudget.for_api(self.api).note_turn("halo-1", "someone-bench", now=self.now)
         document = self.api.read("logs")
@@ -141,7 +141,7 @@ class APITests(unittest.TestCase):
     def test_every_core_node_session_is_paced_by_the_budget(self):
         """Inventory, launch status and node logs together, snapshots every 2 s for five minutes (and a job finishing
         in between): every ssh session to the node is a budget grant, at least 5 s apart, at most 12 a minute."""
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         sessions = []
 
         def status(config_path=None, skip=None):
@@ -169,7 +169,7 @@ class APITests(unittest.TestCase):
         self.assertEqual({kind for kind, _ in sessions}, {"status", "logs", "inventory"})
 
     def test_a_router_on_a_held_node_is_neither_read_nor_its_log_fetched(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         self.orch.status.side_effect = lambda config_path=None, skip=None: {"qwen-replicas": {
             "nodes": {}, "router": {"error": skip("halo-1", "router")}, "router_machine": "halo-1"}}
         pollbudget.for_api(self.api).note_turn("halo-1", "someone-bench", now=self.now)
@@ -181,7 +181,7 @@ class APITests(unittest.TestCase):
         """The Logs page asks for one process's log every 2 s: a node's log (and a router hosted on a node) is read
         through the budget: nothing while a turn holds the node, then at most once per 30 s (the last answer
         between reads)."""
-        from hyperloom import orchestrate, pollbudget
+        from hydraweave import orchestrate, pollbudget
         fetched = []
         self.orch.logs.side_effect = lambda profile, process, tail, config_path=None: (
             fetched.append((process, self.now)) or {"stdout": f"line {len(fetched)}", "stderr": ""})
@@ -211,7 +211,7 @@ class APITests(unittest.TestCase):
     def test_a_status_read_the_spacing_refused_is_tried_again(self):
         """Another poller (the turn check) takes the node just before each status read: the read is retried at the
         next snapshot instead of waiting a cycle, so the status keeps following the node."""
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         budget = pollbudget.for_api(self.api)
         served = {"value": 0}
         reads = []
@@ -235,7 +235,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(status["generation"], served["value"])
 
     def test_the_inventory_pauses_while_a_gpu_turn_holds_the_node(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         self.api.read("devices")
         self.assertEqual(self.calls, ["doctor", "gpu"])
         pollbudget.for_api(self.api).note_turn("halo-1", "someone-bench", now=self.now + 30)
@@ -246,7 +246,7 @@ class APITests(unittest.TestCase):
         self.assertIsNotNone(row["gpu"])                                  # the last answer stays shown
 
     def test_a_machine_first_seen_in_a_gpu_turn_is_online_not_offline(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         pollbudget.for_api(self.api).note_turn("halo-1", "someone-bench", now=self.now)
         row = self.api.read("devices")["machines"][0]
         self.assertEqual(self.calls, [])                                  # no node read during the turn
@@ -294,7 +294,7 @@ class APITests(unittest.TestCase):
                       "usb4": {"module": {"status": "ok", "value": True}}} if verb == "doctor" else {
                 "amd": {"status": "ok", "value": [{"id": "card0", "vram_total_bytes": {"status": "ok", "value": 100},
                     "vram_used_bytes": {"status": "ok", "value": 40}, "busy_percent": {"status": "ok", "value": 75}}]}}
-            return {"schema": "hyperloom/node-v1", "checks": checks}
+            return {"schema": "hydraweave/node-v1", "checks": checks}
         self.remote.Remote.return_value.call.side_effect = node
         self.orch.status.return_value = {"qwen-replicas": {"nodes": {"halo-1": {"leases": [
             {"lease": "fixture", "deadline": 1100., "state": "ready", "processes": [
@@ -320,7 +320,7 @@ class APITests(unittest.TestCase):
 
     def test_local_doctor_on_first_run_does_not_require_configuration(self):
         self.orch.load_cluster.side_effect = FileNotFoundError
-        with patch.object(self.api, "_node", return_value={"schema": "hyperloom/node-v1"}) as node:
+        with patch.object(self.api, "_node", return_value={"schema": "hydraweave/node-v1"}) as node:
             self.assertEqual(wait_job(self.api, self.api.mutate("doctor", {}))["state"], "succeeded")
             self.assertEqual(node.call_args.args[0].access, "local")
             self.orch.load_cluster.assert_not_called()
@@ -342,7 +342,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(entries[-1]["result"]["state"], "succeeded")
 
     def test_up_runs_on_the_portals_configuration_and_lists_only_its_launches(self):
-        from hyperloom.recipes import service
+        from hydraweave.recipes import service
         seen = []
         self.orch.up.side_effect = lambda *a, **kw: seen.append(service.configured_file()) or {"state": "running"}
         self.assertEqual(wait_job(self.api, self.api.mutate("up", {"profile": "qwen-replicas"}))["state"], "succeeded")
@@ -353,7 +353,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(set(self.orch.status.call_args.kwargs), {"config_path", "skip"})
 
     def test_profiles_show_only_this_configurations_launch_of_a_shared_name(self):
-        from hyperloom import orchestrate
+        from hydraweave import orchestrate
         owned = {"profile": "qwen-replicas", "router": {"machine": "halo-1"}, "release_id": "r" * 12,
                  "process_specs": [{"machine_id": "halo-1", "role": "replica", "argv": ["/opt/foreign-engine"],
                                     "env": {"FOREIGN_SETTING": "1"}}],
@@ -378,7 +378,7 @@ class APITests(unittest.TestCase):
     def test_core_node_calls_never_wait_behind_a_collector(self):
         """A collector's hung ssh call holds the machine's node gate: the core's doctor and gpu reads still answer
         at once (no TimeoutError after the gate's wait), while a feature call keeps waiting for the gate."""
-        from hyperloom import nodegate
+        from hydraweave import nodegate
         held, release = threading.Event(), threading.Event()
         self.addCleanup(release.set)
 
@@ -403,7 +403,7 @@ class APITests(unittest.TestCase):
         thread.join(5)
 
     def test_a_launch_without_a_configuration_record_can_be_stopped_here(self):
-        from hyperloom import orchestrate
+        from hydraweave import orchestrate
         legacy = {"profile": "qwen-replicas", "router": {"machine": "halo-1"}, "machines": {}}
         self.orch._read.side_effect = lambda path: dict(legacy)
         self.assertEqual(orchestrate.ownership(legacy, self.api.config_path), "unknown")
@@ -419,7 +419,7 @@ class APITests(unittest.TestCase):
                 self.assertEqual(wait_job(self.api, self.api.mutate(action, arguments))["state"], "succeeded")
         self.orch.install.assert_called_once_with(self.cluster, "halo-1", ["strix-hip-decode-token"], profile="qwen-replicas")
         self.orch.down.assert_called_once_with("qwen-replicas", force=True)
-        with patch("hyperloom.web.api.secrets.rotate", return_value="do-not-expose") as rotate:
+        with patch("hydraweave.web.api.secrets.rotate", return_value="do-not-expose") as rotate:
             job = wait_job(self.api, self.api.mutate("keys/rotate", {"name": "engine"}))
             self.assertEqual(job["state"], "succeeded")
             rotate.assert_called_once_with("engine")
@@ -616,7 +616,7 @@ class APITests(unittest.TestCase):
                 return f"strix_generated_tokens_total {count[0]}\nstrix_queue_waiting 2\nstrix_queue_running 1\n"
             return {"schema": "strix-serve-status-v1", "requests": [
                 {"id": "request", "time": 1000, "queue_ms": 10., "prefill_ms": 20., "route": "fake"}]}
-        with patch("hyperloom.web.api._http", side_effect=fetch):
+        with patch("hydraweave.web.api._http", side_effect=fetch):
             first = self.api.read("stats")
             self.assertIsNone(first["engines"][0]["throughput"]["value"])
             self.assertEqual(first["engines"][0]["ttft_p50"]["value"], 30)
@@ -641,7 +641,7 @@ class APITests(unittest.TestCase):
         self.assertEqual({name: (row["preset"], row["family"]) for name, row in rows.items()},
                          {"qwen-replicas": ("qwen-replicas", "qwen-replicas"),
                           "w5": ("qwen-replicas-w5", "qwen-replicas"), "mm": ("minimax-pair", "minimax-pair")})
-        script = (Path(__file__).resolve().parents[1] / "hyperloom" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        script = (Path(__file__).resolve().parents[1] / "hydraweave" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         # The UI gates on the family the API reports, never on a preset or profile name.
         self.assertIn('p.family !== "qwen-replicas"', script)
         self.assertIn('p.family === "qwen-replicas"', script)
@@ -660,7 +660,7 @@ class APITests(unittest.TestCase):
         def fetch(endpoint, suffix, text=False):
             fetched.append(suffix)
             raise OSError("connection refused")
-        with patch("hyperloom.web.api._http", side_effect=fetch):
+        with patch("hydraweave.web.api._http", side_effect=fetch):
             stats = self.api.read("stats")
         rows = {row["profile"]: row for row in stats["engines"]}
         for name in ("mm", "mm-launch"):
@@ -673,8 +673,8 @@ class APITests(unittest.TestCase):
 
     def test_a_key_file_release_binds_the_lan(self):
         # The launched release decides the bind, not the family row (a key-file MiniMax release serves the LAN).
-        from hyperloom import engines
-        from hyperloom.web.api import _binds_loopback
+        from hydraweave import engines
+        from hydraweave.web.api import _binds_loopback
         real = engines.load_preset
         keyed = dict(real("minimax-pair"), serve_auth="key-file",
                      argv=real("minimax-pair")["argv"] + ["--api-key-file", "{key_file}"])
@@ -731,7 +731,7 @@ class APITests(unittest.TestCase):
 
 class TransportTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-web-http-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-web-http-")
         self.addCleanup(temporary.cleanup)
         directory = Path(temporary.name)
         (directory / "index.html").write_text('<html><head></head><body></body></html>', encoding="utf-8", newline="\n")
@@ -742,9 +742,9 @@ class TransportTests(unittest.TestCase):
         thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
         thread.start()
         self.addCleanup(lambda: (self.server.shutdown(), self.server.server_close(), thread.join(2)))
-        self.headers = {"Origin": self.server.origin, "Content-Type": "application/json", "X-Hyperloom-CSRF": self.server.csrf_token}
+        self.headers = {"Origin": self.server.origin, "Content-Type": "application/json", "X-Hydraweave-CSRF": self.server.csrf_token}
 
-    def request(self, method, path="/hyperloom/api/up", body=b'{}', headers=None):
+    def request(self, method, path="/hydraweave/api/up", body=b'{}', headers=None):
         connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
         try:
             connection.request(method, path, body=body, headers=self.headers if headers is None else headers)
@@ -758,7 +758,7 @@ class TransportTests(unittest.TestCase):
         status, headers, data = self.request("GET", "/", body=None)
         self.assertEqual(status, 200)
         self.assertIn(self.server.csrf_token.encode(), data)
-        self.assertIn('name="hyperloom-csrf"', data.decode())
+        self.assertIn('name="hydraweave-csrf"', data.decode())
         self.assertFalse(any(name.lower().startswith("access-control-") for name in headers))
         for path in ("/../api.py", "/%2e%2e/api.py", "/server.py", "/static/", "/index.html/.."):
             self.assertEqual(self.request("GET", path, body=None)[0], 404)
@@ -766,8 +766,8 @@ class TransportTests(unittest.TestCase):
     def test_security_negatives_never_reach_backend(self):
         for headers, expected in (({**self.headers, "Origin": "http://192.0.2.10"}, 403),
                                   ({**self.headers, "Host": "192.0.2.10"}, 403),
-                                  ({**self.headers, "X-Hyperloom-CSRF": "wrong"}, 403),
-                                  ({key: value for key, value in self.headers.items() if key != "X-Hyperloom-CSRF"}, 403),
+                                  ({**self.headers, "X-Hydraweave-CSRF": "wrong"}, 403),
+                                  ({key: value for key, value in self.headers.items() if key != "X-Hydraweave-CSRF"}, 403),
                                   ({**self.headers, "Content-Type": "text/plain"}, 415)):
             with self.subTest(headers=headers):
                 self.assertEqual(self.request("POST", headers=headers)[0], expected)
@@ -779,14 +779,14 @@ class TransportTests(unittest.TestCase):
 
     def test_every_endpoint_dispatches_and_mutation_returns_job(self):
         for screen in SCREENS:
-            self.assertEqual(self.request("GET", "/hyperloom/api/" + screen, body=None)[0], 200)
+            self.assertEqual(self.request("GET", "/hydraweave/api/" + screen, body=None)[0], 200)
             self.api.read.assert_called_with(screen, {})
         for action in ("up", "down", "install", "doctor", "hosts/pin", "keys/rotate", "cancel"):
-            self.assertEqual(self.request("POST", "/hyperloom/api/" + action)[0], 202)
+            self.assertEqual(self.request("POST", "/hydraweave/api/" + action)[0], 202)
             self.api.mutate.assert_called_with(action, {})
 
     def test_cli_ui_only_calls_server(self):
-        with patch("hyperloom.web.server.serve") as serve, patch("sys.stdout", new_callable=io.StringIO):
+        with patch("hydraweave.web.server.serve") as serve, patch("sys.stdout", new_callable=io.StringIO):
             self.assertEqual(cli.main(["ui", "--port", "18701", "--no-browser"]), 0)
             serve.assert_called_once_with(18701, no_browser=True)
 
@@ -797,11 +797,11 @@ if __name__ == "__main__":
 
 class DetachedCommandLineTests(unittest.TestCase):
     def test_up_and_down_argv(self):
-        from hyperloom.web.api import API
+        from hydraweave.web.api import API
         api = API(config_path="C:/cfg/cluster.json", orchestrator=object(), remote_module=object(),
                   audit_path=tempfile.mkdtemp() + "/audit.jsonl")
         up = api._cli_argv("up", {"profile": "qwen-replicas", "node": ["halo-1"], "router": "halo-1", "deadline": 600})
-        self.assertEqual(up[1:5], ["-m", "hyperloom", "up", "qwen-replicas"])
+        self.assertEqual(up[1:5], ["-m", "hydraweave", "up", "qwen-replicas"])
         self.assertIn("--node", up)
         self.assertEqual(up[up.index("--router") + 1], "halo-1")
         self.assertEqual(up[up.index("--deadline") + 1], "600")

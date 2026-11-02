@@ -9,15 +9,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hyperloom import downloads
-from hyperloom.config import parse
+from hydraweave import downloads
+from hydraweave.config import parse
 from tests.test_config import example
 
 
 NODE = Path(__file__).resolve().parents[1] / "node"
 FAKE_CURL = Path(__file__).resolve().parent / "fixtures" / "node_download" / "fake_curl.py"
 sys.path.insert(0, str(NODE))
-spec = importlib.util.spec_from_file_location("node_download_under_test", NODE / "hyperloom_download.py")
+spec = importlib.util.spec_from_file_location("node_download_under_test", NODE / "hydraweave_download.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 sys.path.remove(str(NODE))
@@ -27,7 +27,7 @@ BODY = b"payload"
 
 class NodeDownloadCase(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="hyperloom-download-")
+        self.temp = tempfile.TemporaryDirectory(prefix="hydraweave-download-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
         self.root = self.base / "install root"
@@ -61,7 +61,7 @@ class NodePlanTests(NodeDownloadCase):
         row = first["files"][0]
         url = "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/" + "a" * 40 + "/UD/part-1.gguf"
         self.assertEqual(row["argv"][:3], ["nice", "-n", "19"])
-        self.assertEqual(row["argv"][-3:], ["--output", str(self.assets / ".part-1.gguf.hyperloom-part"), url])
+        self.assertEqual(row["argv"][-3:], ["--output", str(self.assets / ".part-1.gguf.hydraweave-part"), url])
         self.assertIn("--proto", row["argv"])
         self.assertTrue(first["disk"][0]["ok"])
         other = node.run("download-plan", self.payload(self.item(sha256="b" * 64)))
@@ -88,17 +88,17 @@ class NodePlanTests(NodeDownloadCase):
         self.assertIn("already exists", reply["error"])
         self.assertEqual((self.assets / "part-1.gguf").read_bytes(), b"existing")
 
-    def test_only_a_marked_hyperloom_asset_directory(self):
+    def test_only_a_marked_hydraweave_asset_directory(self):
         # A lab model directory (no marker) is never written into, even outside lab_dir.
         lab_models = self.base / "lab models"
         lab_models.mkdir()
         reply = node.run("download-plan", self.payload(self.item(directory=str(lab_models),
                                                                  destination=str(lab_models / "part-1.gguf"))))
-        self.assertIn("not dedicated to hyperloom downloads", reply["error"])
+        self.assertIn("not dedicated to hydraweave downloads", reply["error"])
         (lab_models / node.ASSET_MARKER).mkdir()
         reply = node.run("download-plan", self.payload(self.item(directory=str(lab_models),
                                                                  destination=str(lab_models / "part-1.gguf"))))
-        self.assertIn("not dedicated to hyperloom downloads", reply["error"])
+        self.assertIn("not dedicated to hydraweave downloads", reply["error"])
 
     def test_active_lease_refuses_download(self):
         code = node.run("download-plan", self.payload())["confirm"]
@@ -162,7 +162,7 @@ class NodeJobTests(NodeDownloadCase):
         code, state = self.job()
         self.assertEqual((code, state["state"]), (0, "succeeded"))
         self.assertEqual((self.assets / "part-1.gguf").read_bytes(), BODY)
-        self.assertFalse((self.assets / ".part-1.gguf.hyperloom-part").exists())
+        self.assertFalse((self.assets / ".part-1.gguf.hydraweave-part").exists())
 
     def test_verify_failure_leaves_no_final_file(self):
         code, state = self.job(body=b"tampered")
@@ -174,7 +174,7 @@ class NodeJobTests(NodeDownloadCase):
         code, state = self.job(body=b"pay", FAKE_EXIT="22")
         self.assertIn("exited 22", state["error"])
         self.assertFalse((self.assets / "part-1.gguf").exists())
-        self.assertEqual((self.assets / ".part-1.gguf.hyperloom-part").read_bytes(), b"pay")
+        self.assertEqual((self.assets / ".part-1.gguf.hydraweave-part").read_bytes(), b"pay")
 
     def test_hash_uses_the_direct_hasher_and_stops_for_a_turn(self):
         calls = []
@@ -187,14 +187,14 @@ class NodeJobTests(NodeDownloadCase):
 
         with patch.object(install, "hash_file", side_effect=hasher):
             code, state = self.job()
-        self.assertEqual(calls, [self.assets / ".part-1.gguf.hyperloom-part"])
+        self.assertEqual(calls, [self.assets / ".part-1.gguf.hydraweave-part"])
         self.assertIn("GPU turn is held", state["error"])
         self.assertFalse((self.assets / "part-1.gguf").exists())
-        self.assertEqual((self.assets / ".part-1.gguf.hyperloom-part").read_bytes(), BODY)
+        self.assertEqual((self.assets / ".part-1.gguf.hydraweave-part").read_bytes(), BODY)
 
     @unittest.skipUnless(os.name == "posix", "flock")
     def test_partial_file_has_one_writer(self):
-        part = self.assets / ".part-1.gguf.hyperloom-part"
+        part = self.assets / ".part-1.gguf.hydraweave-part"
         held = node.lock_part(part)
         try:
             code, state = self.job()

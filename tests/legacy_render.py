@@ -21,19 +21,19 @@ CAPS = (None, 90, 8)
 def capture(root):
     # The caller starts a fresh interpreter: imports must come from the requested checkout.
     sys.path.insert(0, str(root))
-    from hyperloom import config, engines, orchestrate, render, rtx
-    from hyperloom.placement import ds41
+    from hydraweave import config, engines, orchestrate, render, rtx
+    from hydraweave.placement import ds41
 
     fixtures = root / "tests/fixtures"
     obj = json.loads((root / "examples/cluster.example.json").read_text(encoding="utf-8"))
     for mid in ("halo-1", "halo-2"):
         obj["assets"][mid]["calibration_tokens"]["control_path"] = str(fixtures / "render/calibration.tokens")
         obj["assets"][mid]["mm_model"] = {"path": "/models/minimax", "bytes": 0, "sha256": "0" * 64}
-    keys = {mid: "/opt/hyperloom/secrets/engine.key" for mid in ("halo-1", "halo-2")}
+    keys = {mid: "/opt/hydraweave/secrets/engine.key" for mid in ("halo-1", "halo-2")}
     presets = {}
-    for path in sorted((root / "hyperloom/presets").glob("*.json")):
+    for path in sorted((root / "hydraweave/presets").glob("*.json")):
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if raw.get("schema") == "hyperloom/prefill-service-v1":
+        if raw.get("schema") == "hydraweave/prefill-service-v1":
             continue
         if "argv" not in raw:
             continue
@@ -55,7 +55,7 @@ def capture(root):
     obj["pc"]["cuda"] = {"pro_uuid": uuid, "reservation": {
         "owner": "operator", "approval": "synthetic PC-BIG", "expires_at": "2033-05-18T03:48:20Z",
         "vram_cap_gib": 90, "host_gib": 72, "free_commit_floor_gib": 4}}
-    obj["assets"]["workstation"] = {"ds41_model": {"path": "C:/hyperloom/assets/ds41.gguf",
+    obj["assets"]["workstation"] = {"ds41_model": {"path": "C:/hydraweave/assets/ds41.gguf",
                                                    "bytes": 0, "sha256": "0" * 64}}
     obj["profiles"]["ds41-rtx"] = dict(obj["profiles"]["ds41-pair-long"],
         prefill_service={"preset": "rtx-prefill-ds41", "machine": "workstation", "device": "rtx-pro"})

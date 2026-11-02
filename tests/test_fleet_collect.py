@@ -12,10 +12,10 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
 
-from hyperloom import procs
-from hyperloom.cliext import telemetry as cli_telemetry
-from hyperloom.telemetry.store import BASELINES
-from hyperloom.web.features import machines
+from hydraweave import procs
+from hydraweave.cliext import telemetry as cli_telemetry
+from hydraweave.telemetry.store import BASELINES
+from hydraweave.web.features import machines
 
 from tests.test_fleet_support import FakeAPI, bump, host, lab, machine, nvidia_csv, pair_records, replica_records
 
@@ -121,7 +121,7 @@ class CollectorTests(unittest.TestCase):
         entry = self.store.get(machines.HOSTS, "halo-1")
         self.assertEqual((entry["ok"], entry["failures"]), (False, 1))
         self.assertIn("connection refused", entry["error"])
-        self.api.answers["halo-1"] = {"schema": "hyperloom/node-v1", "verb": "host", "error": "not implemented in this node tool"}
+        self.api.answers["halo-1"] = {"schema": "hydraweave/node-v1", "verb": "host", "error": "not implemented in this node tool"}
         self.round(1_800_000_005.0)
         self.assertIn("not implemented", self.store.get(machines.HOSTS, "halo-1")["error"])
 
@@ -359,7 +359,7 @@ class CLITests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def run_cli(self, *argv):
-        from hyperloom import cli
+        from hydraweave import cli
         out = io.StringIO()
         with redirect_stdout(out):
             code = cli.main(["telemetry", *argv])
@@ -378,7 +378,7 @@ class CLITests(unittest.TestCase):
 
     def test_record_status_query_and_thresholds(self):
         with mock.patch.object(cli_telemetry, "_existing", lambda api: api.telemetry), \
-                mock.patch("hyperloom.telemetry.open_store", lambda api: api.telemetry):
+                mock.patch("hydraweave.telemetry.open_store", lambda api: api.telemetry):
             code, out = self.run_cli("sample", "--collector", "fleet-nodes", "--record")
             self.assertEqual((code, out["recorded"]), (0, True))
             self.assertGreater(out["collectors"]["fleet-nodes"]["recorded"], 10)
@@ -403,14 +403,14 @@ class CLITests(unittest.TestCase):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

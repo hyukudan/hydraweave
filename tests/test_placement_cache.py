@@ -12,13 +12,13 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom.recipes import content_cache, descriptors
+from hydraweave.recipes import content_cache, descriptors
 
 
 def test_04_legacy_mtime_cache_loads_unchanged(tmp_path):
     # Execute main's frozen writer, including its JSON formatting and integer-second stat identity.
-    namespace = dict(__name__="hyperloom.recipes.baseline_descriptors", __package__="hyperloom.recipes")
-    baseline = (Path(__file__).parent / "fixtures/placement_baseline/hyperloom.recipes.descriptors.py").read_text(
+    namespace = dict(__name__="hydraweave.recipes.baseline_descriptors", __package__="hydraweave.recipes")
+    baseline = (Path(__file__).parent / "fixtures/placement_baseline/hydraweave.recipes.descriptors.py").read_text(
         encoding="utf-8")
     exec(compile(baseline, "8539c28:descriptors.py", "exec"), namespace)
     model = tmp_path / "model"

@@ -7,8 +7,8 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import config
-from hyperloom.web.api import API, _accelerator, _nic_name, _nics, _os_name, _usb4
+from hydraweave import config
+from hydraweave.web.api import API, _accelerator, _nic_name, _nics, _os_name, _usb4
 
 FIXTURE = Path(__file__).parent / "fixtures" / "web" / "inspection.json"
 
@@ -18,7 +18,7 @@ class SummaryTests(unittest.TestCase):
         self.inspection = json.loads(read_fixture(FIXTURE))
         machines = {mid: config.Machine(mid, "windows" if mid == "workstation" else "linux",
                     "local" if mid == "workstation" else "ssh", "192.0.2." + str(i + 10), mid, 22,
-                    "/opt/hyperloom/" + mid, True, [{"id": "gpu"}])
+                    "/opt/hydraweave/" + mid, True, [{"id": "gpu"}])
                     for i, mid in enumerate(("workstation", "halo-1", "halo-2"))}
         # The captured second GPU is excluded by this configuration, independently of its model name.
         machines["workstation"].devices.append({"id": "excluded-fixture", "excluded": True,
@@ -32,7 +32,7 @@ class SummaryTests(unittest.TestCase):
         self.api._action_log = lambda: []
 
     def inventory(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         self.api._inspections, self.api._poll_budget = {}, pollbudget.Budget()   # summaries, not the pacing
         with patch.object(pollbudget, "NODE_SPACING_S", 0.0):
             return self.api._inventory(self.cluster, {})
@@ -82,9 +82,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(links[0]["summary"], "Conexión · 1 Gb/s")
 
     def test_legacy_launch_uses_the_cli_renderer_without_claiming_saved_inputs(self):
-        from hyperloom.render import ProcessSpec
+        from hydraweave.render import ProcessSpec
         spec = ProcessSpec("halo-1", "replica", ["/opt/engine", "--http-port", "18501"], {}, "qwen-stderr")
-        with patch("hyperloom.web.api.render.render_processes", return_value=[spec]) as renderer:
+        with patch("hydraweave.web.api.render.render_processes", return_value=[spec]) as renderer:
             profile = self.api._profiles(self.cluster, {})[0]
         renderer.assert_called_once()
         self.assertEqual(profile["effective_configuration"][0]["source"], "configured profile render")
@@ -125,7 +125,7 @@ class SummaryTests(unittest.TestCase):
                 self.assertEqual(kwargs["env"]["PYTHONIOENCODING"], "utf-8")
                 return SimpleNamespace(returncode=0, stdout=json.dumps(data, ensure_ascii=False))
             return SimpleNamespace(returncode=1, stdout="")
-        with patch("hyperloom.web.api.subprocess.run", side_effect=run):
+        with patch("hydraweave.web.api.subprocess.run", side_effect=run):
             self.assertEqual(api._probe(SimpleNamespace(access="local"))["interfaces"][0]["name"], "Conexión")
 
     def test_nvidia_utilization_comes_from_smi(self):
@@ -137,7 +137,7 @@ class SummaryTests(unittest.TestCase):
                 self.assertIn("utilization.gpu", argv[1])
                 return SimpleNamespace(returncode=0, stdout="GPU-fixture, Fixture NVIDIA, 37, 96000, 40000, 54, 211\n")
             return SimpleNamespace(returncode=1, stdout="")
-        with patch("hyperloom.web.api.subprocess.run", side_effect=run):
+        with patch("hydraweave.web.api.subprocess.run", side_effect=run):
             device = self.api.__class__()._probe(SimpleNamespace(access="local"))["devices"][0]
         gpu = _accelerator(device, {}, {}, [])
         self.assertEqual(gpu["utilization_pct"], 37)
@@ -173,7 +173,7 @@ class SummaryTests(unittest.TestCase):
         self.orch.load_cluster.return_value = self.cluster
         self.orch.status.return_value = {}
         self.orch._known_hosts.return_value = FIXTURE.parent / "absent-known-hosts"
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         with patch.object(pollbudget, "NODE_SPACING_S", 0.0):        # summaries, not the pacing: both verbs at once
             data = self.api._snapshot()
         self.assertEqual(data["devices"]["summary"]["minimum_headroom_bytes"], 60000000000)

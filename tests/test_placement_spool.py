@@ -10,12 +10,12 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import rtx
-from hyperloom.recipes import content_cache, reader, runtime
+from hydraweave import rtx
+from hydraweave.recipes import content_cache, reader, runtime
 
 
 def test_5_native_replica_spool_round_trip(tmp_path):
-    from hyperloom import replica_spool
+    from hydraweave import replica_spool
     from tests import test_placement_render, test_rtx
     from tests.replica_fake import FakeReplica
     data = dict(runtime.preset(), engine_sha=runtime.replica_args.AUDITED_REVISION)
@@ -35,7 +35,7 @@ def test_5_native_replica_spool_round_trip(tmp_path):
         content_cache._write(tmp_path / "done" / (request.stem + ".json"),
                              dict(name=request.stem, rc=0, args=args))
         (tmp_path / "run" / request.name).rename(tmp_path / "done" / request.name)
-    with mock.patch("hyperloom.replica_spool.time.sleep", side_effect=lambda _: worker()):
+    with mock.patch("hydraweave.replica_spool.time.sleep", side_effect=lambda _: worker()):
         assert spool.request(["--ping"])["args"] == ["--ping"]
         assert spool.request(["--phases", "chats0", "--chat-steps", "2"])["rc"] == 0
         assert spool.request(["--quit"])["args"] == ["--quit"]

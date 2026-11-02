@@ -1,5 +1,5 @@
 {
- "schema": "hyperloom/node-v1",
+ "schema": "hydraweave/node-v1",
  "verb": "models",
  "roots": [
   {

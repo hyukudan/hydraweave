@@ -1,7 +1,7 @@
 {
   "<node-1>": {
     "doctor": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "os": {
           "status": "ok",
@@ -215,7 +215,7 @@
       }
     },
     "gpu": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "amd": {
           "status": "ok",
@@ -279,7 +279,7 @@
   },
   "<node-2>": {
     "doctor": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "os": {
           "status": "ok",
@@ -497,7 +497,7 @@
       }
     },
     "gpu": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "amd": {
           "status": "ok",
@@ -561,7 +561,7 @@
   },
   "workstation": {
     "doctor": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "os": {
           "status": "unavailable",
@@ -588,7 +588,7 @@
       }
     },
     "gpu": {
-      "schema": "hyperloom/node-v1",
+      "schema": "hydraweave/node-v1",
       "checks": {
         "amd": {
           "status": "unavailable",

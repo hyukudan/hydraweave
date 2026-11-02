@@ -13,9 +13,9 @@ from urllib.parse import unquote as _unquote, urlsplit as _urlsplit
 # Scope: the audit hook below is defence in depth for writes made by this Python process. Native writers (git, a
 # shell, cmd) and fresh child interpreters do not run the hook; they are kept away from the real configuration only
 # by the redirected environment that they inherit.
-_GUARD_ROOTS = "HYPERLOOM_TEST_REAL_CONFIG_DIRS"        # exported once, so nested test runs guard the originals
-_ORIGINAL_LOCALAPPDATA = "HYPERLOOM_TEST_ORIGINAL_LOCALAPPDATA"   # per-user browser installs (tests/ui/smoke.py)
-_ORIGINAL_CHROME = "HYPERLOOM_TEST_CHROME"
+_GUARD_ROOTS = "HYDRAWEAVE_TEST_REAL_CONFIG_DIRS"        # exported once, so nested test runs guard the originals
+_ORIGINAL_LOCALAPPDATA = "HYDRAWEAVE_TEST_ORIGINAL_LOCALAPPDATA"   # per-user browser installs (tests/ui/smoke.py)
+_ORIGINAL_CHROME = "HYDRAWEAVE_TEST_CHROME"
 _ROAMING_APP_DATA = "3EB685DB-65F9-4CF6-A03A-E3EF65729F3D"
 _LOCAL_APP_DATA = "F1B32785-6FBA-4FCF-9D55-7B8E7F157091"
 
@@ -77,26 +77,29 @@ def _original_roots():
     if _os.environ.get(_GUARD_ROOTS):
         roots = set(_os.environ[_GUARD_ROOTS].split(_os.pathsep))
     else:
-        roots = {_Path(_os.environ.get("APPDATA", _Path.home() / "AppData" / "Roaming")) / "hyperloom",
-                 _Path(_os.environ.get("LOCALAPPDATA", _Path.home() / "AppData" / "Local")) / "hyperloom",
-                 _Path.home() / ".config" / "hyperloom"}
+        roots = {_Path(_os.environ.get("APPDATA", _Path.home() / "AppData" / "Roaming")) / "hydraweave",
+                 _Path(_os.environ.get("LOCALAPPDATA", _Path.home() / "AppData" / "Local")) / "hydraweave",
+                 _Path.home() / ".config" / "hydraweave"}
         if _os.environ.get("XDG_CONFIG_HOME"):
-            roots.add(_Path(_os.environ["XDG_CONFIG_HOME"]) / "hyperloom")
+            roots.add(_Path(_os.environ["XDG_CONFIG_HOME"]) / "hydraweave")
     if _os.name == "nt":
-        roots.update(_Path(folder) / "hyperloom" for folder in map(_known_folder, (_ROAMING_APP_DATA, _LOCAL_APP_DATA))
+        roots.update(_Path(folder) / "hydraweave" for folder in map(_known_folder, (_ROAMING_APP_DATA, _LOCAL_APP_DATA))
                      if folder)
         # The shell's known folders ignore APPDATA/LOCALAPPDATA but expand USERPROFILE; the account's profile
         # directory ignores the environment altogether.
         for profile in {_os.environ.get("USERPROFILE"), _profile_directory()} - {None, ""}:
-            roots.update(_Path(profile) / "AppData" / name / "hyperloom" for name in ("Roaming", "Local"))
+            roots.update(_Path(profile) / "AppData" / name / "hydraweave" for name in ("Roaming", "Local"))
     else:
         import pwd
-        roots.add(_Path(pwd.getpwuid(_os.getuid()).pw_dir) / ".config" / "hyperloom")
+        roots.add(_Path(pwd.getpwuid(_os.getuid()).pw_dir) / ".config" / "hydraweave")
     return tuple(sorted({form for root in roots for form in _spellings(root)}))
 
 
 # Install before importing application modules. CLI children inherit the same sandbox.
 _real_config_dirs = _original_roots()
+# The fallback locations must have the same write protection as the current defaults.
+_real_config_dirs = tuple(sorted(set(_real_config_dirs) |
+                                 {p.replace("hydraweave", "hyperloom") for p in _real_config_dirs}))
 _os.environ.setdefault(_GUARD_ROOTS, _os.pathsep.join(_real_config_dirs))
 _os.environ.setdefault(_ORIGINAL_LOCALAPPDATA, _os.environ.get("LOCALAPPDATA", ""))
 # Child Pythons keep the user site (test tools installed with pip --user) after APPDATA/HOME move.
@@ -120,10 +123,10 @@ if _ORIGINAL_CHROME not in _os.environ:
     _os.environ[_ORIGINAL_CHROME] = next((str(_Path(path).resolve()) for path in _chrome_candidates
                                         if path and _Path(path).is_file()), "")
 
-_outer_admission_db = _os.environ.get("HYPERLOOM_ADMISSION_DB")
+_outer_admission_db = _os.environ.get("HYDRAWEAVE_ADMISSION_DB")
 _temporary = _tempfile.TemporaryDirectory(prefix="hl-tests-", ignore_cleanup_errors=True)
 _test_root = _Path(_temporary.name)
-# Hyperloom's config/secrets/runtime roots: APPDATA and LOCALAPPDATA on Windows, HOME (~/.config) and
+# Hydraweave's config/secrets/runtime roots: APPDATA and LOCALAPPDATA on Windows, HOME (~/.config) and
 # XDG_CONFIG_HOME elsewhere. USERPROFILE retains the Windows identity required by Chrome's debugging checks, and
 # HOME stays on Windows (Python ignores it there; Git for Windows reads its global config from it).
 for _name, _relative in (("APPDATA", "appdata"), ("LOCALAPPDATA", "local"), ("HOME", "home"),
@@ -136,8 +139,8 @@ for _name, _relative in (("APPDATA", "appdata"), ("LOCALAPPDATA", "local"), ("HO
 # An outer value is kept (a deliberate file database), unless it points into a real configuration directory.
 if _outer_admission_db not in (None, "", ":memory:") and _inside_real_config(
         _uri_path(_outer_admission_db) if _outer_admission_db.startswith("file:") else _outer_admission_db):
-    _os.environ["HYPERLOOM_ADMISSION_DB"] = ":memory:"
-_os.environ.setdefault("HYPERLOOM_ADMISSION_DB", ":memory:")
+    _os.environ["HYDRAWEAVE_ADMISSION_DB"] = ":memory:"
+_os.environ.setdefault("HYDRAWEAVE_ADMISSION_DB", ":memory:")
 
 
 class RealConfigWrite(BaseException):

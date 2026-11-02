@@ -1,9 +1,9 @@
 """No control-machine subprocess may open a console window on Windows (user-visible flashing).
 
-Every subprocess.Popen/run/call/check_call/check_output in hyperloom/ must pass CREATE_NO_WINDOW, either directly
+Every subprocess.Popen/run/call/check_call/check_output in hydraweave/ must pass CREATE_NO_WINDOW, either directly
 (**no_window(...)) or through a local dict variable assigned from no_window(...) in the same function. POSIX-only
 alternatives in a conditional expression are fine as long as the Windows branch uses no_window().
-DETACHED_PROCESS and CREATE_NEW_CONSOLE are forbidden (see hyperloom/winproc.py).
+DETACHED_PROCESS and CREATE_NEW_CONSOLE are forbidden (see hydraweave/winproc.py).
 """
 import ast
 import os
@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-PACKAGE = Path(__file__).resolve().parents[1] / "hyperloom"
+PACKAGE = Path(__file__).resolve().parents[1] / "hydraweave"
 CALLS = {"Popen", "run", "call", "check_call", "check_output"}
 
 
@@ -62,7 +62,7 @@ class NoWindowTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_helper_flags(self):
-        from hyperloom import winproc
+        from hydraweave import winproc
         with mock.patch.object(winproc.os, "name", "nt"):
             self.assertEqual(winproc.no_window(0x200)["creationflags"], 0x200 | winproc.CREATE_NO_WINDOW)
         with mock.patch.object(winproc.os, "name", "posix"):
@@ -72,7 +72,7 @@ class NoWindowTests(unittest.TestCase):
     def test_real_child_gets_no_console_window(self):
         # A console child started with no_window() has a console (hidden) but no window.
         import sys
-        from hyperloom.winproc import no_window
+        from hydraweave.winproc import no_window
         code = ("import ctypes; k=ctypes.windll.kernel32; b=(ctypes.c_uint32*4)(); "
                 "print(int(bool(k.GetConsoleWindow())), k.GetConsoleProcessList(b,4)>0)")
         out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30,

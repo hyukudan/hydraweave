@@ -5,10 +5,10 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom import cli
-from hyperloom.cliext import planner
-from hyperloom.web.api import _accelerator
-from hyperloom.web.features import planner as web_planner
+from hydraweave import cli
+from hydraweave.cliext import planner
+from hydraweave.web.api import _accelerator
+from hydraweave.web.features import planner as web_planner
 
 
 class PlannerPlacementUITests(unittest.TestCase):
@@ -47,7 +47,7 @@ class PlannerPlacementUITests(unittest.TestCase):
             else:
                 self.assertEqual((args.recipe, args.route, args.bundle), ("recipe", "decode", "cached"))
         with mock.patch.object(planner, "_loader", return_value=None), \
-                mock.patch("hyperloom.recipes.service.solve", return_value={"rows": []}) as solve, \
+                mock.patch("hydraweave.recipes.service.solve", return_value={"rows": []}) as solve, \
                 mock.patch.object(planner, "_emit"):
             self.assertEqual(planner.run_solve(cli.build_parser().parse_args(
                 web_planner.solve_argv(api, {"recipe": "recipe", "route": "decode", "bundle": "cached"}))), 0)

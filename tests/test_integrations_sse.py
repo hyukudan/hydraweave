@@ -1,4 +1,4 @@
-"""F44: GET /hyperloom/api/stream on the real portal server with a fake API."""
+"""F44: GET /hydraweave/api/stream on the real portal server with a fake API."""
 
 import http.client
 import json
@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom.web import features, server
-from hyperloom.web.features import integrations
+from hydraweave.web import features, server
+from hydraweave.web.features import integrations
 
 
 SECRET = "sentinel-secret-7f3a"
@@ -66,7 +66,7 @@ class StreamTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def open(self, path="/hyperloom/api/stream", method="GET", host=None, headers=None):
+    def open(self, path="/hydraweave/api/stream", method="GET", host=None, headers=None):
         connection = http.client.HTTPConnection(self.server.server_address[0], self.port, timeout=5)
         connection.request(method, path, headers={"Host": host or self.host, **(headers or {})})
         self.addCleanup(connection.close)
@@ -101,7 +101,7 @@ class StreamTests(unittest.TestCase):
         self.assertEqual((second["event"], second["id"]), ("snapshot", "1"))
         self.assertNotIn(SECRET, second["data"])
         document = json.loads(second["data"])
-        self.assertEqual((document["schema"], document["seq"]), ("hyperloom/stream-v1", 1))
+        self.assertEqual((document["schema"], document["seq"]), ("hydraweave/stream-v1", 1))
         content = document["content"]
         self.assertEqual(sorted(content), ["devices", "overview", "profiles", "stats", "why"])
         machine = content["devices"]["machines"][0]
@@ -146,14 +146,14 @@ class StreamTests(unittest.TestCase):
     def test_limits_host_query_and_methods(self):
         _, response = self.open(host=f"workstation:{self.port}")
         self.assertEqual(response.status, 403)
-        _, response = self.open("/hyperloom/api/stream?x=1")
+        _, response = self.open("/hydraweave/api/stream?x=1")
         self.assertEqual(response.status, 400)
         _, response = self.open(method="HEAD")
         self.assertEqual((response.status, response.getheader("Allow"), response.read()), (405, "GET", b""))
         connection = http.client.HTTPConnection(self.server.server_address[0], self.port, timeout=5)
-        connection.request("POST", "/hyperloom/api/stream", body=b"{}", headers={
+        connection.request("POST", "/hydraweave/api/stream", body=b"{}", headers={
             "Host": self.host, "Origin": self.server.origin,
-            "X-Hyperloom-CSRF": self.server.csrf_token, "Content-Type": "application/json", "Content-Length": "2"})
+            "X-Hydraweave-CSRF": self.server.csrf_token, "Content-Type": "application/json", "Content-Length": "2"})
         self.assertEqual(connection.getresponse().status, 404)
         connection.close()
         open_streams = []

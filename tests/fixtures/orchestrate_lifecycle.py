@@ -5,7 +5,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from hyperloom import orchestrate as orch, secrets
+from hydraweave import orchestrate as orch, secrets
 from tests.test_orchestrate import FakeRemote, OrchestrationTests, cluster_fixture
 
 

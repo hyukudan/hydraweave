@@ -4,12 +4,12 @@ SPEC §3.1 keeps algorithm switches out of the MVP until each one has a qualific
 This page describes how they are now exposed.
 
 ## Where they come from
-- Each preset (`hyperloom/presets/<profile>.json`) has an `advanced` table. A row names:
+- Each preset (`hydraweave/presets/<profile>.json`) has an `advanced` table. A row names:
   - `kind` and `target`: an argv flag (`argv` = `--flag value`, `argv-equals` = `--flag=value`) or a `STRIX_*` variable;
   - `values`: the only qualified values (2..16), and `production`: the value the production line runs;
   - `qualification`: the campaign `receipt`, the `engine_sha` it was measured at, and the `evidence` (document at that pin);
   - optional `requires` / `conflicts` on other knobs' values, and a one-line `effect`.
-- The table is data copied from the pinned engine's documents; hyperloom does not invent flags.
+- The table is data copied from the pinned engine's documents; Hydraweave does not invent flags.
 - Refused as targets: identity, transport, layout, numerics, endpoints and asset flags; the production identity env; `STRIX_DIST_*`;
   loader/interpreter variables; any flag the production line or a basic knob already sets.
 
@@ -36,8 +36,8 @@ All four only change scheduling or which drafts are proposed; the engine documen
 - `install` checks every row's target statically in the built binary, like the production flags: the argv flag, or the
   env name, must be present as a string in the ELF (the binary is never executed). `up` refuses a non-production knob
   whose target the active release was not checked for (a release built before the row existed): rebuild it with
-  `hyperloom install <profile>`.
+  `hydraweave install <profile>`.
 - A production value renders nothing new, so the golden production line is unchanged.
-- Any other value is appended as a named override. `hyperloom render` and `hyperloom status` then show
+- Any other value is appended as a named override. `hydraweave render` and `hydraweave status` then show
   `"launch": {"production": false, "advanced": {...}, "qualification": {...}}`, so the launch can never be
   mistaken for the production line.

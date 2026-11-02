@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import redaction
-from hyperloom.recipes import preflight, reader
-from hyperloom.web import api as portal, server
+from hydraweave import redaction
+from hydraweave.recipes import preflight, reader
+from hydraweave.web import api as portal, server
 
 
 # Synthetic values only. This table specifies outputs, never matching rules. A probe value is not shaped like a
@@ -56,7 +56,7 @@ BOUNDARIES = (
 
 class PlacementBoundaryTests(unittest.TestCase):
     def base_source(self):
-        return (Path(__file__).parent / "fixtures/placement_baseline/hyperloom.web.api.py").read_text(encoding="utf-8")
+        return (Path(__file__).parent / "fixtures/placement_baseline/hydraweave.web.api.py").read_text(encoding="utf-8")
 
     def test_masking_regressions_fail_instead_of_skipping(self):
         for case in CASES:
@@ -90,7 +90,7 @@ class PlacementBoundaryTests(unittest.TestCase):
                     handler = object.__new__(server.Handler)
                     handler._host, handler._send = lambda: True, mock.Mock()
                     handler.server = SimpleNamespace(api=api)
-                    handler.path = "/hyperloom/api/logs?profile=test&process=prefill"
+                    handler.path = "/hydraweave/api/logs?profile=test&process=prefill"
                     stack.enter_context(mock.patch.object(server, "_page_seen"))
                     handler._get()
                     status, result = handler._send.call_args.args[:2]

@@ -1,4 +1,4 @@
-"""`hyperloom endpoints ...`: the CLI calls the portal's functions, audits edits and redacts its output."""
+"""`hydraweave endpoints ...`: the CLI calls the portal's functions, audits edits and redacts its output."""
 
 import contextlib
 import io
@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom import cli, config
+from hydraweave import cli, config
 from tests.test_endpoints_feature import KEY, MODELS, PUBLIC, FakeServer, json_route
 
 
@@ -25,7 +25,7 @@ class CLITests(unittest.TestCase):
             patcher = mock.patch.object(owner, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        from hyperloom import orchestrate
+        from hydraweave import orchestrate
         patcher = mock.patch.object(orchestrate, "load_cluster", lambda *a, **kw: cluster)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -37,7 +37,7 @@ class CLITests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def tearDown(self):
-        from hyperloom import telemetry
+        from hydraweave import telemetry
         store = telemetry._stores.pop(str(Path(self.dir.name) / "telemetry.sqlite3"), None)
         if store is not None:
             store.close()
@@ -50,7 +50,7 @@ class CLITests(unittest.TestCase):
         code, _, err = self.run_cli("add", "--label", "Public", "--host", PUBLIC, "--port", "80")
         self.assertEqual(code, 2)
         self.assertIn("private or loopback", err)
-        with mock.patch("hyperloom.secrets.get", return_value=KEY) as lookup:
+        with mock.patch("hydraweave.secrets.get", return_value=KEY) as lookup:
             code, out, _ = self.run_cli("check", "--json")
         self.assertEqual(code, 0)
         lookup.assert_not_called()                                     # no stored key is loaded for a target
@@ -74,7 +74,7 @@ class CLITests(unittest.TestCase):
                           ("endpoints/remove", "succeeded"), ("endpoints/remove", "refused")])
 
     def test_unavailable_exposure_fails_in_both_formats(self):
-        from hyperloom.web.features import endpoints
+        from hydraweave.web.features import endpoints
         with mock.patch.object(endpoints, "_cluster", return_value=None):
             self.assertEqual(self.run_cli("exposure")[0], 1)
             self.assertEqual(self.run_cli("exposure", "--json")[0], 1)
@@ -83,7 +83,7 @@ class CLITests(unittest.TestCase):
         server = FakeServer({"/v1/models": MODELS})
         self.addCleanup(server.close)
         self.run_cli("add", "--label", "Open", "--host", "127.0.0.1", "--port", str(server.port))
-        from hyperloom.web.features import endpoints
+        from hydraweave.web.features import endpoints
         # The loopback answer is red only with LAN listener evidence: give the control machine a fleet answer.
         with mock.patch.object(endpoints, "listener", return_value={"state": "any"}):
             code, out, _ = self.run_cli("exposure")

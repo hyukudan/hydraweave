@@ -4,13 +4,13 @@ Status (2026-10-25 evening): implemented on the default branch. CUDA build and s
 
 ## What it does
 
-`hyperloom up <profile>` runs a resident prefill service on this machine's RTX PRO when the profile has a `prefill_service`:
+`hydraweave up <profile>` runs a resident prefill service on this machine's RTX PRO when the profile has a `prefill_service`:
 
 1. The decode side starts as usual: pair lease, layout check, both ranks `READY`.
 2. The service starts. It binds to 127.0.0.1 only, inside a Job Object, with `CUDA_DEVICE_ORDER=PCI_BUS_ID` and `CUDA_VISIBLE_DEVICES=<PRO uuid>`. It is ready when it prints its `READY` event and `/health` answers `ok`.
 3. The router starts with `prefill.policy auto`. Its offload target is the service, using the service's measured profile and the decode profile's measured curves. The handoff goes to rank 0's `/admin/import-state` with rank 0's key.
 
-`hyperloom down` stops the router first, then the service, then the engines. A failure to stop the service is reported but never keeps the engines running.
+`hydraweave down` stops the router first, then the service, then the engines. A failure to stop the service is reported but never keeps the engines running.
 
 **Lifecycle safety**
 - The service record (its directory) is written to the profile's state file **before** the helper starts, so `down` and the controller's watchdog can always find it.
@@ -48,7 +48,7 @@ Status (2026-10-25 evening): implemented on the default branch. CUDA build and s
   - its VRAM goes above the cap (under WDDM it measures device use above the starting baseline);
   - it becomes visible on any GPU other than the PRO;
   - the reservation ends.
-- **Operator gate (optional).** `reservation.gate` is a command, an absolute executable plus arguments, e.g. `["C:/tools/pro-gate.exe", "--device", "pro"]`. hyperloom runs it right before the service touches the device (after the device lock, before the busy check) and before a CUDA build. Exit 0 lets the start go on. Any other exit, no exit within 60 s, or a command that cannot run refuses the start; the first output line is the reason. The busy check sees only memory already allocated, so another job that has just started on the device passes it. A shared PC uses the gate to keep its own device schedule, e.g. "no other window is open", and to record that this one opens.
+- **Operator gate (optional).** `reservation.gate` is a command, an absolute executable plus arguments, e.g. `["C:/tools/pro-gate.exe", "--device", "pro"]`. Hydraweave runs it right before the service touches the device (after the device lock, before the busy check) and before a CUDA build. Exit 0 lets the start go on. Any other exit, no exit within 60 s, or a command that cannot run refuses the start; the first output line is the reason. The busy check sees only memory already allocated, so another job that has just started on the device passes it. A shared PC uses the gate to keep its own device schedule, e.g. "no other window is open", and to record that this one opens.
 - **Router.** The service is loopback-only, so the router must run locally (`--router local`).
 - **Window.** A reservation lasts at most 20 minutes unless it carries an `extended_approval` (main's ACK line).
 - **One heavy job per device.** The service helper and the CUDA build hold a per-UUID lock, so two profiles (or a build and a service) never share the PRO.
@@ -57,14 +57,14 @@ Status (2026-10-25 evening): implemented on the default branch. CUDA build and s
 
 ## Model-agnostic design
 
-A service preset (`hyperloom/presets/rtx-prefill-<name>.json`, schema `hyperloom/prefill-service-v1`) is pure data. It holds:
+A service preset (`hydraweave/presets/rtx-prefill-<name>.json`, schema `hydraweave/prefill-service-v1`) is pure data. It holds:
 - the binary, build recipe and argv template;
 - which flags carry secrets;
 - the decode preset families it can hand off to, with each family's context rule and measured router curves;
 - the service's measured profile;
 - a named fidelity oracle.
 
-`hyperloom/rtx.py` names no model.
+`hydraweave/rtx.py` names no model.
 
 **Adding Qwen** takes a new preset with:
 - `decode_presets: ["qwen-replicas"]`;
@@ -78,10 +78,10 @@ The service passes one `--handoff-api-key`, so a family with several decode repl
 
 | Command | What it does |
 |---|---|
-| `hyperloom prefill check <profile>` | Passive: config, reservation, `nvidia-smi` identity of the UUID (it must be an RTX PRO 6000), memory, built release. |
-| `hyperloom prefill build <profile> --source <engine checkout>` | `windows/build-cuda-front.ps1` in a Job Object, under the reservation's free-commit watchdog and deadline (at most 4 h). The checkout must be clean and at the preset's pinned commit. Runs vswhere, vcvars64, the CUDA 13.0 check, then Ninja at Idle priority. Writes `MANIFEST.json` with the binary sha256. |
-| `hyperloom prefill gate <profile> --prompts <dir>` | The fidelity gate against the running service. For each oracle length it checks the state sha256, next token, logits FNV and state size, then that the process is visible only on the PRO. |
-| `hyperloom prefill placement <profile>` | Acceptance 2–3 through the running router. An ~8K-token prompt must be placed `offload` (router header), served by the service, with no fallback in the router counters. A short prompt must stay `local`. |
+| `hydraweave prefill check <profile>` | Passive: config, reservation, `nvidia-smi` identity of the UUID (it must be an RTX PRO 6000), memory, built release. |
+| `hydraweave prefill build <profile> --source <engine checkout>` | `windows/build-cuda-front.ps1` in a Job Object, under the reservation's free-commit watchdog and deadline (at most 4 h). The checkout must be clean and at the preset's pinned commit. Runs vswhere, vcvars64, the CUDA 13.0 check, then Ninja at Idle priority. Writes `MANIFEST.json` with the binary sha256. |
+| `hydraweave prefill gate <profile> --prompts <dir>` | The fidelity gate against the running service. For each oracle length it checks the state sha256, next token, logits FNV and state size, then that the process is visible only on the PRO. |
+| `hydraweave prefill placement <profile>` | Acceptance 2–3 through the running router. An ~8K-token prompt must be placed `offload` (router header), served by the service, with no fallback in the router counters. A short prompt must stay `local`. |
 
 ## Acceptance (SPEC §6 Phase 3a)
 

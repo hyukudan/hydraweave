@@ -1,4 +1,4 @@
-"""`hyperloom placement` (cliext/planner.py): the planner's hardware description built from saved facts, the three
+"""`hydraweave placement` (cliext/planner.py): the planner's hardware description built from saved facts, the three
 scenarios, the bounded planner child and the shaping of its answer. The facts are saved records (no machine is
 contacted); one test runs the pinned TensorMeld planner for real."""
 from contextlib import redirect_stdout
@@ -10,8 +10,8 @@ import sys
 import unittest
 from unittest import mock
 
-from hyperloom import cli
-from hyperloom.cliext import planner
+from hydraweave import cli
+from hydraweave.cliext import planner
 from tests.recipe_fixtures import PRO, facts, isolated
 
 FIXTURE = Path(__file__).parent / "fixtures" / "planner" / "plan-hetero-qwen.json"

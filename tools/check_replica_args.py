@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from hyperloom.recipes import replica_args, runtime
+from hydraweave.recipes import replica_args, runtime
 
 
 SNAPSHOT = ROOT / "tests/fixtures/replica-parser-a919c257.json"

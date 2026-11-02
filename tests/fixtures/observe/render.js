@@ -8,7 +8,7 @@ const input = JSON.parse(fs.readFileSync(0, "utf8"));
 global.document = {addEventListener() {}, getElementById() { return null; }, querySelector() { return null; }};
 global.localStorage = {getItem: () => input.storage ? JSON.stringify(input.storage) : null, setItem() {}};
 global.window = {
-  Hyperloom: {
+  Hydraweave: {
     state: {docs: input.docs}, esc,
     card: (title, body, sub) => `<section><h3>${esc(title)}</h3>${body}${sub ? `<small>${esc(sub)}</small>` : ""}</section>`,
     unavailable: why => `<span class="unavailable">unavailable · ${esc(why)}</span>`,
@@ -19,7 +19,7 @@ global.window = {
     statusPill: state => `<span>${esc(state)}</span>`,
     button: () => "<button></button>", csrf: () => "", request() {}, announce() {}, refresh() {},
   },
-  HyperloomTS: {chart: () => "", lines: () => [], bind() {}, endpoint: name => "history/" + name},
+  HydraweaveTS: {chart: () => "", lines: () => [], bind() {}, endpoint: name => "history/" + name},
 };
-require(path.resolve(__dirname, "../../../hyperloom/web/static/pages", input.page + ".js"));
-process.stdout.write(window.HyperloomPages[input.name || input.page].render());
+require(path.resolve(__dirname, "../../../hydraweave/web/static/pages", input.page + ".js"));
+process.stdout.write(window.HydraweavePages[input.name || input.page].render());

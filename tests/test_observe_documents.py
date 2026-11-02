@@ -7,12 +7,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom import cliext
-from hyperloom.cliext import observe as observe_cli
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API, APIError
-from hyperloom.web.features import observe
+from hydraweave import cliext
+from hydraweave.cliext import observe as observe_cli
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API, APIError
+from hydraweave.web.features import observe
 from tests.fixtures.observe.fakes import NODE1, NODE2, LOOPBACK, ROUTER, Env, fixture
 
 
@@ -39,7 +39,7 @@ class RequestDocumentTests(Base):
     def test_join_observers_and_phases(self):
         self.env.collect()
         document = observe.requests_document(self.env.api, {})
-        self.assertEqual(document["schema"], "hyperloom/ui-observe-requests-v1")
+        self.assertEqual(document["schema"], "hydraweave/ui-observe-requests-v1")
         rows = {row["id"]: row for row in document["requests"]}
         offload = rows["0123456789abcdef"]
         self.assertEqual(offload["router"]["observer"], "router")
@@ -110,7 +110,7 @@ class RequestDocumentTests(Base):
         self.assertEqual(api.telemetry.execute("SELECT count(*) FROM sqlite_master WHERE name LIKE 'observe_%'")[0][0], 0)
 
     def test_nothing_is_lost_to_redaction(self):
-        from hyperloom.web.api import redact
+        from hydraweave.web.api import redact
         self.env.collect()
         status = fixture("engine-status-c1.json")
         status["speculative"].update(accepted=184, proposed=255, cycles=105)
@@ -289,7 +289,7 @@ class SettingsAndRegistrationTests(Base):
 class CliTests(Base):
     def run_cli(self, *argv):
         import argparse
-        parser = argparse.ArgumentParser(prog="hyperloom")
+        parser = argparse.ArgumentParser(prog="hydraweave")
         commands = parser.add_subparsers(dest="command")
         observe_cli.add(commands)
         args = parser.parse_args(list(argv))
@@ -313,7 +313,7 @@ class CliTests(Base):
         code, text = self.run_cli("engine-panel")
         self.assertIn("qwen/halo-1", text)
         code, text = self.run_cli("speculative", "--json")
-        self.assertEqual(json.loads(text)["schema"], "hyperloom/ui-observe-speculative-v1")
+        self.assertEqual(json.loads(text)["schema"], "hydraweave/ui-observe-speculative-v1")
         code, text = self.run_cli("sessions")
         self.assertIn(observe.AFFINITY_LABEL, text)
 
@@ -329,7 +329,7 @@ class CliTests(Base):
         self.assertEqual([a["result"]["state"] for a in audit], ["succeeded", "refused"])
 
     def test_cli_reads_the_portal_node_samples_read_only(self):
-        from hyperloom.telemetry.store import Store as FileStore
+        from hydraweave.telemetry.store import Store as FileStore
         path = self.env.directory / "telemetry.sqlite3"
         portal = FileStore(path)
         portal.put("fleet/engine", "halo-1:mm:18601", {"ts": 1.0, "machine": "halo-1"})
@@ -364,14 +364,14 @@ class CliTests(Base):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

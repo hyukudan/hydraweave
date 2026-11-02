@@ -17,8 +17,8 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import orchestrate, procs, rtx, placement_supervision
-from hyperloom.recipes import launch, commands, content_cache, core, runtime, session
+from hydraweave import orchestrate, procs, rtx, placement_supervision
+from hydraweave.recipes import launch, commands, content_cache, core, runtime, session
 
 from tests import test_rtx, test_recipes
 from tests.placement_fixtures import grant, identity, files
@@ -29,7 +29,7 @@ from tests.test_recipes_grants import NOW, window
 @pytest.mark.parametrize("fault", ["controller-death", "cancelled", "launch", "existing", "ready"])
 def test_placement_start_owns_handlers_watcher_and_rollback(tmp_path, monkeypatch, request, fault):
     path = tmp_path / "profile.json"
-    from hyperloom.recipes import service
+    from hydraweave.recipes import service
     config = tmp_path / "cluster.json"
     config.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(service, "configured_file", lambda: config)
@@ -152,8 +152,8 @@ def test_placement_start_owns_handlers_watcher_and_rollback(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("handover", [False, True])
 def test_01_evaluate_prepare_up_and_real_watchdog_with_fake_child(tmp_path, files, identity, monkeypatch, request, handover):
-    from hyperloom import admission, cli, gpu_counters, orchestrate, secrets
-    from hyperloom.recipes import service
+    from hydraweave import admission, cli, gpu_counters, orchestrate, secrets
+    from hydraweave.recipes import service
     from tests.replica_fake import FakeReplica as FakeChild
 
     monkeypatch.setattr(service, "config_dir", lambda: tmp_path)

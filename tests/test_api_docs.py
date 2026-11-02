@@ -8,8 +8,8 @@ import re
 import unittest
 from unittest.mock import patch
 
-from hyperloom.web import features, recipes
-from hyperloom.web.api import MUTATIONS, SCREENS
+from hydraweave.web import features, recipes
+from hydraweave.web.api import MUTATIONS, SCREENS
 
 
 ENTRY = re.compile(r"^\s*\|\s*`([A-Z]+ [^`]+)`\s*\|", re.MULTILINE)
@@ -20,7 +20,7 @@ class APIDocsTests(unittest.TestCase):
         # Use the portal's real loader and register functions, never API()/serve().
         # This optional capability probes third_party files during registration;
         # it does not affect routes. Suppress that probe to keep this test passive.
-        with patch("hyperloom.cliext.planner.planner_available", return_value=(False, "docs test")):
+        with patch("hydraweave.cliext.planner.planner_available", return_value=(False, "docs test")):
             registry = features.load()
         self.assertFalse(registry.failed, f"Feature registration failed: {registry.failed}")
         self.assertEqual(set(features.MODULES), set(registry.loaded), "A feature module was not loaded")

@@ -12,7 +12,7 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom.recipes import commands, content_cache, core, reader, runtime, session
+from hydraweave.recipes import commands, content_cache, core, reader, runtime, session
 
 from tests import test_recipes
 from tests.placement_fixtures import identity, files
@@ -30,10 +30,10 @@ def test_02_actual_core_schema_renders_without_injected_manifest_hash(files):
 
 
 def test_02_genuine_core_output_renders_without_modifying_hashed_document(tmp_path, files, identity):
-    executable = os.environ.get("HYPERLOOM_TS_RECIPE")
-    golden = os.environ.get("HYPERLOOM_PLACEMENT_GOLDEN")
+    executable = os.environ.get("HYDRAWEAVE_TS_RECIPE")
+    golden = os.environ.get("HYDRAWEAVE_PLACEMENT_GOLDEN")
     if not executable or not golden:
-        pytest.skip("set HYPERLOOM_TS_RECIPE and HYPERLOOM_PLACEMENT_GOLDEN for genuine CPU output")
+        pytest.skip("set HYDRAWEAVE_TS_RECIPE and HYDRAWEAVE_PLACEMENT_GOLDEN for genuine CPU output")
     artifacts, _ = files
     golden = Path(golden)
     probe = json.loads((golden / "g4/J2-probe.json").read_bytes())

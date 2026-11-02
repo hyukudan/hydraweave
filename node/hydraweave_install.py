@@ -1,0 +1,906 @@
+"""Marked node installs and detached, low-priority build/hash jobs (Python 3.10+)."""
+
+import errno
+import hashlib
+import json
+import mmap
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unicodedata
+import uuid
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hydraweave_compat import LEGACY_NAME, read_marker, read_path, tool_command
+
+VERBS = {"install", "job", "releases", "activate", "uninstall", "verify-model", "stat-assets", "push-release",
+         "bundle-prepare", "bundle-accept", "bundle-discard"}
+# The single ref a source bundle carries (hydraweave/bundles.py writes it; nothing else is in the bundle).
+BUNDLE_REF = "refs/hydraweave/source"
+MAX_BUNDLE = 64 * 1024 ** 3
+STAGE_MAX_AGE_S = 3600  # bundle-prepare removes older stages of interrupted uploads
+TRELLIS_MODES = {"ds41", "minimax"}
+HASH_BLOCK = 8 * 1024 ** 2
+DIRECT_UNSUPPORTED = {errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP}
+RUNTIME_ENV = {"LD_LIBRARY_PATH": "/opt/rocm/core-10.1/lib"}
+TERMINAL = {"stopped", "failed", "aborted", "cancelled", "canceled", "finished"}
+
+
+def text(value):
+    if (not isinstance(value, str) or not value
+            or any(unicodedata.category(c) in {"Cc", "Cf", "Cs"} for c in value)):
+        raise ValueError("expected nonempty text without control characters")
+    return value
+
+
+def absolute(value):
+    value = text(value)
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("expected an absolute path without parent traversal")
+    return path
+
+
+def identifier(value):
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}", text(value)):
+        raise ValueError("invalid identifier")
+    return value
+
+
+def canonical(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                      allow_nan=False).encode("utf-8")
+
+
+def release_id(manifest):
+    return hashlib.sha256(canonical(manifest)).hexdigest()[:12]
+
+
+def read_json(path):
+    with path.open("rb") as stream:
+        data = stream.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024:
+        raise ValueError("state file too large")
+    return json.loads(data)
+
+
+def atomic_json(path, obj):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, 0o600)
+            stream.write(canonical(obj) + b"\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def inside(root, *parts):
+    path = root.joinpath(*parts)
+    if not path.resolve().is_relative_to(root):
+        raise ValueError("path escapes marked root")
+    return path
+
+
+def overlap(a, b):
+    return a.is_relative_to(b) or b.is_relative_to(a)
+
+
+def checked_root(payload, create=False):
+    requested = absolute(payload.get("root"))
+    if requested.is_symlink():
+        raise ValueError("install root must not be a symlink")
+    root = requested.resolve()
+    home = Path.home().resolve()
+    if home.is_relative_to(root) or root == Path(root.anchor):
+        raise ValueError("install root is or contains HOME or a filesystem root")
+    policy_path = inside(root, "etc", "install-policy.json")
+    policy = read_json(policy_path) if policy_path.is_file() else {}
+    protected = list(policy.get("asset_paths", [])) + list(payload.get("asset_paths", []))
+    lab = payload.get("lab_dir") or policy.get("lab_dir")
+    if lab is not None:
+        protected.append(lab)
+    for value in protected:
+        if overlap(root, absolute(value).resolve()):
+            raise ValueError("install root overlaps lab or configured asset path")
+    if any((parent / ".git").exists() for parent in (root, *root.parents)):
+        raise ValueError("install root overlaps a git repository")
+    if root.exists():
+        # Do not follow links when searching for a repository inside a proposed root.
+        for directory, dirs, files in os.walk(root, followlinks=False):
+            relative = Path(directory).relative_to(root)
+            # Fetched sources are expected repositories in an already marked install.
+            if relative.parts and relative.parts[0] == "src" and read_marker(root / ".hydraweave-root").is_file():
+                dirs[:] = []
+                continue
+            if ".git" in dirs or ".git" in files:
+                raise ValueError("install root contains a git repository")
+    marker = read_marker(inside(root, ".hydraweave-root"))
+    if marker.is_symlink():
+        raise ValueError("invalid root marker")
+    if not marker.exists():
+        if not create:
+            raise ValueError("unmarked install root")
+        if root.exists() and any(root.iterdir()):
+            raise ValueError("refusing nonempty unmarked install root")
+        root.mkdir(parents=True, exist_ok=True)
+        with marker.open("x", encoding="ascii") as stream:
+            stream.write(uuid.uuid4().hex + "\n")
+    if not re.fullmatch(r"[0-9a-f]{32}", marker.read_text(encoding="ascii").strip()):
+        raise ValueError("invalid root marker")
+    for name in ("etc", "run", "log", "src", "releases"):
+        inside(root, name).mkdir(exist_ok=True)
+    if create:
+        if lab is not None and service_specs(root):
+            raise ValueError("refused: a non-lab service unit is installed on this root (etc/"
+                             + ", etc/".join(service_specs(root)) + "); remove it with 'hydraweave service remove' "
+                             "before installing in lab mode")
+        atomic_json(policy_path, {"lab_dir": lab, "asset_paths": sorted(set(protected) - {lab})})
+    return root
+
+
+def service_specs(root):
+    """Non-lab unit specs (hydraweave_service) of this root; each references one of its releases."""
+    return sorted(path.name for path in inside(root, "etc").glob("service-*.json"))
+
+
+def lab_idle(lab):
+    if lab is None:
+        return
+    holder = absolute(lab) / ".gpu-turn" / "holder"
+    try:
+        line = holder.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    if line.startswith("PAIR"):
+        raise ValueError("builds and model hashing are refused during a PAIR turn")
+
+
+def service_gone(state):
+    """A non-lab service record whose unit process is gone (killed, node rebooted): not an active lease."""
+    if not str(state.get("label", "")).startswith("hl-svc-"):
+        return False
+    if state.get("boot_id") is not None and state["boot_id"] != boot_id():
+        return True
+    if os.name == "posix" and type(state.get("pid")) is int and state["pid"] > 0:
+        try:
+            os.kill(state["pid"], 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+    return False
+
+
+def active_leases(root, profile=None):
+    result = []
+    for path in inside(root, "run").glob("lease-*.json"):
+        state = read_json(inside(root, "run", path.name))
+        if state.get("state") in TERMINAL or service_gone(state):
+            continue
+        recorded_profile = state.get("profile", state.get("spec", {}).get("profile"))
+        # Older lease records have no profile: fail closed rather than switch live code.
+        if profile is None or recorded_profile is None or recorded_profile == profile:
+            result.append(state)
+    return result
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def file_identity(info):
+    return {"bytes": info.st_size, "mtime_ns": info.st_mtime_ns,
+            "inode": info.st_ino, "dev": info.st_dev}
+
+
+def asset_files(path):
+    """Return sorted regular files; internal links are allowed, escapes/cycles are not."""
+    root = path.resolve(strict=True)
+    files, metadata = [], []
+
+    def visit(current, ancestors):
+        try:
+            resolved = current.resolve(strict=True)
+        except RuntimeError as exc:
+            raise ValueError("asset symlink cycle: " + str(current)) from exc
+        if not resolved.is_relative_to(root):
+            raise ValueError("asset symlink leaves directory: " + str(current))
+        info = current.stat()
+        relative = current.relative_to(path).as_posix()
+        metadata.append((relative, file_identity(info), file_identity(current.lstat())))
+        if stat.S_ISREG(info.st_mode):
+            files.append((relative, current, info))
+        elif stat.S_ISDIR(info.st_mode):
+            identity = (info.st_dev, info.st_ino)
+            if identity in ancestors:
+                raise ValueError("asset directory symlink cycle: " + str(current))
+            for child in sorted(current.iterdir()):
+                visit(child, ancestors | {identity})
+        else:
+            raise ValueError("asset is not a regular file or directory: " + str(current))
+
+    visit(path, set())
+    return sorted(files), sorted(metadata)
+
+
+def stat_asset(path):
+    info = path.stat()
+    result = file_identity(info)
+    if stat.S_ISDIR(info.st_mode):
+        files, metadata = asset_files(path)
+        result["bytes"] = sum(info.st_size for _, _, info in files)
+        # Directory mtime alone misses changes to existing children. This hashes metadata only.
+        result["tree_stat_sha256"] = hashlib.sha256(canonical(metadata)).hexdigest()
+    elif not stat.S_ISREG(info.st_mode):
+        raise ValueError("asset is not a regular file or directory: " + str(path))
+    return result
+
+
+def hash_file(path, check=None):
+    """Keep model reads out of the page cache when the filesystem supports O_DIRECT.
+    check, if given, runs before every block and aborts the hash by raising ValueError."""
+    def read_hash(direct):
+        flags = os.O_RDONLY | (os.O_DIRECT if direct else 0)
+        fd = os.open(path, flags)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("asset is not a regular file")
+            if not direct and hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_NOREUSE"):
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_NOREUSE)
+            digest, total = hashlib.sha256(), 0
+            # Anonymous mmap starts on a page boundary; every request/offset is 8 MiB aligned.
+            with mmap.mmap(-1, HASH_BLOCK) as buffer:
+                with memoryview(buffer) as view:
+                    while total < before.st_size:
+                        if check is not None:
+                            check()
+                        if direct:
+                            count = os.readv(fd, [view])
+                        else:
+                            chunk = os.read(fd, HASH_BLOCK)
+                            count = len(chunk)
+                        if not count:
+                            raise ValueError("asset changed while hashing: " + str(path))
+                        digest.update(view[:count] if direct else chunk)
+                        total += count
+                        if count < HASH_BLOCK and total != before.st_size:
+                            raise ValueError("short asset read: " + str(path))
+            if (total != before.st_size or file_identity(before) != file_identity(os.fstat(fd))
+                    or file_identity(before) != file_identity(path.stat())):
+                raise ValueError("asset changed while hashing: " + str(path))
+            return digest.hexdigest()
+        finally:
+            os.close(fd)
+
+    if hasattr(os, "O_DIRECT") and hasattr(os, "readv"):
+        try:
+            return read_hash(True)
+        except OSError as exc:
+            if exc.errno not in DIRECT_UNSUPPORTED:
+                raise
+    return read_hash(False)
+
+
+def boot_id():
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+
+
+def settle_stale(path, state):
+    """A queued or running job that recorded its boot (download jobs) but whose node rebooted, or whose
+    process is gone, can never finish: record it as failed instead of reporting it running forever."""
+    if state.get("state") not in {"queued", "running"} or "boot_id" not in state:
+        return state
+    reason = None
+    if state["boot_id"] != boot_id():
+        reason = "the node rebooted while the job ran"
+    elif os.name == "posix" and type(state.get("pid")) is int:
+        try:
+            os.kill(state["pid"], 0)
+        except ProcessLookupError:
+            reason = "the job process ended without recording a result"
+        except PermissionError:
+            pass
+    if reason is None:
+        return state
+    state = {**state, "state": "failed", "error": reason + "; partial files are kept, rerun the same plan to resume",
+             "finished": time.time()}
+    atomic_json(path, state)
+    return state
+
+
+def hash_asset(path):
+    before = stat_asset(path)
+    if path.is_dir():
+        files, _ = asset_files(path)
+        rows = [(relative, info.st_size, hash_file(filename)) for relative, filename, info in files]
+        digest = hashlib.sha256(canonical(rows)).hexdigest()
+    else:
+        digest = hash_file(path)
+    if before != stat_asset(path):
+        raise ValueError("asset changed while hashing: " + str(path))
+    return {**before, "sha256": digest}
+
+
+def release(root, rid):
+    if not re.fullmatch(r"[0-9a-f]{12}", text(rid)):
+        raise ValueError("release_id must be 12 lowercase hex characters")
+    directory = inside(root, "releases", rid)
+    manifest = read_json(inside(root, "releases", rid, "MANIFEST.json"))
+    if release_id(manifest) != rid:
+        raise ValueError("manifest digest does not match release id")
+    binaries = manifest.get("binaries")
+    if not isinstance(binaries, dict) or not binaries:
+        raise ValueError("release has no binary hashes")
+    for name, digest in binaries.items():
+        identifier(name)
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("invalid binary digest")
+        binary = inside(root, "releases", rid, "bin", name)
+        if binary.is_symlink() or sha256(binary) != digest:
+            raise ValueError("binary sha256 mismatch")
+    if not all(manifest.get("capabilities", {}).get(name, {}).get("ok") for name in binaries):
+        raise ValueError("release capability check missing or failed")
+    return directory, manifest
+
+
+def checked_string(value):
+    """A string the static capability check may look for: an argv flag or an engine env name."""
+    return isinstance(value, str) and bool(re.fullmatch(r"--[A-Za-z0-9][A-Za-z0-9_-]{0,125}|STRIX_[A-Z0-9_]{1,64}", value))
+
+
+def static_capabilities(binary, flags):
+    data = Path(binary).read_bytes()
+    if data[:4] != b"\x7fELF":
+        return {"ok": False, "method": "static", "missing": ["<not an ELF executable>"]}
+    missing = [flag for flag in flags if flag.encode("utf-8") not in data]
+    return {"ok": not missing, "method": "static", "checked": len(flags), "missing": missing}
+
+
+def command(argv, **kwargs):
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, check=True, **kwargs)
+
+
+def version(argv):
+    try:
+        result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
+                                timeout=10, check=False)
+        return {"returncode": result.returncode,
+                "text": (result.stdout + result.stderr).decode("utf-8", "replace")[:16384].strip()}
+    except (OSError, subprocess.TimeoutExpired):
+        return {"returncode": None, "text": "unavailable"}
+
+
+def envelope():
+    if shutil.which("systemd-run"):
+        try:
+            command(["systemd-run", "--user", "--scope", "-p", "MemoryMax=16G", "true"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            return ["systemd-run", "--user", "--scope", "-p", "MemoryMax=16G", "nice", "-n", "19"]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return ["nice", "-n", "19"]
+
+
+def launch_job(root, kind, payload):
+    if os.name != "posix":
+        raise ValueError("node background jobs require POSIX")
+    job = uuid.uuid4().hex
+    spec = inside(root, "run", "job-" + job + ".spec.json")
+    state_path = inside(root, "run", "job-" + job + ".json")
+    log = inside(root, "log", "job-" + job + ".log")
+    prefix = envelope() if kind == "install" else ["nice", "-n", "19"]
+    if kind == "verify-model":
+        if not shutil.which("ionice"):
+            raise ValueError("verify-model requires ionice for idle I/O priority")
+        prefix += ["ionice", "-c3"]
+    atomic_json(spec, {"root": str(root), "kind": kind, "payload": payload,
+                       "job": job, "limited": prefix[0] != "systemd-run"})
+    atomic_json(state_path, {"job": job, "kind": kind, "state": "queued", "log": str(log)})
+    try:
+        with log.open("ab") as output:
+            child = subprocess.Popen(["nohup", *prefix, sys.executable, str(Path(__file__).resolve()),
+                                      "--job", str(spec)], stdin=subprocess.DEVNULL,
+                                     stdout=output, stderr=output, start_new_session=True,
+                                     close_fds=True)
+    except OSError as exc:
+        atomic_json(state_path, {"job": job, "state": "failed", "error": str(exc)})
+        raise
+    threading.Thread(target=child.wait, daemon=True).start()
+    # Do not rewrite queued state here: the worker may already have finished.
+    return {"job": job, "pid": child.pid, "log": str(log)}
+
+
+def validate_component(item):
+    """A pinned source: {repo, commit} fetched from the remote, or, for an unpublished commit, also
+    {published: false, bundle_sha256} fetched from the staged bundle <root>/incoming/<commit>.bundle."""
+    if not isinstance(item, dict) or not {"repo", "commit"} <= set(item):
+        raise ValueError("component requires repo and commit")
+    extra = set(item) - {"repo", "commit"}
+    if extra and (extra != {"published", "bundle_sha256"} or item["published"] is not False
+                  or not isinstance(item["bundle_sha256"], str)
+                  or not re.fullmatch(r"[0-9a-f]{64}", item["bundle_sha256"])):
+        raise ValueError("an unpublished component requires published false and bundle_sha256")
+    if not re.fullmatch(r"[0-9a-f]{40}", text(item["commit"])):
+        raise ValueError("component commit must be an immutable full SHA")
+    if text(item["repo"]).startswith("-"):
+        raise ValueError("invalid component repository")
+
+
+def validate_install(payload):
+    components = payload.get("components")
+    if not isinstance(components, dict) or "engine" not in components:
+        raise ValueError("components.engine is required")
+    for name, item in components.items():
+        identifier(name)
+        validate_component(item)
+    recipe = payload.get("recipe")
+    optional = {"required_flags", "trellis_mode", "trellis_api", "trellis_configure"}
+    if (not isinstance(recipe, dict) or not {"configure", "targets", "ctest_regex", "trellis"} <= set(recipe)
+            or set(recipe) - {"configure", "targets", "ctest_regex", "trellis"} - optional):
+        raise ValueError("recipe requires configure, targets, ctest_regex and trellis (optional required_flags, "
+                         "trellis_mode, trellis_api, trellis_configure)")
+    if recipe.get("trellis_mode", "ds41") not in TRELLIS_MODES:
+        raise ValueError("unknown trellis_mode")
+    if recipe.get("trellis_api", "v12") not in {"v12", "tp03", "splitk04", "dense_r1"}:
+        raise ValueError("unknown trellis_api")
+    trellis_flags = recipe.get("trellis_configure", [])
+    if not isinstance(trellis_flags, list) or not all(
+            isinstance(flag, str) and re.fullmatch(r"-D[A-Z0-9_]+=[A-Za-z0-9_.]+", flag) for flag in trellis_flags):
+        raise ValueError("trellis_configure must list -DNAME=VALUE flags")
+    flags = recipe.get("required_flags", {})
+    if not isinstance(flags, dict) or any(not isinstance(v, list) or not all(map(checked_string, v))
+                                          for v in flags.values()):
+        raise ValueError("required_flags must map targets to lists of --flags or STRIX_* env names")
+    if not isinstance(recipe["configure"], list):
+        raise ValueError("configure must be an argv list")
+    for arg in recipe["configure"]:
+        text(arg)
+    if not isinstance(recipe["targets"], list) or not recipe["targets"]:
+        raise ValueError("targets must be a nonempty list")
+    for target in recipe["targets"]:
+        identifier(target)
+    if len(set(recipe["targets"])) != len(recipe["targets"]):
+        raise ValueError("duplicate build targets")
+    text(recipe["ctest_regex"])
+    if type(recipe["trellis"]) is not bool:
+        raise ValueError("trellis must be boolean")
+    if recipe["trellis"] and "strix-trellis" not in components:
+        raise ValueError("trellis source component is required")
+
+
+def bundle_heads(bundle):
+    """The refs a bundle advertises (git bundle list-heads works outside a repository)."""
+    listed = command(["git", "bundle", "list-heads", str(bundle)], capture_output=True, text=True, timeout=600,
+                     cwd=str(Path(bundle).parent)).stdout
+    rows = [line.split() for line in listed.splitlines() if line.strip()]
+    if any(len(row) != 2 for row in rows):
+        raise ValueError("malformed bundle head list")
+    return {ref: commit for commit, ref in rows}
+
+
+def staged_bundle(root, item):
+    """The verified bundle of an unpublished component: sha256 as recorded, exactly one ref at the pinned commit."""
+    bundle = inside(root, "incoming", item["commit"] + ".bundle")
+    if bundle.is_symlink() or not bundle.is_file():
+        raise ValueError("unpublished source bundle missing: stage it with hydraweave install --source")
+    if sha256(bundle) != item["bundle_sha256"]:
+        raise ValueError("source bundle sha256 mismatch")
+    source_ref(bundle_heads(bundle), item["commit"])
+    return bundle
+
+
+def source_ref(heads, commit):
+    """An old bundle is valid only with the same single-ref and pinned-commit checks."""
+    old = BUNDLE_REF.replace("hydraweave", LEGACY_NAME)
+    for ref in (BUNDLE_REF, old):
+        if heads == {ref: commit}:
+            return ref
+    raise ValueError("source bundle must carry exactly " + BUNDLE_REF + " at the pinned commit")
+
+
+def fetch_sources(root, components):
+    """Fetch pinned sources, including the router's unbuilt Python package. Published components come from
+    their remote by commit; unpublished ones from their staged bundle (never from a remote)."""
+    sources = {}
+    for name, item in sorted(components.items()):
+        identifier(name)
+        validate_component(item)
+        source = inside(root, "src", name + "-" + item["commit"])
+        source.mkdir(exist_ok=True)
+        if not (source / ".git").exists():
+            command(["git", "init", str(source)])
+        if item.get("published") is False:
+            bundle = staged_bundle(root, item)
+            # The bundle is depth 1 (hydraweave/bundles.py): mark its commit shallow, as a --depth 1 fetch would.
+            shallow = source / ".git" / "shallow"
+            known = set(shallow.read_text(encoding="ascii").split()) if shallow.is_file() else set()
+            shallow.write_text("".join(sha + "\n" for sha in sorted(known | {item["commit"]})),
+                               encoding="ascii", newline="\n")
+            command(["git", "-C", str(source), "fetch", str(bundle), source_ref(bundle_heads(bundle), item["commit"])])
+        else:
+            # Recover cleanly after an interrupted init/remote setup.
+            command(["git", "-C", str(source), "config", "remote.origin.url", item["repo"]])
+            command(["git", "-C", str(source), "fetch", "--depth", "1", "origin", item["commit"]])
+        command(["git", "-C", str(source), "checkout", "--force", "FETCH_HEAD"])
+        actual = command(["git", "-C", str(source), "rev-parse", "HEAD"],
+                         capture_output=True, text=True).stdout.strip()
+        if actual != item["commit"]:
+            raise ValueError("fetched source commit mismatch")
+        sources[name] = source
+    return sources
+
+
+def build(root, payload, job):
+    lab_idle(payload.get("lab_dir"))
+    sources = fetch_sources(root, payload["components"])
+    staging = inside(root, "releases", ".build-" + job)
+    staging.mkdir()
+    output = staging / "bin"
+    recipe = payload["recipe"]
+    env = dict(os.environ, **RUNTIME_ENV)
+    env["HYDRAWEAVE_CONFIGURE"] = "\n".join(recipe["configure"])
+    env["HYDRAWEAVE_CTEST_REGEX"] = recipe["ctest_regex"]
+    env["HYDRAWEAVE_TRELLIS_MODE"] = recipe.get("trellis_mode", "ds41")
+    env["HYDRAWEAVE_TRELLIS_API"] = recipe.get("trellis_api", "v12")
+    env["HYDRAWEAVE_TRELLIS_CONFIGURE"] = "\n".join(recipe.get("trellis_configure", []))
+    try:
+        command(["bash", str(Path(__file__).with_name("build-node.sh")), str(sources["engine"]),
+                 str(sources["strix-trellis"]) if recipe["trellis"] else "-",
+                 str(inside(root, "run", "build-" + job)), str(output), *recipe["targets"]], env=env)
+        hashes, capabilities = {}, {}
+        for target in recipe["targets"]:
+            binary = inside(root, "releases", staging.name, "bin", target)
+            if binary.is_symlink():
+                raise ValueError("release binaries must be regular files")
+            hashes[target] = sha256(binary)
+            # Static check only: engine binaries are never executed outside a GPU lease (a serve binary
+            # given an unknown flag can open GPU or USB4 devices). The preset's flags must be present as
+            # strings in the binary.
+            capabilities[target] = static_capabilities(binary, recipe.get("required_flags", {}).get(target, []))
+            if not capabilities[target]["ok"]:
+                raise ValueError("capability check failed: " + target + " missing " +
+                                 ",".join(capabilities[target]["missing"][:8]))
+        node = Path(__file__).with_name("hydraweave-node").read_text(encoding="utf-8")
+        node_version = re.search(r'^VERSION = "([^"]+)"', node, re.MULTILINE).group(1)
+        rocm_file = Path("/opt/rocm/core-10.1/.info/version")
+        manifest = {"schema": "hydraweave/release-v1", "components": payload["components"],
+                    "recipe": recipe, "binaries": hashes, "capabilities": capabilities,
+                    "hydraweave_node_version": node_version, "runtime_env": RUNTIME_ENV,
+                    "toolchains": {"amdclang++": version([shutil.which("amdclang++") or
+                                                           "/opt/rocm/core-10.1/bin/amdclang++", "--version"]),
+                                   "cmake": version(["cmake", "--version"]),
+                                   "ninja": version(["ninja", "--version"]),
+                                   "rocm": rocm_file.read_text().strip() if rocm_file.is_file() else "unavailable",
+                                   "rocm_package": version(["dpkg-query", "-W", "-f=${Version}", "rocm-core"])}}
+        rid = release_id(manifest)
+        atomic_json(staging / "MANIFEST.json", manifest)
+        destination = inside(root, "releases", rid)
+        if destination.exists():
+            release(root, rid)
+        else:
+            staging.rename(destination)
+        return {"release_id": rid}
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def job_main(spec_path):
+    spec = read_json(absolute(spec_path))
+    root = checked_root({"root": spec["root"]})
+    job = spec["job"]
+    identifier(job)
+    path = inside(root, "run", "job-" + job + ".json")
+    state = {"job": job, "kind": spec["kind"], "pid": os.getpid(), "state": "running",
+             "started": time.time(), "log": str(inside(root, "log", "job-" + job + ".log"))}
+    atomic_json(path, state)
+    try:
+        if spec["limited"]:
+            import resource
+            _, hard = resource.getrlimit(resource.RLIMIT_AS)
+            cap = 16 * 1024 ** 3
+            if hard != resource.RLIM_INFINITY:
+                cap = min(cap, hard)
+            resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+        if spec["kind"] == "install":
+            state.update(build(root, spec["payload"], job))
+        else:
+            payload = spec["payload"]
+            lab_idle(payload.get("lab_dir"))
+            model = absolute(payload["path"])
+            if payload["bytes"] and stat_asset(model)["bytes"] != payload["bytes"]:
+                raise ValueError("model size mismatch")
+            verified = hash_asset(model)
+            if payload["bytes"] and verified["bytes"] != payload["bytes"]:
+                raise ValueError("model size mismatch")
+            if payload.get("sha256") is not None and verified["sha256"] != payload["sha256"]:
+                raise ValueError("model sha256 mismatch")
+            state.update(verified, verified=True)
+        state["state"] = "succeeded"
+    except Exception as exc:
+        state.update(state="failed", error=str(exc))
+    finally:
+        state["finished"] = time.time()
+        atomic_json(path, state)
+        absolute(spec_path).unlink(missing_ok=True)
+    return 0 if state["state"] == "succeeded" else 1
+
+
+def push_release(root, payload):
+    directory, manifest = release(root, payload.get("release_id"))
+    peer = text(payload.get("peer_ssh"))
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", peer) or peer.count("@") > 1:
+        raise ValueError("invalid peer ssh alias")
+    peer_root = text(payload.get("peer_root"))
+    if not PurePosixPath(peer_root).is_absolute() or ".." in PurePosixPath(peer_root).parts:
+        raise ValueError("peer_root must be absolute without parent traversal")
+    peer_root = str(PurePosixPath(peer_root))
+    rid = directory.name
+    staging = str(PurePosixPath(peer_root) / "releases" / (".incoming-" + uuid.uuid4().hex))
+    q = shlex.quote
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "--", peer]
+    releases = str(PurePosixPath(peer_root) / "releases")
+    destination = releases + "/" + rid
+    expected = {"MANIFEST.json": sha256(directory / "MANIFEST.json"),
+                **{"bin/" + n: d for n, d in manifest["binaries"].items()}}
+
+    def verify_peer(path):
+        for name, digest in expected.items():
+            result = command([*ssh, "sha256sum -- " + q(path + "/" + name)],
+                             capture_output=True, text=True, timeout=30)
+            if not result.stdout.split() or result.stdout.split()[0] != digest:
+                raise ValueError("peer binary sha256 mismatch")
+
+    # Bootstrap already shipped this module: use the same root guards on a fresh peer.
+    peer_policy = {"root": peer_root, "lab_dir": payload.get("peer_lab_dir"),
+                   "asset_paths": payload.get("peer_asset_paths", [])}
+    prepare = ("import sys; from pathlib import Path; "
+               "sys.path.insert(0, str(Path.home()/'.hydraweave-boot')); "
+               "import hydraweave_install; root=hydraweave_install.checked_root(" + repr(peer_policy) + ", create=True); "
+               "hydraweave_install.fetch_sources(root, " + repr({name: row for name, row in
+                   manifest.get("components", {}).items() if name == "tensormeld"}) + ")")
+    command([*ssh, "python3 -c " + q(prepare)], timeout=600)
+    # Reject remote symlink ancestors again before writing the unique staging directory.
+    guard = (f"( test -f {q(peer_root + '/.hydraweave-root')} || "
+             f"test -f {q(peer_root + '/.' + LEGACY_NAME + '-root')} ) && "
+             f"test \"$(readlink -f -- {q(peer_root)})\" = {q(peer_root)} && "
+             f"test ! -L {q(releases)} && test ! -L {q(destination)} && "
+             f"mkdir -p -- {q(releases)} && "
+             f"if test -d {q(destination)}; then printf existing; else mkdir -- {q(staging)}; fi")
+    prepared = command([*ssh, guard], capture_output=True, text=True, timeout=30)
+    if prepared.stdout.strip() == "existing":
+        verify_peer(destination)
+        return {"release_id": rid, "verified": True}
+    try:
+        if shutil.which("rsync"):
+            command(["rsync", "-a", "-s", "-e", "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes",
+                     "--", str(directory) + "/", peer + ":" + staging + "/"], timeout=600)
+        else:
+            with subprocess.Popen(["tar", "-C", str(directory), "-cf", "-", "."],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE) as archive:
+                try:
+                    subprocess.run([*ssh, "tar -C " + q(staging) + " -xf -"], stdin=archive.stdout,
+                                   check=True, timeout=600)
+                    archive.stdout.close()
+                    archive.wait(timeout=5)
+                finally:
+                    archive.stdout.close()
+                    if archive.poll() is None:
+                        archive.terminate()
+                    archive.wait(timeout=5)
+                if archive.returncode:
+                    raise ValueError("release archive failed")
+        verify_peer(staging)
+        command([*ssh, f"test ! -e {q(destination)} && mv -- {q(staging)} {q(destination)}"], timeout=30)
+        return {"release_id": rid, "verified": True}
+    finally:
+        # The generated staging path was checked against the peer root above.
+        command([*ssh, "rm -rf -- " + q(staging)], timeout=30)
+
+
+def bundle_prepare(root, payload):
+    """A fresh staging name in <root>/incoming for one scp upload (the control machine copies, then accepts)."""
+    commit = text(payload.get("commit"))
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("bundle commit must be a full SHA")
+    incoming = inside(root, "incoming")
+    if incoming.is_symlink():
+        raise ValueError("incoming must not be a symlink")
+    incoming.mkdir(mode=0o700, exist_ok=True)
+    sweep_stages(incoming)
+    return {"stage": str(inside(root, "incoming", ".stage-" + uuid.uuid4().hex + ".bundle")),
+            "path": str(inside(root, "incoming", commit + ".bundle"))}
+
+
+def sweep_stages(incoming, now=None):
+    """Remove staging files of interrupted uploads: only `.stage-*` regular files older than STAGE_MAX_AGE_S. The
+    stage this call hands out is a new name, so it is never among them, and a concurrent upload (younger than the
+    limit) is kept."""
+    now = time.time() if now is None else now
+    removed = []
+    for entry in incoming.iterdir():
+        try:
+            info = entry.lstat()
+        except OSError:
+            continue
+        if (entry.name.startswith(".stage-") and stat.S_ISREG(info.st_mode)
+                and now - info.st_mtime > STAGE_MAX_AGE_S):
+            try:
+                entry.unlink()
+                removed.append(entry.name)
+            except OSError:
+                pass
+    return removed
+
+
+def stage_path(root, payload):
+    stage = absolute(payload.get("stage"))
+    if not re.fullmatch(r"\.stage-[0-9a-f]{32}\.bundle", stage.name) or stage.parent != inside(root, "incoming"):
+        raise ValueError("bundle stage must be a staging name in <root>/incoming")
+    return stage
+
+
+def bundle_discard(root, payload):
+    """Remove one staging name after a failed upload (the control machine's cleanup; absent is fine)."""
+    stage = stage_path(root, payload)
+    existed = stage.exists() or stage.is_symlink()
+    stage.unlink(missing_ok=True)
+    return {"removed": existed}
+
+
+def bundle_accept(root, payload):
+    """Verify an uploaded stage (size, sha256, exactly one ref at the commit), then rename it into place."""
+    commit = text(payload.get("commit"))
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("bundle commit must be a full SHA")
+    digest, size = payload.get("sha256"), payload.get("bytes")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("bundle sha256 required")
+    if type(size) is not int or not 0 < size <= MAX_BUNDLE:
+        raise ValueError("bundle size out of bounds")
+    stage = stage_path(root, payload)
+    try:
+        if stage.is_symlink() or not stage.is_file() or stage.stat().st_size != size or sha256(stage) != digest:
+            raise ValueError("uploaded bundle size or sha256 mismatch")
+        source_ref(bundle_heads(stage), commit)
+        os.chmod(stage, 0o600)
+        destination = inside(root, "incoming", commit + ".bundle")
+        os.replace(stage, destination)
+    finally:
+        stage.unlink(missing_ok=True)
+    return {"path": str(destination), "sha256": digest, "bytes": size}
+
+
+def run(verb, payload):
+    result = {"schema": "hydraweave/node-v1", "verb": verb}
+    try:
+        if verb not in VERBS or not isinstance(payload, dict):
+            raise ValueError("unsupported install request")
+        if verb == "stat-assets":
+            paths = payload.get("paths")
+            if not isinstance(paths, list) or len(paths) > 4096:
+                raise ValueError("paths must be a list of at most 4096 asset paths")
+            rows = {}
+            for value in paths:
+                try:
+                    rows[text(value)] = stat_asset(absolute(value))
+                except (OSError, ValueError) as exc:
+                    rows[text(value)] = {"error": str(exc)}
+            return {**result, "assets": rows}
+        if verb == "verify-model":
+            model = absolute(payload.get("path"))
+            size = payload.get("bytes")
+            info = stat_asset(model)
+            if type(size) is not int or size < 0 or (size and info["bytes"] != size):
+                raise ValueError("model size mismatch")
+            digest = payload.get("sha256")
+            if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+                raise ValueError("invalid model sha256")
+            if "root" not in payload:
+                raise ValueError("root is required for a background hashing job")
+        if verb == "install":
+            validate_install(payload)
+            lab_idle(payload.get("lab_dir"))
+        root = checked_root(payload, create=verb in {"install", "bundle-prepare"})
+        if verb == "bundle-prepare":
+            return {**result, **bundle_prepare(root, payload)}
+        if verb == "bundle-accept":
+            return {**result, **bundle_accept(root, payload)}
+        if verb == "bundle-discard":
+            return {**result, **bundle_discard(root, payload)}
+        if verb in {"install", "verify-model"}:
+            policy = read_json(root / "etc" / "install-policy.json")
+            payload = {**payload, "lab_dir": payload.get("lab_dir") or policy.get("lab_dir")}
+            lab_idle(payload.get("lab_dir"))
+            result.update(launch_job(root, verb, payload))
+        elif verb == "job":
+            job = identifier(payload.get("job"))
+            state = settle_stale(inside(root, "run", "job-" + job + ".json"),
+                                 read_json(inside(root, "run", "job-" + job + ".json")))
+            # A failed job is a successful query, not a protocol failure (exit 2).
+            # Keep its diagnostic out of the response envelope's error field.
+            if "error" in state:
+                state["reason"] = state.pop("error")
+            result.update(state)
+            log = inside(root, "log", "job-" + job + ".log")
+            result["tail"] = ""
+            if log.exists():
+                with log.open("rb") as stream:
+                    stream.seek(0, os.SEEK_END)
+                    stream.seek(max(0, stream.tell() - 65536))
+                    result["tail"] = stream.read(65536).decode("utf-8", errors="ignore")
+        elif verb == "releases":
+            active = {}
+            for path in (root / "etc").glob("active-*.json"):
+                state = read_json(inside(root, "etc", path.name))
+                active[path.name[7:-5]] = state["release_id"]
+            rows = []
+            for directory in sorted((root / "releases").iterdir()):
+                if re.fullmatch(r"[0-9a-f]{12}", directory.name):
+                    _, manifest = release(root, directory.name)
+                    rows.append({"release_id": directory.name, "manifest": manifest,
+                                 "active_profiles": [p for p, rid in active.items() if rid == directory.name]})
+            result.update(releases=rows, active=active)
+        elif verb == "activate":
+            profile = identifier(payload.get("profile"))
+            if active_leases(root, profile):
+                raise ValueError("cannot activate while a lease for this profile is running")
+            _, manifest = release(root, payload.get("release_id"))
+            atomic_json(inside(root, "etc", "active-" + profile + ".json"),
+                        {"profile": profile, "release_id": release_id(manifest)})
+            result.update(profile=profile, release_id=release_id(manifest))
+        elif verb == "push-release":
+            result.update(push_release(root, payload))
+        elif verb == "uninstall":
+            if active_leases(root):
+                raise ValueError("cannot uninstall while a lease is running")
+            if service_specs(root):
+                raise ValueError("cannot uninstall while a non-lab service unit references this root's releases (etc/"
+                                 + ", etc/".join(service_specs(root)) + "); run 'hydraweave service remove' first")
+            if any(read_json(p).get("state") in {"queued", "running"}
+                   for p in (root / "run").glob("job-*.json") if not p.name.endswith(".spec.json")):
+                raise ValueError("cannot uninstall while a job is running")
+            keep = payload.get("keep_logs", False)
+            if type(keep) is not bool:
+                raise ValueError("keep_logs must be boolean")
+            # rmtree unlinks symlinks; it never follows them into assets or other roots.
+            if keep:
+                for path in root.iterdir():
+                    if path.name in {"log", ".hydraweave-root", "." + LEGACY_NAME + "-root"}:
+                        continue
+                    if path.is_symlink() or not path.is_dir():
+                        path.unlink()
+                    else:
+                        shutil.rmtree(path)
+            else:
+                shutil.rmtree(root)
+            result.update(uninstalled=True, kept_logs=keep)
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, subprocess.SubprocessError) as exc:
+        result["error"] = str(exc)
+    return result
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--job":
+        raise SystemExit(job_main(sys.argv[2]))
+    raise SystemExit("internal job entry point only")

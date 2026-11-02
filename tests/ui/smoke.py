@@ -30,7 +30,7 @@ from tests.portable_fixtures import read_fixture
 ROUTES = ("devices", "topology", "models", "recipes", "engines", "stats", "logs", "settings", "results", "sessioncache")
 TITLES = ("Devices", "Topology & links", "Models & placement", "Recipes & profiles", "Engines", "Live stats", "Logs",
           "Settings & pairing", "Measured results", "Session cache")
-API = "/hyperloom/api/"
+API = "/hydraweave/api/"
 # A node-only Qwen recipe that fits the fixture's one-node profile (test data, not a lab recipe).
 FIXTURE_RECIPE = """schema = "strix-stream/recipe-v1"
 name = "qwen-fixture-two"
@@ -90,7 +90,7 @@ class FixtureServer:
     """A separate process runs the real CLI/server, with backend calls replaced."""
 
     def __init__(self, *, blocked=False, port=None, launch_fixture=False):
-        self.temporary = tempfile.TemporaryDirectory(prefix="hyperloom-ui-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="hydraweave-ui-")
         self.directory = Path(self.temporary.name)
         self.port = port or free_port()
         self.origin = f"http://127.0.0.1:{self.port}"
@@ -161,34 +161,34 @@ class FixtureServer:
 
 
 def fixture_server(args):
-    from hyperloom import cli, config, orchestrate, remote, render, secrets
-    from hyperloom.web import api as web_api
-    from hyperloom.web import recipes as recipe_web
+    from hydraweave import cli, config, orchestrate, remote, render, secrets
+    from hydraweave.web import api as web_api
+    from hydraweave.web import recipes as recipe_web
 
     directory = args.fixture_dir
     directory.mkdir(parents=True, exist_ok=True)
     os.environ.update(APPDATA=str(directory), LOCALAPPDATA=str(directory),
                       XDG_CONFIG_HOME=str(directory), XDG_DATA_HOME=str(directory))
     machine = config.Machine("halo-1", "linux", "ssh", "192.0.2.10", "halo-1", 22,
-                             "/opt/hyperloom/halo-1", True, [{"id": "gpu"}])
+                             "/opt/hydraweave/halo-1", True, [{"id": "gpu"}])
     assets = {"halo-1": {"qwen-model": {"path": "/opt/models/qwen.gguf", "bytes": 123456789,
                                          "sha256": "a" * 64}}}
-    raw = {"schema": "hyperloom/cluster-v1", "machines": [{"id": "halo-1", "os": "linux",
+    raw = {"schema": "hydraweave/cluster-v1", "machines": [{"id": "halo-1", "os": "linux",
            "access": "ssh", "http_address": "192.0.2.10", "ssh_target": "halo-1", "ssh_port": 22,
-           "install_root": "/opt/hyperloom/halo-1", "lab_mode": True, "devices": [{"id": "gpu"}]}], "assets": assets,
+           "install_root": "/opt/hydraweave/halo-1", "lab_mode": True, "devices": [{"id": "gpu"}]}], "assets": assets,
            "profiles": {"qwen-replicas": {"nodes": ["halo-1"]}}, "router": {}, "pc": {}}
     cluster = config.Cluster({machine.id: machine}, assets, raw["profiles"], {}, {}, raw)
     inspection = json.loads(read_fixture(ROOT / "tests/fixtures/web/inspection.json"))
     for mid, system, access, address in (("workstation", "windows", "local", "192.0.2.20"),
                                           ("halo-2", "linux", "ssh", "192.0.2.11")):
         cluster.machines[mid] = config.Machine(mid, system, access, address, mid, 22,
-                                             "/opt/hyperloom/" + mid, True, [{"id": "gpu"}])
+                                             "/opt/hydraweave/" + mid, True, [{"id": "gpu"}])
     # A two-node profile for the recipes walkthrough's deploy (its recipe needs a replica on each node).
     cluster.profiles["qwen-two"] = {"preset": "qwen-replicas", "nodes": ["halo-1", "halo-2"]}
     ordered = {mid: cluster.machines[mid] for mid in ("workstation", "halo-1", "halo-2")}
     cluster.machines.clear()
     cluster.machines.update(ordered)
-    config_file = directory / "hyperloom" / "cluster.json"
+    config_file = directory / "hydraweave" / "cluster.json"
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(json.dumps(raw), encoding="utf-8", newline="\n")
     # All-zero synthetic public-key bytes; there is no private key or SSH peer.
@@ -279,7 +279,7 @@ def fixture_server(args):
                     "config": {"path": str(config_file.resolve()), "sha256": None},
                     "started_at": time.time() - 60, "router": {"machine": "local", "directory": str(directory / "router")},
                     "devices": ["halo-1:gpu"],
-                    "process_specs": [{"machine_id": "halo-1", "role": "replica", "argv": ["/opt/hyperloom/halo-1/releases/" + "a" * 12 + "/bin/strix-hip-decode-token", "--http-port", "18501"], "env": {"STRIX_COHORT_ROWS": "32"}}]}
+                    "process_specs": [{"machine_id": "halo-1", "role": "replica", "argv": ["/opt/hydraweave/halo-1/releases/" + "a" * 12 + "/bin/strix-hip-decode-token", "--http-port", "18501"], "env": {"STRIX_COHORT_ROWS": "32"}}]}
         if path.name == "router.json":
             return {"listen": {"address": "127.0.0.1", "port": 18600}, "policy": "nodes"}
         if path.name == "state.json":
@@ -289,9 +289,9 @@ def fixture_server(args):
     with ExitStack() as stack:
         # The fixture portal is no lab: its pollers are not paced and no GPU turn pauses them (the polling budget
         # itself is tested in tests/test_pollbudget.py), so every page shows its recorded node answers at once.
-        # For the same reason the node poll (hyperloom.nodepoll, tested in tests/test_nodepoll.py) does not run: the
+        # For the same reason the node poll (hydraweave.nodepoll, tested in tests/test_nodepoll.py) does not run: the
         # pages read the recorded node answers directly.
-        from hyperloom import nodepoll, pollbudget
+        from hydraweave import nodepoll, pollbudget
         replacements = [(nodepoll, "start", lambda api: None),
                         (pollbudget.Budget, "node", lambda self, *a, **kw: None),
                         (pollbudget.Budget, "engine", lambda self, *a, **kw: None),
@@ -323,10 +323,10 @@ def fixture_server(args):
                 try:
                     return recipe_web.in_process(argv, lambda path: cluster)
                 except Exception as exc:          # e.g. a probe the fixture refuses: a refusal like the CLI's
-                    return recipe_web.Result(1, b"", f"hyperloom: {exc}".encode())
+                    return recipe_web.Result(1, b"", f"hydraweave: {exc}".encode())
         stack.enter_context(patch.object(recipe_web.Runner, "run", recipe_run))
         # Hardware facts for recipes: a saved observation of the fixture's node (no probe runs here).
-        from hyperloom.recipes import commands as recipe_commands, session as recipe_session
+        from hydraweave.recipes import commands as recipe_commands, session as recipe_session
         node = {"name": "AMD Radeon 8060S", "memory_gib": 120.0, "host_ram_gib": 125.0}
         observation = recipe_session.facts_record(
             "qwen-two", {"cuda": []}, {"model": "qwen3.8-flash-next", "devices": {"halo-1": node, "halo-2": node},
@@ -352,7 +352,7 @@ def fixture_server(args):
         stack.enter_context(patch.object(render, "check_route_table", lambda table: None))
         # The fixture's engine states its prefill bounds (one prefill of up to 8 prompts, whole prompts), so the
         # fixture recipe's local prefill route is admissible; the real presets cite them per engine build.
-        from hyperloom.recipes import facts as recipe_facts
+        from hydraweave.recipes import facts as recipe_facts
         real_context = recipe_facts.context
 
         def fixture_context(cluster, profile):
@@ -361,11 +361,11 @@ def fixture_server(args):
         stack.enter_context(patch.object(recipe_facts, "context", fixture_context))
         for owner, name, value in seed_fixtures(directory, time.time()):
             stack.enter_context(patch.object(owner, name, value))
-        os.environ.update(HYPERLOOM_RECIPE_STUB="1", HYPERLOOM_TS_RECIPE="", HYPERLOOM_SS_RECIPE="")
-        os.environ["HYPERLOOM_UI_INPROCESS"] = "1"  # patched backends: keep jobs in this process
+        os.environ.update(HYDRAWEAVE_RECIPE_STUB="1", HYDRAWEAVE_TS_RECIPE="", HYDRAWEAVE_SS_RECIPE="")
+        os.environ["HYDRAWEAVE_UI_INPROCESS"] = "1"  # patched backends: keep jobs in this process
         if args.launch_fixture:
-            from hyperloom.recipes import service
-            from hyperloom.web.features import launch
+            from hydraweave.recipes import service
+            from hydraweave.web.features import launch
             original_init, original_profiles = web_api.API.__init__, web_api.API._profiles
 
             def launch_init(self, *a, **kw):
@@ -421,7 +421,7 @@ THEME_SELECTORS = {"light": r":root\s*\{",
 
 
 def check_contrast(path=None, themes_checked=("light", "dark")):
-    css = (path or ROOT / "hyperloom/web/static/app.css").read_text(encoding="utf-8")
+    css = (path or ROOT / "hydraweave/web/static/app.css").read_text(encoding="utf-8")
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
     themes = {}
     for theme in themes_checked:
@@ -456,10 +456,10 @@ def check_tokens(css, theme):
 
 
 def find_chrome():
-    candidates = [os.environ.get("CHROME"), os.environ.get("HYPERLOOM_TEST_CHROME")]
+    candidates = [os.environ.get("CHROME"), os.environ.get("HYDRAWEAVE_TEST_CHROME")]
     candidates += [shutil.which(name) for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome")]
     # The test package moves LOCALAPPDATA into its sandbox and keeps the original for per-user browser installs.
-    for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA", "HYPERLOOM_TEST_ORIGINAL_LOCALAPPDATA"):
+    for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA", "HYDRAWEAVE_TEST_ORIGINAL_LOCALAPPDATA"):
         if os.environ.get(variable):
             candidates.append(str(Path(os.environ[variable]) / "Google/Chrome/Application/chrome.exe"))
     candidates += ["/opt/google/chrome/chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"]
@@ -658,7 +658,7 @@ def keyboard_walkthrough(client, server):
             raise AssertionError("Dialog failed to return focus: " + action + " -- " + json.dumps(client.evaluate(
                 f"(() => {{ const b = document.querySelector({json.dumps(selector)}); return {{active: document.activeElement.outerHTML.slice(0, 200), "
                 "opener: b && b.outerHTML.slice(0, 200), connection: document.getElementById('connection').textContent, "
-                f"fresh: window.Hyperloom.state.fresh}}; }})()")))
+                f"fresh: window.Hydraweave.state.fresh}}; }})()")))
         if client.errors:
             raise AssertionError(json.dumps(client.errors))
         print("PASS keyboard " + action + " (Tab, reverse Tab, Space, Escape)", flush=True)
@@ -728,7 +728,7 @@ def recipes_walkthrough(client, server, output=None):
                     "document.getElementById('copy-name').value = 'qwen-walk'")
     click("#recipe-dialog-confirm")
     wait("!!document.querySelector('[data-recipe-action=open][data-id=\"qwen3.8-flash-next.walk\"]')")
-    # Export: the copy (now selected) as a bundle file, through `hyperloom recipe export`.
+    # Export: the copy (now selected) as a bundle file, through `hydraweave recipe export`.
     wait("!!document.querySelector('[data-recipe-action=export]')")
     click('[data-recipe-action="export"]')
     wait("/Exported qwen3.8-flash-next.walk/.test(document.body.innerText)")
@@ -744,10 +744,10 @@ def recipes_walkthrough(client, server, output=None):
     wait("!document.querySelector('[data-recipe-action=deploy]').disabled")
     click('[data-recipe-action="deploy"]')
     wait("document.getElementById('recipe-dialog')?.open")
-    previous_job = client.evaluate("Hyperloom.state.job?.id || null")
+    previous_job = client.evaluate("Hydraweave.state.job?.id || null")
     click("#recipe-dialog-confirm")
-    wait("!Hyperloom.state.launchRefusal && Hyperloom.state.job?.id !== " + json.dumps(previous_job)
-         + " && ['succeeded', 'failed'].includes(Hyperloom.state.job?.state)", timeout=120)
+    wait("!Hydraweave.state.launchRefusal && Hydraweave.state.job?.id !== " + json.dumps(previous_job)
+         + " && ['succeeded', 'failed'].includes(Hydraweave.state.job?.state)", timeout=120)
     job = client.evaluate("document.getElementById('job-panel').innerText")
     if "recipes/deploy" not in job or "succeeded" not in job:
         raise AssertionError("recipes walkthrough: the deploy job did not succeed: " + job[:2000])
@@ -759,33 +759,33 @@ def recipes_walkthrough(client, server, output=None):
 def preflight_refusal_walkthrough(client, server):
     """A real synchronous legacy recipe refusal stays in the job-error panel through polling."""
     client.call("Page.navigate", url=server.url + "#/recipes")
-    eventually(lambda: client.evaluate("!!window.Hyperloom && Hyperloom.state.fresh && !Hyperloom.mutationReason()"))
+    eventually(lambda: client.evaluate("!!window.Hydraweave && Hydraweave.state.fresh && !Hydraweave.mutationReason()"))
     message = "recipe preflight refused: preflight checks failed; see local audit"
     for action, arguments, detail in (
             ("up", {"profile": "qwen-replicas", "recipe_inputs": "0" * 64, "node": ["halo-1"]},
              "planned snapshot as it is"),
             ("recipes/deploy", {"inputs": "0" * 64}, "no snapshot")):
-        eventually(lambda: client.evaluate("Hyperloom.state.fresh && !Hyperloom.mutationReason()"))
-        client.evaluate(f"window.refusal = null; Hyperloom.mutate({json.dumps(action)}, {json.dumps(arguments)})"
+        eventually(lambda: client.evaluate("Hydraweave.state.fresh && !Hydraweave.mutationReason()"))
+        client.evaluate(f"window.refusal = null; Hydraweave.mutate({json.dumps(action)}, {json.dumps(arguments)})"
                         ".catch(e => { window.refusal = {message: e.message, status: e.status}; });")
         eventually(lambda: client.evaluate("window.refusal !== null"))
         refusal = client.evaluate("window.refusal")
         if refusal != {"status": 400, "message": message}:
             raise AssertionError("unexpected preflight refusal: " + json.dumps(refusal))
-        audit_path = server.directory / "hyperloom/audit.jsonl"
+        audit_path = server.directory / "hydraweave/audit.jsonl"
         audit = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[-1])
         if audit["action"] != action or audit["result"]["state"] != "refused" or detail not in audit["result"]["error"]:
             raise AssertionError("local preflight audit did not retain the refusal detail")
         eventually(lambda: client.evaluate("!document.getElementById('job-panel').hidden && "
                                            "document.getElementById('job-panel').innerText.includes(window.refusal.message)"), timeout=5)
-        client.evaluate("Hyperloom.refresh()")
+        client.evaluate("Hydraweave.refresh()")
         if not client.evaluate("document.getElementById('job-panel').innerText.includes(window.refusal.message)"):
             raise AssertionError("polling erased the preflight refusal")
     if client.evaluate("!!document.querySelector('#job-panel [data-action=cancel], #job-panel [data-action=stop]')"):
         raise AssertionError("a refused launch must have no running-job controls")
     if any(call["action"] == "up" for call in server.calls()):
         raise AssertionError("preflight refusal started the legacy engine")
-    jobs = client.evaluate("Hyperloom.request('jobs')")
+    jobs = client.evaluate("Hydraweave.request('jobs')")
     if jobs["jobs"]:
         raise AssertionError("preflight refusal created a job")
     if client.errors:
@@ -796,7 +796,7 @@ def preflight_refusal_walkthrough(client, server):
 def feature_pages(client, server, output, width, theme):
     """Every registered feature page (static/pages): it renders its title, finishes loading, does not overflow
     and raises no console error; one screenshot per page, width and theme (page-<id>-<width>-<theme>.png)."""
-    pages = client.evaluate("Object.entries(window.HyperloomPages || {}).map(([id, p]) => [id, p.title || id])")
+    pages = client.evaluate("Object.entries(window.HydraweavePages || {}).map(([id, p]) => [id, p.title || id])")
     count = 0
     for page, title in pages:
         client.call("Page.navigate", url=server.url + "#/" + page)
@@ -867,7 +867,7 @@ def shell_walkthrough(client, server, output):
             eventually(check, timeout=30)
         except AssertionError:
             raise AssertionError(f"shell: preference {field}={value!r} not saved; page says: "
-                                 + str(client.evaluate("[document.querySelector('#main [role=status]')?.textContent, JSON.stringify(window.Hyperloom.prefs())]"))) from None
+                                 + str(client.evaluate("[document.querySelector('#main [role=status]')?.textContent, JSON.stringify(window.Hydraweave.prefs())]"))) from None
 
     def scenario(content):
         # The fixture process reads this file on every request; Windows refuses to replace or remove a file another
@@ -905,8 +905,8 @@ def shell_walkthrough(client, server, output):
     go("#/history")
     go("#/devices")
     client.evaluate("new Promise(resolve => setTimeout(resolve, 7000))")
-    left = client.evaluate("({hidden: document.getElementById('connection').hidden, blocker: window.Hyperloom.mutationReason(), "
-                           "kept: Object.keys(window.Hyperloom.state.fetched).filter(k => k.startsWith('history'))})")
+    left = client.evaluate("({hidden: document.getElementById('connection').hidden, blocker: window.Hydraweave.mutationReason(), "
+                           "kept: Object.keys(window.Hydraweave.state.fetched).filter(k => k.startsWith('history'))})")
     if not left["hidden"] or left["blocker"] or left["kept"]:
         raise AssertionError("shell: a page left behind still ages the view: " + json.dumps(left))
     # Palette: Ctrl+K from a focused control, type, Enter navigates; Escape returns focus.
@@ -928,7 +928,7 @@ def shell_walkthrough(client, server, output):
     key(client, "Escape")
     wait("!document.getElementById('palette').open && document.activeElement.id === 'palette-open'")
     # A blocked action names its blocker and does not run.
-    client.evaluate("window.Hyperloom.state.busy = true")
+    client.evaluate("window.Hydraweave.state.busy = true")
     chord(client, "k")
     wait("document.getElementById('palette').open")
     client.call("Input.insertText", text="run doctor")
@@ -938,7 +938,7 @@ def shell_walkthrough(client, server, output):
     if client.evaluate("document.getElementById('action-dialog').open"):
         raise AssertionError("shell: a blocked palette action opened its dialog")
     key(client, "Escape")
-    client.evaluate("window.Hyperloom.state.busy = false")
+    client.evaluate("window.Hydraweave.state.busy = false")
     # Ctrl+B collapses and restores the sidebar.
     client.evaluate("document.activeElement.blur()")
     chord(client, "b")
@@ -985,9 +985,9 @@ def shell_walkthrough(client, server, output):
     # Save ordering: two quick changes of one field; the first answer must not overwrite the newer choice, and a
     # failed second save keeps it in this browser only (a later poll and a reload do not undo it).
     go("#/settings")
-    client.call("Fetch.enable", patterns=[{"urlPattern": "*/hyperloom/api/prefs/save", "requestStage": "Request"}])
+    client.call("Fetch.enable", patterns=[{"urlPattern": "*/hydraweave/api/prefs/save", "requestStage": "Request"}])
     try:
-        client.evaluate("(window.Hyperloom.setPref({theme: 'dark'}), window.Hyperloom.setPref({theme: 'light'}), true)")
+        client.evaluate("(window.Hydraweave.setPref({theme: 'dark'}), window.Hydraweave.setPref({theme: 'light'}), true)")
         first = client.paused_request()
         if json.loads(first["request"].get("postData") or "{}") != {"theme": "dark"}:
             raise AssertionError("shell: first save body " + str(first["request"].get("postData")))
@@ -995,7 +995,7 @@ def shell_walkthrough(client, server, output):
         second = client.paused_request()
         if json.loads(second["request"].get("postData") or "{}") != {"theme": "light"}:
             raise AssertionError("shell: second save body " + str(second["request"].get("postData")))
-        if client.evaluate("window.Hyperloom.prefs().theme") != "light":
+        if client.evaluate("window.Hydraweave.prefs().theme") != "light":
             raise AssertionError("shell: the first save's answer overwrote the newer choice")
         client.call("Fetch.failRequest", requestId=second["requestId"], errorReason="Failed")
         retry = client.paused_request()          # a refused connection is retried once
@@ -1005,11 +1005,11 @@ def shell_walkthrough(client, server, output):
     wait("/browser only/.test(document.querySelector('#main [role=status]')?.textContent || '')")
     saved("theme", "dark")
     client.evaluate("new Promise(resolve => setTimeout(resolve, 4500))")
-    if client.evaluate("window.Hyperloom.prefs().theme + document.documentElement.dataset.theme") != "lightlight":
+    if client.evaluate("window.Hydraweave.prefs().theme + document.documentElement.dataset.theme") != "lightlight":
         raise AssertionError("shell: a poll overrode a browser-only preference")
     go("#/settings", reload=True)
     client.evaluate("new Promise(resolve => setTimeout(resolve, 3000))")
-    if client.evaluate("window.Hyperloom.prefs().theme") != "light":
+    if client.evaluate("window.Hydraweave.prefs().theme") != "light":
         raise AssertionError("shell: a reload lost a browser-only preference")
     select("pref-theme", "system")
     saved("theme", "system")
@@ -1017,12 +1017,12 @@ def shell_walkthrough(client, server, output):
     # Time zones: a chosen zone applies its own rules at each timestamp (winter and summer offsets differ).
     select("pref-timezone", "Europe/Madrid")
     saved("timezone", "Europe/Madrid")
-    times = client.evaluate("[1736935200, 1752573600].map(t => window.Hyperloom.time(t))")  # 10:00 UTC in January and July
+    times = client.evaluate("[1736935200, 1752573600].map(t => window.Hydraweave.time(t))")  # 10:00 UTC in January and July
     if not (times[0].startswith("11:00") and times[1].startswith("12:00")):
         raise AssertionError("shell: zone rules not applied per timestamp: " + json.dumps(times))
     client.call("Emulation.setTimezoneOverride", timezoneId="Asia/Tokyo")
     try:
-        if not client.evaluate("window.Hyperloom.time(1736935200)").startswith("11:00"):
+        if not client.evaluate("window.Hydraweave.time(1736935200)").startswith("11:00"):
             raise AssertionError("shell: a browser in another zone did not use the chosen zone")
     finally:
         client.call("Emulation.setTimezoneOverride", timezoneId="")
@@ -1042,14 +1042,14 @@ def shell_walkthrough(client, server, output):
     go("#/settings", "document.getElementById('pref-timezone')?.options.length > 3", reload=True)
     if client.evaluate("[...document.getElementById('pref-timezone').options].some(o => o.value === 'Factory')"):
         raise AssertionError("shell: a zone this browser cannot format is offered")
-    token = client.evaluate("document.querySelector('meta[name=hyperloom-csrf]').content")
+    token = client.evaluate("document.querySelector('meta[name=hydraweave-csrf]').content")
     status, _, body = server.request("POST", API + "prefs/save", json.dumps({"timezone": "Factory"}).encode(),
-                                     {"Origin": server.origin, "Content-Type": "application/json", "X-Hyperloom-CSRF": token})
+                                     {"Origin": server.origin, "Content-Type": "application/json", "X-Hydraweave-CSRF": token})
     if status != 200:
         raise AssertionError("shell: the portal refused a zone it lists: " + body.decode("utf-8", "replace")[:300])
-    go("#/settings", "window.Hyperloom.prefs().timezone === 'Factory'", reload=True)
+    go("#/settings", "window.Hydraweave.prefs().timezone === 'Factory'", reload=True)
     wait("/Factory cannot be shown by this browser; UTC used/.test(document.getElementById('prefs-data').innerText)")
-    if not (client.evaluate("window.Hyperloom.time(1736935200)").startswith("10:00") and client.evaluate("window.Hyperloom.zone().name") == "UTC"):
+    if not (client.evaluate("window.Hydraweave.time(1736935200)").startswith("10:00") and client.evaluate("window.Hydraweave.zone().name") == "UTC"):
         raise AssertionError("shell: an unsupported saved zone did not fall back to UTC")
     select("pref-timezone", "local")
     saved("timezone", "local")
@@ -1067,9 +1067,9 @@ def shell_walkthrough(client, server, output):
     base = {"counts": {"critical": 1, "warning": 1, "info": 0}, "banner": "GPU thermal slowdown on halo-1 gpu0", "evaluated_at": now, "stale": False,
             "strip": [finding("hot", "critical", "GPU hot", "halo-1", 300), finding("disk", "warning", "Disk at 92 %", "halo-2", 4000)]}
     scenario({"health/summary": base, "overview": overview})
-    client.evaluate("localStorage.setItem('hyperloom-notify', 'true')")
+    client.evaluate("localStorage.setItem('hydraweave-notify', 'true')")
     go("#/devices", "document.querySelectorAll('#exceptions li.exception').length === 2", reload=True)
-    wait("document.title.startsWith('(2) Hyperloom') && document.getElementById('favicon').href.includes('%23d32f2f')")
+    wait("document.title.startsWith('(2) Hydraweave') && document.getElementById('favicon').href.includes('%23d32f2f')")
     wait("document.getElementById('throttle-banner').textContent === 'GPU thermal slowdown on halo-1 gpu0' && !document.getElementById('throttle-banner').hidden")
     wait("/41[.,]5 tok\\/s/.test(document.getElementById('nav-machines').innerText) && /7 tok.s · rank 1 of qwen · rank 0 on halo-1/.test(document.getElementById('nav-machines').innerText)")
     if client.evaluate("document.querySelector('#exceptions .pill').textContent") != "critical":
@@ -1113,9 +1113,9 @@ def shell_walkthrough(client, server, output):
     wait("!/evaluation stale/.test(document.getElementById('exceptions').innerText) && window.__notes.length === 3 && window.__notes[2] === 'w4'")
     # A page that lists a shell document itself shares the shell's snapshot: answer, 404 (the page shows its
     # error state), then the same answer again (the page renders it again although its content is unchanged).
-    owner = client.call("Page.addScriptToEvaluateOnNewDocument", source="""(window.HyperloomPages ||= {})["probe-owner"] = {
+    owner = client.call("Page.addScriptToEvaluateOnNewDocument", source="""(window.HydraweavePages ||= {})["probe-owner"] = {
       title: "Probe owner", group: "Operations", order: 99, endpoints: () => ["health/summary"],
-      render: () => `<p id="probe-owner">critical ${window.Hyperloom.state.docs["health/summary"].counts.critical}</p>`};""")["identifier"]
+      render: () => `<p id="probe-owner">critical ${window.Hydraweave.state.docs["health/summary"].counts.critical}</p>`};""")["identifier"]
     try:
         scenario({"health/summary": dict(base, evaluated_at=time.time()), "overview": overview})
         go("#/probe-owner", "document.getElementById('probe-owner')?.textContent === 'critical 1'", reload=True)
@@ -1145,7 +1145,7 @@ def shell_walkthrough(client, server, output):
     go("#/devices")
     for _ in range(3):
         client.evaluate("new Promise(resolve => setTimeout(resolve, 3000))")
-        age = client.evaluate("Date.now() - window.Hyperloom.state.fetched.devices")
+        age = client.evaluate("Date.now() - window.Hydraweave.state.fetched.devices")
         if age > 4500 or not client.evaluate("document.getElementById('connection').hidden && !document.getElementById('add-machine').disabled"):
             raise AssertionError(f"shell: a slow optional document delayed the screen ({age} ms since the last devices answer)")
     scenario({"health/summary": dict(base, evaluated_at=time.time()), "overview": overview})
@@ -1154,13 +1154,13 @@ def shell_walkthrough(client, server, output):
     scenario({"health/summary": dict(base, evaluated_at=time.time()), "overview": overview, "jobs_delay_s": 8})
     samples = client.evaluate("""new Promise(resolve => { const out = {aged: 0, violations: 0}; const started = Date.now();
       const timer = setInterval(() => {
-        const age = Date.now() - (window.Hyperloom.state.fetched.devices || Date.now());
-        if (age > 6000) { out.aged++; if (!window.Hyperloom.mutationReason()) out.violations++; }
+        const age = Date.now() - (window.Hydraweave.state.fetched.devices || Date.now());
+        if (age > 6000) { out.aged++; if (!window.Hydraweave.mutationReason()) out.violations++; }
         if (Date.now() - started > 9000) { clearInterval(timer); resolve(out); } }, 100); })""")
     if not samples["aged"] or samples["violations"]:
         raise AssertionError("shell: the action blocker was clear with an old document: " + json.dumps(samples))
     scenario({"health/summary": dict(base, evaluated_at=time.time()), "overview": overview})
-    wait("!window.Hyperloom.mutationReason()", timeout=40)
+    wait("!window.Hydraweave.mutationReason()", timeout=40)
     # Info tooltips: shown on focus, dismissed by Escape and kept dismissed across a poll; the pointer can move
     # from the button into the tooltip.
     go("#/stats", "!!document.querySelector('main .info-btn')")
@@ -1211,7 +1211,7 @@ def shell_walkthrough(client, server, output):
     scenario({"health/summary": "missing", "overview": "missing"})
     go("#/devices", "document.getElementById('exceptions').hidden && !document.title.startsWith('(')", reload=True)
     scenario(None)
-    client.evaluate("localStorage.removeItem('hyperloom-notify')")
+    client.evaluate("localStorage.removeItem('hydraweave-notify')")
     if client.errors:
         raise AssertionError("shell: browser console/exception errors: " + json.dumps(client.errors))
     return "palette, Ctrl+B, deep links, black/compact/Spanish/refresh preferences, strip/banner/badge/favicon/notifications, tab bar"
@@ -1229,7 +1229,7 @@ def shell_service_worker(client, server):
             raise AssertionError("service worker: timed out waiting for " + expression) from None
 
     registered = "navigator.serviceWorker.getRegistrations().then(rs => rs.filter(r => (r.active || r.waiting || r.installing)?.scriptURL === location.origin + '/sw.js').length)"
-    shell_caches = "caches.keys().then(ks => ks.filter(k => k.startsWith('hyperloom-shell-')))"
+    shell_caches = "caches.keys().then(ks => ks.filter(k => k.startsWith('hydraweave-shell-')))"
     client.call("Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False)
     client.call("Page.navigate", url=server.url + "#/devices")
     wait("document.readyState === 'complete'")
@@ -1237,24 +1237,24 @@ def shell_service_worker(client, server):
     client.call("Page.reload")
     wait("document.readyState === 'complete' && !!navigator.serviceWorker.controller")
     wait("document.querySelector('main').getAttribute('aria-busy') === 'false'")
-    entries = client.evaluate("caches.open('hyperloom-shell-v1').then(c => c.keys()).then(rs => rs.map(r => new URL(r.url).pathname))")
-    if "/app.js" not in entries or any(p.startswith("/hyperloom/api") or p in ("/", "/index.html", "/sw.js") for p in entries):
+    entries = client.evaluate("caches.open('hydraweave-shell-v1').then(c => c.keys()).then(rs => rs.map(r => new URL(r.url).pathname))")
+    if "/app.js" not in entries or any(p.startswith("/hydraweave/api") or p in ("/", "/index.html", "/sw.js") for p in entries):
         raise AssertionError("service worker: unexpected cache entries " + json.dumps(entries))
-    if client.evaluate(shell_caches) != ["hyperloom-shell-v1"]:
+    if client.evaluate(shell_caches) != ["hydraweave-shell-v1"]:
         raise AssertionError("service worker: unexpected caches")
     client.call("Network.enable")
     client.call("Network.emulateNetworkConditions", offline=True, latency=0, downloadThroughput=-1, uploadThroughput=-1)
     try:
         offline = client.evaluate("""(async () => {
           const outcome = async work => { try { const r = await work(); return r.status; } catch (_) { return 'failed'; } };
-          return {api: await outcome(() => fetch('/hyperloom/api/devices', {cache: 'no-store'})),
-                  post: await outcome(() => fetch('/hyperloom/api/prefs/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})),
+          return {api: await outcome(() => fetch('/hydraweave/api/devices', {cache: 'no-store'})),
+                  post: await outcome(() => fetch('/hydraweave/api/prefs/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})),
                   script: await outcome(() => fetch('/app.js'))}; })()""")
         if offline != {"api": "failed", "post": "failed", "script": 200}:
             raise AssertionError("service worker: offline answers " + json.dumps(offline))
         client.call("Page.navigate", url=server.url + "?offline=1")
         client.evaluate("new Promise(resolve => setTimeout(resolve, 1500))")
-        if client.evaluate("!!document.querySelector('meta[name=hyperloom-csrf]')"):
+        if client.evaluate("!!document.querySelector('meta[name=hydraweave-csrf]')"):
             raise AssertionError("service worker: an offline navigation was answered from a cache")
         # The browser's own offline error page refuses the smoke's start-up script (storage): not a portal error.
         client.errors[:] = [e for e in client.errors
@@ -1266,16 +1266,16 @@ def shell_service_worker(client, server):
     time.sleep(2)
     client.reconnect()
     client.call("Page.reload")
-    wait("document.readyState === 'complete' && !!document.querySelector('meta[name=hyperloom-csrf]')")
-    before = client.evaluate("document.querySelector('meta[name=hyperloom-csrf]').content")
+    wait("document.readyState === 'complete' && !!document.querySelector('meta[name=hydraweave-csrf]')")
+    before = client.evaluate("document.querySelector('meta[name=hydraweave-csrf]').content")
     server.process.terminate()
     server.process.wait(timeout=10)
     restarted = FixtureServer(port=server.port)
     try:
         client.call("Page.reload")
-        wait("document.readyState === 'complete' && !!document.querySelector('meta[name=hyperloom-csrf]')")
-        after = client.evaluate("document.querySelector('meta[name=hyperloom-csrf]').content")
-        served = re.search(rb'name="hyperloom-csrf" content="([^"]+)"', restarted.request("GET", "/")[2])[1].decode()
+        wait("document.readyState === 'complete' && !!document.querySelector('meta[name=hydraweave-csrf]')")
+        after = client.evaluate("document.querySelector('meta[name=hydraweave-csrf]').content")
+        served = re.search(rb'name="hydraweave-csrf" content="([^"]+)"', restarted.request("GET", "/")[2])[1].decode()
         if after == before or after != served:
             raise AssertionError("service worker: the reloaded page did not show the new portal's CSRF page")
         # The portal stops serving /sw.js: the page removes the worker and the shell caches on load.
@@ -1301,7 +1301,7 @@ def shell_service_worker(client, server):
                 client.reconnect()
             time.sleep(1.5)
             client.call("Page.navigate", url=server.url + f"not-a-page-{attempt}")
-            wait("document.readyState === 'complete' && !document.querySelector('meta[name=hyperloom-csrf]')")
+            wait("document.readyState === 'complete' && !document.querySelector('meta[name=hydraweave-csrf]')")
             try:
                 wait(f"{registered}.then(n => n === 0)", timeout=15)
                 break
@@ -1322,11 +1322,11 @@ def seed_fixtures(directory, now):
     """Feature fixture data: every tests/ui/seeds/<name>.py may define seed(store, now) (telemetry history)
     and patches(directory, now) -> [(owner, attribute, value)] (fake node verbs, engine documents)."""
     import importlib.util
-    from hyperloom.telemetry.store import Store
-    store = Store(directory / "hyperloom" / "telemetry.sqlite3")
+    from hydraweave.telemetry.store import Store
+    store = Store(directory / "hydraweave" / "telemetry.sqlite3")
     patches = []
     for path in sorted((ROOT / "tests" / "ui" / "seeds").glob("*.py")):
-        spec = importlib.util.spec_from_file_location("hyperloom_ui_seed_" + path.stem, path)
+        spec = importlib.util.spec_from_file_location("hydraweave_ui_seed_" + path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         if hasattr(module, "seed"):
@@ -1351,7 +1351,7 @@ def launch_walkthrough(client, server, output):
                            "[...document.querySelectorAll('#job-panel button')].every(b => !b.disabled)"):
         raise AssertionError("launch: cancel and stop must remain reachable")
     if not client.evaluate("(() => {const el = document.createElement('div'); "
-                           "el.innerHTML = HyperloomLaunch.render({phases: [{label: '<img src=x>', state: 'unknown', why: 'not recorded'}], "
+                           "el.innerHTML = HydraweaveLaunch.render({phases: [{label: '<img src=x>', state: 'unknown', why: 'not recorded'}], "
                            "elapsed_s: 2, eta: {n: 0, seconds: null, why: 'no history'}}); "
                            "return !el.querySelector('progress, img') && el.textContent.includes('not recorded');})()"):
         raise AssertionError("launch: missing history or escaping failed")
@@ -1364,7 +1364,7 @@ def launch_walkthrough(client, server, output):
 
 def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False, recipes_only=False,
                   launch_only=False, refusals_only=False):
-    with tempfile.TemporaryDirectory(prefix="hyperloom-chrome-", ignore_cleanup_errors=True) as profile:
+    with tempfile.TemporaryDirectory(prefix="hydraweave-chrome-", ignore_cleanup_errors=True) as profile:
         port = free_port()
         command = [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
                    "--disable-background-networking", "--disable-component-update", "--disable-sync",
@@ -1391,7 +1391,7 @@ def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False
                 client = DevTools(target["webSocketDebuggerUrl"])
                 client.call("Runtime.enable")
                 client.call("Page.enable")
-                client.call("Page.addScriptToEvaluateOnNewDocument", source="localStorage.removeItem('hyperloom-theme');")
+                client.call("Page.addScriptToEvaluateOnNewDocument", source="localStorage.removeItem('hydraweave-theme');")
                 if launch_only:
                     launch_walkthrough(client, server, output)
                     return 1
@@ -1536,7 +1536,7 @@ def main():
     if not chrome:
         print("SKIP browser smoke: Chrome/Chromium is absent (set CHROME or --chrome).")
         return 0
-    output = args.output or Path(tempfile.mkdtemp(prefix="hyperloom-ui-screenshots-"))
+    output = args.output or Path(tempfile.mkdtemp(prefix="hydraweave-ui-screenshots-"))
     output.mkdir(parents=True, exist_ok=True)
     print("Screenshots: " + str(output), flush=True)
     with FixtureServer() as server:

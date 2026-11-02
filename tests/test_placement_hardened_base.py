@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom import admission, cli, orchestrate, pollbudget, replica_spool, rtx, secrets
-from hyperloom.recipes import service
-from hyperloom.web.api import API, APIError
+from hydraweave import admission, cli, orchestrate, pollbudget, replica_spool, rtx, secrets
+from hydraweave.recipes import service
+from hydraweave.web.api import API, APIError
 
 
 class HardenedBaseTests(unittest.TestCase):
@@ -59,7 +59,7 @@ class HardenedBaseTests(unittest.TestCase):
         self.save(known=False)
         api = API(self.config, audit_path=self.root / "audit.jsonl")
         with service.configured(self.config), \
-                mock.patch("hyperloom.recipes.preflight.cli",
+                mock.patch("hydraweave.recipes.preflight.cli",
                            side_effect=lambda *a, **kw: service.reviewed_stops([], profile="placement")), \
                 mock.patch.object(admission, "for_config", side_effect=AssertionError("admitted")), \
                 mock.patch.object(orchestrate, "down", side_effect=AssertionError("stopped")):

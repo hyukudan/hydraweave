@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 NODE = Path(__file__).resolve().parents[1] / "node"
 sys.path.insert(0, str(NODE))
-spec = importlib.util.spec_from_file_location("node_models_under_test", NODE / "hyperloom_models.py")
+spec = importlib.util.spec_from_file_location("node_models_under_test", NODE / "hydraweave_models.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 sys.path.remove(str(NODE))
@@ -40,7 +40,7 @@ def tree(path):
 
 class LibraryCase(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="hyperloom-library-")
+        self.temp = tempfile.TemporaryDirectory(prefix="hydraweave-library-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
         self.lab = self.base / "lab"
@@ -316,7 +316,7 @@ class InventoryTests(LibraryCase):
         self.assertEqual((tree(self.root), tree(self.models)), before)
         self.assertFalse(any(hasattr(node, name) for name in ("spawn", "job_main", "start_verify", "job_state",
                                                               "cancel", "Pauser", "Locked", "transition")))
-        script = subprocess.run([sys.executable, str(NODE / "hyperloom_models.py"), "--job",
+        script = subprocess.run([sys.executable, str(NODE / "hydraweave_models.py"), "--job",
                                  str(self.root / "run" / "job-j1.spec.json")], capture_output=True, text=True,
                                 timeout=60)
         self.assertNotEqual(script.returncode, 0)

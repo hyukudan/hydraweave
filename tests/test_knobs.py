@@ -9,21 +9,21 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import importlib.util
 
-from hyperloom import knobs, orchestrate as orch
-from hyperloom.config import ConfigError, parse, preset
-from hyperloom.render import launch_summary, render_processes
+from hydraweave import knobs, orchestrate as orch
+from hydraweave.config import ConfigError, parse, preset
+from hydraweave.render import launch_summary, render_processes
 from tests.test_config import example, ROOT
 
 
 FIXTURES = ROOT / "tests/fixtures/render"
-_spec = importlib.util.spec_from_file_location("install_knobs_under_test", ROOT / "node" / "hyperloom_install.py")
+_spec = importlib.util.spec_from_file_location("install_knobs_under_test", ROOT / "node" / "hydraweave_install.py")
 install = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(install)
 
 
 class AdvancedKnobTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom knobs ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave knobs ")
         self.addCleanup(self.tmp.cleanup)
         self.obj = example()
         for mid in ("halo-1", "halo-2"):
@@ -140,7 +140,7 @@ class CapabilityCheckTests(unittest.TestCase):
         return Mock(machine=SimpleNamespace(id="halo-1"), **{"call.return_value": reply})
 
     def test_up_refuses_a_knob_the_release_was_not_checked_for(self):
-        machine = SimpleNamespace(id="halo-1", install_root="/opt/hyperloom/halo-1")
+        machine = SimpleNamespace(id="halo-1", install_root="/opt/hydraweave/halo-1")
         settings = {"rank0": "halo-1", "rank1": "halo-2", "advanced": {"serve_sched": "off", "dspark_ranks": 2}}
         needs = orch._knob_targets(settings, "ds41-pair")
         self.assertEqual(needs, ("strix-deepseek41-serve", ["STRIX_DS41_SERVE_SCHED"]))

@@ -21,7 +21,7 @@ def _control(machines):
     gpus = read_fixture(FIXTURES / "nvidia-gpus.csv")
     apps = read_fixture(FIXTURES / "nvidia-apps.csv")
     gib = 2 ** 30
-    return {"schema": "hyperloom/node-v1", "verb": "host", "checks": {
+    return {"schema": "hydraweave/node-v1", "verb": "host", "checks": {
         "uptime_s": {"status": "ok", "value": 93000.0},
         "memory": {"status": "ok", "value": {"MemTotal": 128 * gib, "MemAvailable": 61 * gib, "CommitTotal": 98 * gib,
                                              "CommitLimit": 152 * gib, "CommitAvailable": 54 * gib}},
@@ -75,7 +75,7 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom.web.features import machines
+    from hydraweave.web.features import machines
 
     answers = {"halo-1": _host("halo-1"), "halo-2": _host("halo-2")}
     rounds = itertools.count()

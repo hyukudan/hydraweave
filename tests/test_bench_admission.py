@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures" / "bench"))
 import support  # noqa: E402
 from fake_server import FakeServer  # noqa: E402
 
-from hyperloom import admission  # noqa: E402
-from hyperloom.bench import runs, targets  # noqa: E402
-from hyperloom.web.api import APIError  # noqa: E402
+from hydraweave import admission  # noqa: E402
+from hydraweave.bench import runs, targets  # noqa: E402
+from hydraweave.web.api import APIError  # noqa: E402
 
 
 SLOW = {"levels": [1], "max_tokens": 400}
@@ -112,13 +112,13 @@ class ReadHoldsTests(unittest.TestCase):
     def test_no_database_is_created(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.dict("os.environ", {"HYPERLOOM_ADMISSION_DB": ""}):
+                mock.patch.dict("os.environ", {"HYDRAWEAVE_ADMISSION_DB": ""}):
             config = Path(directory, "cluster.json")
             self.assertEqual(admission.read_holds(config), [])
             self.assertFalse(Path(directory, "run").exists())
 
     def test_ops_and_health_documents_read_without_writing(self):
-        from hyperloom.web.features import health, ops
+        from hydraweave.web.features import health, ops
         db = admission.Admission(":memory:")
         db.acquire("bench", {"m1"}, label="bench m1")
         db.acquire("stop", {"m2"}, label="down p")
@@ -168,7 +168,7 @@ class GuardAndWorkerTests(unittest.TestCase):
         from types import SimpleNamespace
         import json
         import tempfile
-        from hyperloom import orchestrate as real
+        from hydraweave import orchestrate as real
         cluster = SimpleNamespace(profiles={"plain": {}})
         with tempfile.TemporaryDirectory() as directory:
             mine, theirs = Path(directory, "a", "cluster.json"), Path(directory, "b", "cluster.json")
@@ -208,7 +208,7 @@ class GuardAndWorkerTests(unittest.TestCase):
             self.assertIn("could not be read", guard["why"]["preview_resources"])
 
     def test_the_ops_preview_counts_a_cancelled_benchmark(self):
-        from hyperloom.web.features import ops
+        from hydraweave.web.features import ops
         db = admission.Admission(":memory:")
         db.acquire("bench", {"m1"}, label="bench m1")
         db.release(db.acquire("stop", {"m1"}, label="down p"))
@@ -216,7 +216,7 @@ class GuardAndWorkerTests(unittest.TestCase):
         self.assertEqual(ops.bench_holds(api, {"m1"}), ["bench m1"])
 
     def test_the_preview_counts_a_cancelled_benchmark_until_it_is_released(self):
-        from hyperloom.bench import guard
+        from hydraweave.bench import guard
         holds = [{"id": "b1", "kind": "bench", "resources": ["m1"], "label": "bench m1", "cancelled": "stopped"}]
         self.assertIn("held by bench m1", guard.refusal(holds, ["m1"]))
         db = admission.Admission(":memory:")

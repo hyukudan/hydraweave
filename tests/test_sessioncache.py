@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from hyperloom import pollbudget
-from hyperloom.adapters import AdapterError, sessions
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.features import observe, sessioncache as sc
+from hydraweave import pollbudget
+from hydraweave.adapters import AdapterError, sessions
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.features import observe, sessioncache as sc
 from tests.test_observe_http import Server, fixed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sessioncache"
@@ -96,7 +96,7 @@ class CollectorTests(unittest.TestCase):
     def setUp(self):
         self.store = Store(":memory:")
         self.addCleanup(self.store.close)
-        self.api = SimpleNamespace(document=lambda name, **kw: {"schema": "hyperloom/ui-" + name + "-v1", **kw},
+        self.api = SimpleNamespace(document=lambda name, **kw: {"schema": "hydraweave/ui-" + name + "-v1", **kw},
                                    orchestrate=SimpleNamespace(_secret_name=lambda p, n: p + "-" + n),
                                    config_path=Path("cluster.json"),
                                    node_poll=SimpleNamespace(page_open=lambda: True),
@@ -383,7 +383,7 @@ class FixtureTests(unittest.TestCase):
             status, _, body = server.request("GET", API + "sessioncache")
             self.assertEqual(status, 200)
             data = json.loads(body)
-            self.assertEqual(data["schema"], "hyperloom/ui-sessioncache-v1")
+            self.assertEqual(data["schema"], "hydraweave/ui-sessioncache-v1")
             profile = next(p for p in data["profiles"] if p["profile"] == "session-demo")
             self.assertEqual(profile["sessions"][0]["id"], "conversation-A")
             self.assertEqual(profile["stats"]["ram_bytes"], 4096)

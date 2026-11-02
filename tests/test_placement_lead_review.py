@@ -13,9 +13,9 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom import device_policy, gpu_counters, placement_supervision, procs, rtx
-from hyperloom.recipes import grants, measurements, preflight, reader, service, solver
-from hyperloom.web.api import API, APIError
+from hydraweave import device_policy, gpu_counters, placement_supervision, procs, rtx
+from hydraweave.recipes import grants, measurements, preflight, reader, service, solver
+from hydraweave.web.api import API, APIError
 from tests.test_recipes_grants import NOW, window
 
 
@@ -133,7 +133,7 @@ class LeadReviewTests(unittest.TestCase):
                     self.assertIn("PC-BIG", dog.reason)
 
     def test_m1_configured_ledger_is_required_without_a_telemetry_database(self):
-        from hyperloom import pc_big
+        from hydraweave import pc_big
         ledger = self.root / "ledger.md"
         ledger.write_text("", encoding="utf-8")
         self.cluster.pc["turn_ledger"] = str(ledger)
@@ -277,7 +277,7 @@ class LeadReviewTests(unittest.TestCase):
         self.assertIsNone(api._active)
 
     def test_planner_actions_are_audited(self):
-        from hyperloom.web.features import planner
+        from hydraweave.web.features import planner
         registered = []
         reg = SimpleNamespace(get=lambda *a: None, post=lambda name, fn, **kw: registered.append((name, kw)),
                               capability=lambda *a: None)
@@ -286,7 +286,7 @@ class LeadReviewTests(unittest.TestCase):
         self.assertEqual(len(registered), 4)
 
     def test_placement_preflight_audit_uses_shared_redactor(self):
-        from hyperloom.web import api as portal
+        from hydraweave.web import api as portal
         full = "PL_E_BUSY HF_TOKEN hf_probe_secret; PASS=pass_probe_secret; mysql -pmysql_probe_secret; sshpass -p ssh_probe_secret"
         for action, arguments, argv in (
                 ("up", {"profile": "test", "recipe": "test"}, ["up", "test", "--recipe", "test"]),
@@ -307,7 +307,7 @@ class LeadReviewTests(unittest.TestCase):
                 for secret in ("hf_probe_secret", "pass_probe_secret", "mysql_probe_secret", "ssh_probe_secret"):
                     self.assertNotIn(secret, str(caught.exception))
     def test_placement_log_response_uses_shared_redactor(self):
-        from hyperloom.web import api as portal
+        from hydraweave.web import api as portal
         api = API(self.root / "config.json")
         text = "HF_TOKEN hf_probe_secret; PASS=pass_probe_secret; mysql -pmysql_probe_secret; sshpass -p ssh_probe_secret"
         api._cached = {"logs": {}}

@@ -8,12 +8,12 @@ in one layer are refused. Profile guards protect a tuned route's layout, includi
 sequence counts, and host budgets. Optional devices use `{"unbound": true}` profile identity markers when absent.
 
 Only non-empty `assist` or `components` tables activate placement (contract rev 21c). Empty tables such as
-`assist = {}` or `components = {}` are normalised away and retain legacy admission and identity rules. Hyperloom
+`assist = {}` or `components = {}` are normalised away and retain legacy admission and identity rules. Hydraweave
 and Tierstream use this same predicate; a core that drops a non-empty table is refused before binding.
 
-`hyperloom.recipes.placement.place` and `.solve` accept cached input documents or paths and return
+`hydraweave.recipes.placement.place` and `.solve` accept cached input documents or paths and return
 `PlacementOutput(document, text)`. They require the authoritative core. Discovery uses `pc.recipe_core`, then
-`HYPERLOOM_TS_RECIPE`, then `ts-recipe` on PATH, followed by legacy `HYPERLOOM_SS_RECIPE` / `ss-recipe` discovery.
+`HYDRAWEAVE_TS_RECIPE`, then `ts-recipe` on PATH, followed by legacy `HYDRAWEAVE_SS_RECIPE` / `ss-recipe` discovery.
 A missing explicit executable is an error for placement. An older executable without placement/JSON-output
 support is also refused; there is no Python placement planner or diagnostic-stub fallback.
 
@@ -26,13 +26,13 @@ placement launches and still requires its published release; the legacy prefill 
 CPU validation with an existing compatible Tierstream build:
 
 ```powershell
-$env:HYPERLOOM_TS_RECIPE = '<tierstream build>/ts-recipe.exe'
-$env:HYPERLOOM_PLACEMENT_GOLDEN = '<spec>/wave4/placement/golden'
+$env:HYDRAWEAVE_TS_RECIPE = '<tierstream build>/ts-recipe.exe'
+$env:HYDRAWEAVE_PLACEMENT_GOLDEN = '<spec>/wave4/placement/golden'
 python -m pytest -q tests/test_recipes_placement_edit.py tests/test_recipes_placement_core.py tests/test_vramplan.py
 ```
 
 The bridge tests compare literal G4 J/J2 results and JSON/text output, and exercise SV1 costs/curves through solve.
 When the sibling CPU `ts-test-place` binary is available, they also run its G4, SV1, solver and profile-guard groups
 against private copies of the contract's frozen vectors. Tierstream performs all arithmetic and comparisons;
-Hyperloom imports no reference planner. Without the environment variables these external integration checks
+Hydraweave imports no reference planner. Without the environment variables these external integration checks
 skip; invocation/error tests and editor tests still run. Existing desc-v1/vramplan parity tests are unchanged.

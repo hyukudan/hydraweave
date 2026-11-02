@@ -1,6 +1,6 @@
 # Asset integrity
 
-`hyperloom assets verify PROFILE [--include-large] [--machine MACHINE] [--config PATH]`
+`hydraweave assets verify PROFILE [--include-large] [--machine MACHINE] [--config PATH]`
 hashes the preset's assets on its configured machines through scheduled node jobs.
 Assets of 64 GiB or more require `--include-large`. Expected all-zero hashes mean
 unknown: verification still computes and records a digest. Known config hashes
@@ -18,14 +18,14 @@ relative paths, ASCII escaping, and compact separators without a trailing newlin
 Internal symlinks are followed under their relative names; escaping links, cycles,
 and special files are refused. Empty directories do not affect the content digest.
 
-The trusted cache is `%APPDATA%\hyperloom\assets-manifest.json` on Windows and
-`~/.config/hyperloom/assets-manifest.json` on POSIX. Entries are keyed first by
+The trusted cache is `%APPDATA%\hydraweave\assets-manifest.json` on Windows and
+`~/.config/hydraweave/assets-manifest.json` on POSIX. Entries are keyed first by
 machine, then by configured path, and contain bytes, mtime_ns, inode, dev, sha256,
 and verified_at (Unix timestamp). Writes are atomic and restricted to the owner.
 Directories also store a fingerprint of descendant metadata to detect changes
 without reading contents. Verification does not move or modify assets.
 
-`hyperloom assets status PROFILE [--config PATH]` compares the manifest to fresh
+`hydraweave assets status PROFILE [--config PATH]` compares the manifest to fresh
 node stats and flags stale entries. Before any lease, `up` checks all asset sizes,
 cached identities, known config digests, and known digests across pair ranks.
 An unverified asset is allowed and labelled `size only` in asset status, the `up`

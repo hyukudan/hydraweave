@@ -9,12 +9,12 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import admission, cliext, downloads
-from hyperloom.config import parse
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API, APIError
-from hyperloom.web.features import library
+from hydraweave import admission, cliext, downloads
+from hydraweave.config import parse
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API, APIError
+from hydraweave.web.features import library
 from tests.test_config import example
 
 
@@ -55,7 +55,7 @@ class DocumentTests(LibraryFeatureCase):
     def test_without_a_store_nothing_is_created_and_no_node_is_called(self):
         before = sorted(p.name for p in Path(self.dir.name).iterdir())
         document = self.api.read("library", {})
-        self.assertEqual(document["schema"], "hyperloom/ui-library-v1")
+        self.assertEqual(document["schema"], "hydraweave/ui-library-v1")
         self.assertIn("not open", document["why"]["inventory"])
         rows = {m["id"]: m for m in document["machines"]}
         self.assertEqual(rows["halo-1"]["roots"], [{"path": "/opt/assets", "source": "config"}])
@@ -152,7 +152,7 @@ class JobTests(LibraryFeatureCase):
 def _smoke():
     import importlib.util
     path = Path(__file__).resolve().parent / "ui" / "smoke.py"
-    spec = importlib.util.spec_from_file_location("hyperloom_ui_smoke_for_library", path)
+    spec = importlib.util.spec_from_file_location("hydraweave_ui_smoke_for_library", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -174,7 +174,7 @@ class LibraryPageInBrowser(unittest.TestCase):
         from urllib.parse import urlsplit
         cls.server = smoke.FixtureServer()
         host = urlsplit(cls.server.origin).hostname
-        cls.profile = tempfile.TemporaryDirectory(prefix="hyperloom-browser-", ignore_cleanup_errors=True)
+        cls.profile = tempfile.TemporaryDirectory(prefix="hydraweave-browser-", ignore_cleanup_errors=True)
         port = smoke.free_port()
         command = [smoke.find_chrome(), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
                    "--disable-background-networking", "--disable-component-update", "--disable-sync",
@@ -244,7 +244,7 @@ class LibraryPageInBrowser(unittest.TestCase):
 
 class PageAndCLITests(unittest.TestCase):
     def test_page_is_in_the_manifest_after_the_shared_chart_files(self):
-        root = Path(__file__).resolve().parents[1] / "hyperloom" / "web" / "static" / "pages"
+        root = Path(__file__).resolve().parents[1] / "hydraweave" / "web" / "static" / "pages"
         files = json.loads((root / "manifest.json").read_text(encoding="utf-8"))["files"]
         self.assertEqual(files[:2], ["timeseries.css", "timeseries.js"])
         self.assertIn("library.js", files)
@@ -256,7 +256,7 @@ class PageAndCLITests(unittest.TestCase):
         self.assertIn('data-page-action', script)
 
     def test_cli_family_parses(self):
-        from hyperloom import cli
+        from hydraweave import cli
         parser = cli.build_parser()
         args = parser.parse_args(["models", "verify", "halo-1", "/opt/assets", "m"])
         self.assertEqual((args.models_operation, args.machine, args.name), ("verify", "halo-1", "m"))
@@ -274,7 +274,7 @@ class PageAndCLITests(unittest.TestCase):
                 parser.parse_args(argv)
 
     def test_cli_verify_is_refused_before_anything_is_read_or_called(self):
-        from hyperloom import cli
+        from hydraweave import cli
         err = io.StringIO()
         with mock.patch.object(cli, "_cluster", side_effect=AssertionError("configuration read")), \
                 mock.patch.object(downloads, "_node", side_effect=AssertionError("node called")), \
@@ -284,8 +284,8 @@ class PageAndCLITests(unittest.TestCase):
         self.assertIn("model verification is not available in this release", err.getvalue())
 
     def test_cli_list_without_a_store_says_why(self):
-        from hyperloom import cli
-        from hyperloom.cliext import library as cli_library
+        from hydraweave import cli
+        from hydraweave.cliext import library as cli_library
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(cli, "config_path", return_value=Path(tmp) / "cluster.json"), \

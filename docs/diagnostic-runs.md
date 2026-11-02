@@ -4,13 +4,13 @@ A diagnostic run is an ordinary `up` with extra, **observation-only** engine swi
 non-production everywhere it is recorded, and its output lands in the node's `<install root>/log/`.
 
 ```
-hyperloom up qwen-replicas --diagnostic prefill-timing [--diagnostic cycle-timing ...]
-hyperloom status qwen-replicas        # "production": false, "diagnostic": ["prefill-timing", ...]
-hyperloom logs qwen-replicas halo-1   # stderr diagnostics are in the engine's lease log
+hydraweave up qwen-replicas --diagnostic prefill-timing [--diagnostic cycle-timing ...]
+hydraweave status qwen-replicas        # "production": false, "diagnostic": ["prefill-timing", ...]
+hydraweave logs qwen-replicas halo-1   # stderr diagnostics are in the engine's lease log
 ```
 
 ## Rules
-- The names come from the preset's `diagnostics` table (data per engine pin, `hyperloom/presets/*.json`). There is no
+- The names come from the preset's `diagnostics` table (data per engine pin, `hydraweave/presets/*.json`). There is no
   free-form env: unknown names, or names of the other preset, are refused before any remote call.
 - A diagnostic only **adds** env variables. It can never replace a production variable (rendering refuses), argv is
   unchanged, and the node's env rules still apply (reserved and loader names are rejected). Without `--diagnostic` the
@@ -21,7 +21,7 @@ hyperloom logs qwen-replicas halo-1   # stderr diagnostics are in the engine's l
   owner's and, for a pair, the peer's) carry `"production": false, "diagnostic": [...]`. Lease labels keep the approved
   `hl-` form.
 - **Never publish numbers from a diagnostic run as production measurements.** Timing switches add host clock reads and
-  stderr writes. hyperloom has no measurement publisher; any bench or report that reads hyperloom state must refuse a
+  stderr writes. Hydraweave has no measurement publisher; any bench or report that reads Hydraweave state must refuse a
   run whose state says `"production": false`.
 
 ## Verified diagnostics (engine pin `9211b07e`; source lines identical to `70ec42b9`)

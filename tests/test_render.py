@@ -8,8 +8,8 @@ import sys
 import tempfile
 import unittest
 
-from hyperloom.config import ConfigError, parse
-from hyperloom.render import render_processes, render_router, validate_router
+from hydraweave.config import ConfigError, parse
+from hydraweave.render import render_processes, render_router, validate_router
 from tests.test_config import example, ROOT
 
 
@@ -18,7 +18,7 @@ FIXTURES = ROOT / "tests/fixtures/render"
 
 class RenderTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom render ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave render ")
         self.addCleanup(self.tmp.cleanup)
         self.obj = example()
         self.key = Path(self.tmp.name) / "router host.key"
@@ -87,7 +87,7 @@ class RenderTests(unittest.TestCase):
         cluster = parse(self.obj)
         self.assertEqual(render_router(cluster, "qwen-replicas")["replicas"][0]["api_key_file"], str(self.key))
         argv = render_processes(cluster, "qwen-replicas")[0].argv
-        self.assertEqual(argv[argv.index("--http-api-key-file")+1], "/opt/hyperloom/secrets/engine.key")
+        self.assertEqual(argv[argv.index("--http-api-key-file")+1], "/opt/hydraweave/secrets/engine.key")
 
     def test_capacity_overrides_are_tokenized_and_router_ports_match(self):
         for name, overrides in (("qwen-replicas", {"--http-port":18502,"--http-max-queue":12}),
