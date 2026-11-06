@@ -1,8 +1,8 @@
 """Heterogeneous DS decode placement across the RTX PRO and the Strix pair: candidate plans and predicted tok/s.
 
-main 20:06: every unit gets a cost on each device and the plan chooses where it lives, minimising link crossings
+Every unit gets a cost on each device and the plan chooses where it lives, minimising link crossings
 per token. This module compares the plan families the engines can run today, each priced by a time model fitted on
-the measured points of hetero/hdec-report.md (2026-10-21/22, 1 user, R1, greedy, exact, 1 GbE):
+the measured points of the heterogeneous-decode runs (October 2026, 1 user, R1, greedy, exact, 1 GbE):
 
 - pair only (P15): 27.2 tok/s, every unit on the pair (measured);
 - pipeline split: RTX layers [0, K) with every expert resident, pair [K, 40), one crossing per token;
@@ -10,12 +10,12 @@ the measured points of hetero/hdec-report.md (2026-10-21/22, 1 user, R1, greedy,
   38.4 tok/s); K outside 8..22 is marked extrapolated;
 - dense + hot experts: attention, dense, shared expert and head of all 40 layers on the RTX (9.55 GiB reserve, W1),
   the hottest experts resident, the rest computed by the pair's expert servers; ms/token = 21 + 0.37 x remote
-  layers/token (hdec fit on static 24.2 remote -> 33.6 tok/s and dynamic 11.0 -> 40.1); remote layers/token =
-  40 x (1 - layer_all_local), from the held-out hit-rate curve of the routes (wave4/vramplan/curves, replica mode);
+  layers/token (fit on static 24.2 remote -> 33.6 tok/s and dynamic 11.0 -> 40.1); remote layers/token =
+  40 x (1 - layer_all_local), from the held-out hit-rate curve of the routes (the bundled ds41-hitrate.csv, replica mode);
   remote layers outside the measured 11.0..24.2 are marked extrapolated.
 
 Every candidate says whether it is a measured point or a model output (`estimate`). The pair's weights never move
-(Strix weights come only from local NVMe, main 18:01): only activations cross the link.
+(Strix weights come only from local NVMe): only activations cross the link.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ LAYERS = 40
 PAIR_ONLY_TOK_S = 27.2
 PIPE_MEASURED = ((8, 28.2), (12, 30.7), (16, 33.9), (20, 36.4), (22, 38.4))  # (K, tok/s)
 HOT = {"base_ms": 21.0, "per_remote_layer_ms": 0.37, "reserve_gib": 9.55, "measured_remote": (11.0, 24.2)}
-CROSSING_SAVING_25G_MS = 0.42  # hdec: a 2.5 GbE switch, per pipeline crossing (user decision; not measured)
+CROSSING_SAVING_25G_MS = 0.42  # a 2.5 GbE switch, per pipeline crossing (an assumed saving; not measured)
 LINKS = ("1g", "2.5g")
 
 
@@ -72,7 +72,7 @@ def pipeline(k, link="1g"):
     measured = dict(PIPE_MEASURED).get(k)
     ks = [x for x, _ in PIPE_MEASURED]
     return Candidate("pipeline", {"--cuts": k, "--layers": k, "--tiers": "D" * k, "tail --first-layer": k}, ms,
-                     f"hdec K=8/12/16/20/22 (least squares ms = {a:.2f} {b:+.3f} K)"
+                     f"measured K=8/12/16/20/22 (least squares ms = {a:.2f} {b:+.3f} K)"
                      + ("; minus 0.42 ms for 2.5 GbE (not measured)" if link == "2.5g" else ""),
                      {"rtx_layers": k, "pair_layers": LAYERS - k, "crossings_per_token": 1, "link": link},
                      extrapolated=not min(ks) <= k <= max(ks) or link != "1g",
@@ -106,7 +106,7 @@ def hot(expert_gib, curve):
     low, high = HOT["measured_remote"]
     ms = HOT["base_ms"] + HOT["per_remote_layer_ms"] * remote
     return Candidate("dense+hot", {"expert_gib": round(expert_gib, 2)}, ms,
-                     "hdec fit 21 + 0.37 ms x remote layers (static 80 GiB 33.6 tok/s, dynamic 40.1 tok/s)",
+                     "fit 21 + 0.37 ms x remote layers (static 80 GiB 33.6 tok/s, dynamic 40.1 tok/s)",
                      {"remote_layers_per_token": round(remote, 1), "layer_all_local": round(local, 3),
                       "dynamic_copies": "not modelled (measured: 80 GiB static + 10 GiB dynamic, 16 copies/token, "
                                         "40.1 tok/s)"},
@@ -137,7 +137,7 @@ def candidates(vram_cap_gib, *, curve, front_k, margin_gib=None, link="1g"):
 
 
 def curve_from_csv(path, mode="replica"):
-    """(expert GiB, layer_all_local) points from wave4/vramplan/curves/ds41-hitrate.csv."""
+    """(expert GiB, layer_all_local) points from tests/fixtures/vramplan/ds41-hitrate.csv."""
     import csv
     with open(path, newline="", encoding="utf-8") as f:
         return [(float(r["expert_gib"]), float(r["layer_all_local"])) for r in csv.DictReader(f) if r["mode"] == mode]

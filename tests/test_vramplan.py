@@ -589,7 +589,7 @@ class HeteroTests(unittest.TestCase):
         self.curve = hetero.curve_from_csv(FIXTURES / "ds41-hitrate.csv")
 
     def test_pipeline_fits_every_measured_k(self):
-        # hdec-report section 2: K = 8 / 12 / 16 / 20 / 22 -> 28.2 / 30.7 / 33.9 / 36.4 / 38.4 tok/s
+        # the measured pipeline split: K = 8 / 12 / 16 / 20 / 22 -> 28.2 / 30.7 / 33.9 / 36.4 / 38.4 tok/s
         for k, tok_s in self.hetero.PIPE_MEASURED:
             with self.subTest(k=k):
                 c = self.hetero.pipeline(k)
