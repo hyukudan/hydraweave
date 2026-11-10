@@ -43,6 +43,11 @@ stop the cluster, and the portal prints a warning saying so. Use it only on a tr
 refuses requests whose `Host` is a DNS name other than this machine's own names (IP addresses are accepted), so a web
 page elsewhere cannot rebind its name to the portal.
 
+A Linux controller that is also a worker polls and runs its own node tool as a local child, with the same commands
+an SSH session would run, so it needs no SSH key to itself. Hydraweave treats an `ssh` machine as this host when its
+`http_address` is bound to one of the controller's interfaces and its `ssh_target` user (if any) is the user running
+Hydraweave. Set `"local": true` or `"local": false` on the machine to decide explicitly.
+
 **Or keep it on loopback and tunnel**:
 
 ```sh

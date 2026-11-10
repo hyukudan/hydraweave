@@ -29,6 +29,9 @@ class Machine:
     devices: list[dict]
     lab_dir: str | None = None
     peer_ssh: dict[str, str] = field(default_factory=dict)
+    # True: this ssh machine is the controller's own host, so its node tool runs as a local child (no ssh to
+    # itself); False: always ssh; None: detected (hydraweave.remote.is_self).
+    local: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -240,7 +243,7 @@ def parse(obj: dict) -> Cluster:
     local_count = device_count = 0
     for m in rows:
         record(m, "machine", ("id", "os", "access", "http_address", "install_root"),
-               ("ssh_target", "ssh_port", "lab_mode", "devices", "lab_dir", "peer_ssh"))
+               ("ssh_target", "ssh_port", "lab_mode", "devices", "lab_dir", "peer_ssh", "local"))
         mid = identifier(m["id"], "machine.id")
         if mid in machines:
             raise ConfigError("duplicate machine id")
@@ -290,7 +293,10 @@ def parse(obj: dict) -> Cluster:
         machines[mid] = Machine(mid, m["os"], m["access"], address(m["http_address"], "http_address"),
                                 target, integer(m.get("ssh_port", 22), "ssh_port", 1, 65535),
                                 absolute(m["install_root"], "install_root", m["os"]),
-                                boolean(m.get("lab_mode", True), "lab_mode"), devices, lab, peers)
+                                boolean(m.get("lab_mode", True), "lab_mode"), devices, lab, peers,
+                                None if m.get("local") is None else boolean(m["local"], "local"))
+        if machines[mid].local and (m["access"] != "ssh" or m["os"] != "linux"):
+            raise ConfigError("machine.local: only a linux ssh machine can be marked as this controller's host")
     for machine in machines.values():
         if any(peer not in machines for peer in machine.peer_ssh):
             raise ConfigError("machine.peer_ssh: unknown machine id")

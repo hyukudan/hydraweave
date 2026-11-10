@@ -42,7 +42,7 @@ class FakeRemote:
     def bootstrap(self):
         self.calls.append((self.machine.id, "bootstrap", {}))
 
-    def has_tool(self):
+    def has_tool(self, *args, **kwargs):
         self.calls.append((self.machine.id, "has-tool", {}))
         return self.machine.id not in getattr(self, "absent", ())
 

@@ -147,6 +147,79 @@ def _config_path(path):
 SSH_CONFIG = "# Hydraweave: ignore ambient SSH configuration.\n"
 
 
+# ---- The controller's own host -------------------------------------------------------------------------------
+# A Linux controller that is also a worker reaches its own node tool as a local child instead of ssh to itself
+# (which needs the controller's key in its own authorized_keys). The commands are the same strings an ssh session
+# would run, in a login-like environment (HOME, USER, PATH, locale; nothing else of the controller's process).
+
+LOCAL_ENV_KEYS = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SHELL", "TZ")
+
+
+def _home():
+    return os.path.expanduser("~")
+
+
+def _local_env():
+    env = {key: os.environ[key] for key in LOCAL_ENV_KEYS if key in os.environ}
+    env.setdefault("HOME", _home())
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    return env
+
+
+def _current_user():
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, AttributeError):
+        return None
+
+
+def _address_is_local(address):
+    """True when this host owns `address`: binding a socket to it only succeeds on one of our interfaces."""
+    import socket
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    if ip.is_loopback:
+        return True
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.bind((str(ip), 0))
+        return True
+    except OSError:
+        return False
+
+
+def _ssh_user(target):
+    return target.rsplit("@", 1)[0] if target and "@" in target else None
+
+
+def is_self(machine):
+    """Whether `machine` is the host this process runs on (so its node tool runs locally, not over ssh).
+
+    `local: true|false` in the configuration decides. Without it, a Linux ssh machine is this host when this is a
+    POSIX host, its http_address is bound to one of our interfaces (not loopback: a loopback address names every
+    host), and the ssh user, if the target names one, is the user running this process.
+    """
+    explicit = getattr(machine, "local", None)
+    if explicit is not None:
+        return bool(explicit) and os.name == "posix"
+    if os.name != "posix" or getattr(machine, "os", None) != "linux" or getattr(machine, "access", None) != "ssh":
+        return False
+    address = getattr(machine, "http_address", None)
+    try:
+        if not isinstance(address, str) or ipaddress.ip_address(address).is_loopback:
+            return False
+    except ValueError:
+        return False
+    user = _ssh_user(getattr(machine, "ssh_target", None))
+    if user is not None and user != _current_user():
+        return False
+    return _address_is_local(address)
+
+
 def _read_or_none(path):
     try:
         return retry_sharing(lambda: Path(path).read_text(encoding="utf-8"))
@@ -197,7 +270,7 @@ def openssh_tool(name):
     return shutil.which(name) or name
 
 
-def _run(argv, data=b"", timeout=30, cancel_event=None, limit=MAX_JSON, executable=None):
+def _run(argv, data=b"", timeout=30, cancel_event=None, limit=MAX_JSON, executable=None, env=None, cwd=None):
     """Drain bounded pipes while allowing timeout and cooperative cancellation."""
     if executable is None and argv and argv[0] in ("ssh", "scp", "ssh-keyscan"):
         executable = openssh_tool(argv[0])
@@ -207,7 +280,8 @@ def _run(argv, data=b"", timeout=30, cancel_event=None, limit=MAX_JSON, executab
         raise RemoteError("remote operation cancelled")
     try:
         child = subprocess.Popen(argv, executable=executable, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, start_new_session=os.name != "nt", **no_window())
+                                 stderr=subprocess.PIPE, start_new_session=os.name != "nt", env=env, cwd=cwd,
+                                 **no_window())
     except OSError as exc:
         raise RemoteError("could not start OpenSSH command") from exc
     output = [bytearray(), bytearray()]
@@ -417,6 +491,7 @@ def known_home(machine):
 class Remote:
     def __init__(self, machine, known_hosts, ssh="ssh"):
         self.machine = machine
+        self.local = is_self(machine)
         self.known_hosts = known_hosts if isinstance(known_hosts, KnownHosts) else KnownHosts(known_hosts)
         self.ssh = ssh
         self.alias = _target(machine.id)
@@ -426,6 +501,9 @@ class Remote:
         self.node_path = None
 
     def _ssh(self, command, data=b"", timeout=30, cancel_event=None, limit=MAX_JSON):
+        if self.local:
+            # The controller's own host: the same command, in a login-like environment, without ssh to itself.
+            return _run(["/bin/sh", "-c", command], data, timeout, cancel_event, limit, env=_local_env(), cwd=_home())
         options = self.known_hosts.options(self.alias, self.address, self.port)
         return _run([self.ssh, *options, "-p", str(self.port), "-T", "--", self.target, command],
                     data, timeout, cancel_event, limit)
@@ -446,9 +524,10 @@ class Remote:
             self._path(self._ssh(LOOKUP, timeout=timeout, cancel_event=cancel_event))
         return self.node_path
 
-    def has_tool(self, timeout=30, *, cancel_event=None):
-        """Whether ~/.hydraweave-boot/hydraweave-node exists (read-only; changes nothing on the node)."""
-        raw = self._ssh('if test -f "$HOME/.hydraweave-boot/hydraweave-node" || test -f "' + LEGACY_TOOL + '"; then printf \'yes\\n\'; '
+    def has_tool(self, timeout=30, *, cancel_event=None, legacy=True):
+        """Whether ~/.hydraweave-boot/hydraweave-node (or, with legacy, the pre-rename tool) exists (read-only)."""
+        old = ' || test -f "' + LEGACY_TOOL + '"' if legacy else ""
+        raw = self._ssh('if test -f "$HOME/.hydraweave-boot/hydraweave-node"' + old + '; then printf \'yes\\n\'; '
                         "else printf 'no\\n'; fi", timeout=timeout, cancel_event=cancel_event)
         answer = raw.strip()
         if answer not in (b"yes", b"no"):
@@ -464,13 +543,17 @@ class Remote:
         self._path(self._ssh('umask 077; mkdir -p -- "$HOME/.hydraweave-boot" && '
                              'printf \'%s\\n\' "$HOME/.hydraweave-boot/hydraweave-node"',
                              timeout=timeout, cancel_event=cancel_event))
-        options = self.known_hosts.options(self.alias, self.address, self.port)
         # Stage, then rename into place: a running build-node.sh or supervisor keeps its old inode.
         stage = ".stage-" + os.urandom(6).hex()
         boot = PurePosixPath(self.node_path).parent
         self._ssh("umask 077; mkdir -- " + shlex.quote(str(boot / stage)), timeout=timeout, cancel_event=cancel_event)
-        _run([scp, *options, "-P", str(self.port), "--", *(str(path.absolute()) for path in sources),
-              f"{self.target}:.hydraweave-boot/{stage}/"], timeout=timeout, cancel_event=cancel_event)
+        if self.local:
+            for path in sources:
+                shutil.copyfile(path, Path(str(boot / stage)) / path.name)
+        else:
+            options = self.known_hosts.options(self.alias, self.address, self.port)
+            _run([scp, *options, "-P", str(self.port), "--", *(str(path.absolute()) for path in sources),
+                  f"{self.target}:.hydraweave-boot/{stage}/"], timeout=timeout, cancel_event=cancel_event)
         self._ssh("cd -- " + shlex.quote(str(boot)) + " && chmod 700 -- "
                   + " ".join(shlex.quote(stage + "/" + name) for name in NODE_FILES)
                   + " && for f in " + " ".join(shlex.quote(name) for name in NODE_FILES)
@@ -486,6 +569,9 @@ class Remote:
             raise RemoteError("upload destination must be a plain absolute node path")
         if not Path(local).is_file():
             raise RemoteError("upload source is not a file")
+        if self.local:
+            shutil.copyfile(local, remote_path)
+            return
         options = self.known_hosts.options(self.alias, self.address, self.port)
         _run([scp, *options, "-P", str(self.port), "--", str(Path(local).absolute()), f"{self.target}:{remote_path}"],
              timeout=timeout, cancel_event=cancel_event)

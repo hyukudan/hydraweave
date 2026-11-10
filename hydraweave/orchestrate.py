@@ -640,7 +640,9 @@ def nodes_update(cluster, profile, machine=None, force=False):
     for mid in mids:
         client = _client(cluster.machines[mid])
         # A machine without the node tool has no lease records either (leases run through it): nothing to check.
-        if not force and not _absent(client):
+        # Only this tool's leases matter: a pre-rename hyperloom-node answers another protocol for another root.
+        current = getattr(client, "has_tool", None)
+        if not force and not _absent(client) and (current is None or current(legacy=False)):
             live = [row for row in _call(client, "status", {"root": cluster.machines[mid].install_root}).get("leases", [])
                     if row.get("state") not in ("stopped", "failed", "aborted", "cancelled", "canceled", "finished")]
             if live:
