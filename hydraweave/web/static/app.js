@@ -346,7 +346,9 @@
     const pageControls = pageOf(page)?.actions ? (() => { try { return pageOf(page).actions(); } catch (_) { return ""; } })() : controls;
     if ($("page-actions").innerHTML !== pageControls) $("page-actions").innerHTML = pageControls;
     const running = profiles().find(p => ["running", "starting", "stopping", "degraded", "error", "failed"].includes(p.state));
-    const global = running?.state || (profiles().length ? "stopped" : state.docs.profiles ? "not configured" : "loading");
+    const homeStatusUnknown = page === "control-center" && (!state.fresh || !Array.isArray(state.docs.profiles?.profiles));
+    const global = homeStatusUnknown ? "Engine status unavailable" : running?.state
+      || (page === "control-center" ? "No engine serving" : profiles().length ? "stopped" : state.docs.profiles ? "not configured" : "loading");
     $("global-status").outerHTML = `<span id="global-status">${statusPill(global)}</span>`;
     $("mobile-status").outerHTML = `<span id="mobile-status">${statusPill(global)}</span>`;
     const local = machines().find(m => m.access === "local");
@@ -1063,7 +1065,7 @@
     const el = $("heartbeat");
     if (!el) return;
     const paused = document.hidden || !navigator.onLine;
-    const text = paused ? t("beat.paused", null, "Paused") : stale || !state.fetched.devices ? t("beat.stale", null, "Stale") : t("beat.live", {s: prefs().refresh_s}, `Live · ${prefs().refresh_s} s`);
+    const text = paused ? t("beat.paused", null, "Paused") : stale || !state.fetched.devices ? t("beat.stale", null, "Stale") : route() === "control-center" ? `Status updated ${Math.max(0, Math.floor((Date.now() - state.fetched.devices) / 1000))} s ago` : t("beat.live", {s: prefs().refresh_s}, `Live · ${prefs().refresh_s} s`);
     const style = paused ? "off" : stale || !state.fetched.devices ? "warn" : "ok";
     if (el.textContent !== text) el.textContent = text;
     el.className = `pill p-${style} heartbeat`;

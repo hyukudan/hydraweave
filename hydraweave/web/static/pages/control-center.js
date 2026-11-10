@@ -11,6 +11,64 @@
     extra: `data-page-action="cc-${name}" ${Object.entries(data).map(([k,v]) => `data-${k}="${esc(v)}"`).join(" ")}`,
   });
   const link = (label, href, primary = false) => `<a class="btn${primary ? " pri" : ""}" href="${esc(href)}">${esc(label)}</a>`;
+  const mark = kind => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${({engine:"M7 7h10v10H7z M4 9h3m-3 6h3m10-6h3m-3 6h3M9 4v3m6-3v3M9 17v3m6-3v3",turns:"m3 8 9-5 9 5-9 5z M3 12l9 5 9-5M3 16l9 5 9-5",node:"M4 4h16v6H4z M4 14h16v6H4z M7 7h1m3 0h6M7 17h1m3 0h6",pc:"M3 4h18v13H3z M9 21h6m-3-4v4"})[kind]}"></path></svg>`;
+
+  // Presentation of existing read documents only. No launch or queue mutation lives on Home.
+  const fresh = name => H().state.fresh && !H().state.errors[name] && H().state.fetched[name]
+    && Date.now() - H().state.fetched[name] <= Math.max(10000, H().prefs().refresh_s * 3000);
+  const catalog = [
+    ["Qwen3.8", "Two replicas", /qwen/i],
+    ["DeepSeek V4.1", "Pair", /deepseek/i],
+    ["MiniMax M3.1", "Pair", /minimax.*m3|m3.*minimax/i],
+    ["GLM-5.3", "Pair", /glm/i],
+    ["MiniMax-H3-Image", "Image", /minimax.*h3|h3.*image/i],
+  ];
+  function servingStatus() {
+    if (!fresh("profiles") || !Array.isArray(H().state.docs.profiles?.profiles)) return "Engine status unavailable";
+    const profiles = H().profiles();
+    const serving = profiles.filter(p => p.state === "running");
+    if (serving.length) return `${serving.length} ${serving.length === 1 ? "engine" : "engines"} serving`;
+    if (profiles.some(p => !["stopped", "idle", "not installed", "unavailable", "disabled"].includes(p.state))) return "Check engine state";
+    return "No engine serving";
+  }
+  function turnState(machine) {
+    const turns = H().state.docs.turns || {}, node = (turns.nodes || []).find(n => n.machine === machine?.id);
+    if (!fresh("turns") || !node || node.state !== "ok" || !Number.isFinite(node.age_s) || node.age_s > 90) return {text:"Turn status unavailable"};
+    const holder = node.holder;
+    if (!holder) return {text:"No GPU turn held"};
+    const confirmed = holder.parsed && holder.alive === true && holder.verified === true && !holder.past_cap
+      && (!holder.pair_state || holder.pair_state.startsWith("running (confirmed"));
+    return confirmed ? {held:true,text:"GPU turn held now",label:holder.label} : {text:"Turn holder needs review"};
+  }
+  function weave() {
+    const observed = H().machines(), configured = doc().nodes || [];
+    const pc = observed.find(m => m.os === "windows" && H().rows(m.accelerators).some(g => !g.excluded && /RTX PRO 6000/i.test(g.name || "")));
+    const slots = [
+      {id:"cluster1",label:"cluster1",detail:"Controller · AMD Strix Halo"},
+      {id:"cluster2",label:"cluster2",detail:"AMD Strix Halo"},
+      {id:pc?.id,label:"RTX PC",detail:"Optional · Windows · RTX PRO 6000"},
+    ];
+    const links = H().rows(H().state.docs.topology?.links);
+    const usb = links.filter(l => l.kind === "USB4" && ["cluster1","cluster2"].includes(l.from) && ["cluster1","cluster2"].includes(l.to));
+    const usbNote = !fresh("topology") || !usb.length ? "Link status unavailable" : usb.every(l => ["up","ok"].includes(l.health)) ? "Reported up" : "Link needs review";
+    const lan = links.filter(l => l.kind === "Ethernet" && slots.some(s => s.id === l.from));
+    return `<section class="card cc-weave" aria-labelledby="cc-weave-title"><div class="cc-section-head"><div><span class="cc-eyebrow">Machines & connections</span><h2 id="cc-weave-title">The weave</h2></div><a class="cc-text-link" href="#/topology">Topology & links <span aria-hidden="true">↗</span></a></div>
+      <div class="cc-weave-map"><div class="cc-thread-links" aria-hidden="true"><div class="cc-usb-thread"></div><div class="cc-lan-thread"></div></div>
+      <ul class="cc-threads">${slots.map(s => {
+        const machine = observed.find(m => m.id === s.id), config = configured.find(n => n.id === s.id);
+        const turn = turnState(machine), known = !!(machine || config);
+        const health = fresh("devices") && machine ? machine.health || "Status unavailable" : known ? "Status unavailable" : s.label === "RTX PC" ? "Optional · not configured" : "Not configured";
+        return `<li class="cc-thread${turn.held ? " cc-thread-held" : ""}"><div class="cc-machine-head"><span class="cc-machine-icon" aria-hidden="true">${mark(s.label === "RTX PC" ? "pc" : "node")}</span>${known ? `<a class="cc-machine-name" href="#/machine?id=${encodeURIComponent(s.id)}">${esc(s.label)}</a>` : `<strong class="cc-machine-name">${esc(s.label)}</strong>`}<span class="cc-machine-detail">${esc(s.detail)}</span><span class="cc-machine-health">${esc(health)}</span></div><div class="cc-machine-thread" aria-hidden="true"></div><div class="cc-turn${turn.held ? " cc-turn-held" : ""}"><strong>${esc(turn.text)}</strong>${turn.label ? `<span>${esc(turn.label)}</span>` : ""}</div></li>`;
+      }).join("")}</ul><div class="cc-usb-label"><strong>USB4 <span>· 2 cables / 4 streams</span></strong><span>${esc(usbNote)} · configured link</span></div><div class="cc-lan-label">LAN <span>· ${fresh("topology") && lan.length ? "Interface observations available" : "Status unavailable"}</span></div></div>
+      <div class="cc-weave-caption"><span><i class="cc-key-usb" aria-hidden="true"></i>USB4 between Strix Halo nodes</span><span><i class="cc-key-turn" aria-hidden="true"></i>Amber marks a verified GPU turn held now</span><a href="#/turns">Read the GPU queue <span aria-hidden="true">↗</span></a></div></section>`;
+  }
+  function engineCatalog() {
+    return `<section class="card cc-catalog" aria-labelledby="cc-catalog-title"><div class="cc-section-head"><div><span class="cc-eyebrow">Inference</span><h2 id="cc-catalog-title">Engines</h2></div><a class="cc-text-link" href="#/engines">Browse engines <span aria-hidden="true">↗</span></a></div><ul class="cc-engine-list">${catalog.map(([name,mode,match]) => {
+      const profile = H().profiles().find(p => match.test(`${p.family || ""} ${p.label || ""} ${H().profileId(p)}`));
+      const href = profile ? `#/engines?profile=${encodeURIComponent(H().profileId(profile))}` : "#/engine-settings";
+      return `<li><a href="${esc(href)}"><strong>${esc(name)}</strong><span>${esc(mode)}</span><span class="cc-engine-state">${profile ? esc(fresh("profiles") ? profile.state || "State unavailable" : "State unavailable") : name === "GLM-5.3" ? "Needs a preset" : "Not configured"}</span><span aria-hidden="true">↗</span></a></li>`;
+    }).join("")}</ul><p class="cc-footnote">Catalog options · configured profiles open their current engine details.</p></section>`;
+  }
 
   function controller() {
     const d = doc(), c = d.controller || {}, router = d.router || {};
@@ -31,12 +89,16 @@
   }
   function render() {
     const d = doc(), cfg = d.configuration || {}, ready = d.configured === true || cfg.state === "valid";
-    const header = `<section class="cc-welcome"><div><span class="cc-eyebrow">Your inference workspace</span><h2>${ready ? "One place to manage every node." : "Bring your machines together."}</h2><p>Prepare the software, choose the model and run it across your hardware.</p></div><img src="/assets/icon.svg" width="80" height="80" alt="" class="cc-hydra"></section>`;
+    const header = `<section class="cc-welcome"><div><span class="cc-eyebrow">Home / Control center</span><h2>Your cluster, woven together.</h2><p>Two Strix Halo nodes. An optional RTX PC. One place to see how they connect.</p></div>${link("Open engines", "#/engines", true)}</section>`;
+    const count = (d.nodes || []).length;
+    const summary = `<div class="cc-summary" aria-label="Cluster summary"><div><span class="cc-summary-icon" aria-hidden="true">${mark("engine")}</span><div><span class="cc-eyebrow">Serving</span><strong>${esc(servingStatus())}</strong></div></div><div><span class="cc-summary-icon" aria-hidden="true">${mark("turns")}</span><div><span class="cc-eyebrow">GPU turns</span><strong>Queue is read only</strong></div></div><div><span class="cc-summary-icon" aria-hidden="true">${mark("node")}</span><div><span class="cc-eyebrow">Workspace</span><strong>${count} ${count === 1 ? "machine" : "machines"} configured</strong></div></div></div>`;
     const invalid = cfg.state === "invalid" ? `<div class="banner warn" role="alert"><div><strong>The saved configuration needs attention</strong><p>${esc(cfg.error || "Validation failed")}</p><span class="mono">${esc(cfg.path)}</span></div></div>` : "";
     const initial = cfg.state === "missing" ? H().card("Start with this computer", `<p>Create the controller workspace, then add your compute nodes. No engine is started during setup.</p>${action("Create workspace", "initialize", {}, "", true)}<p class="hint">Configuration: <span class="mono">${esc(cfg.path)}</span></p>`) : "";
     const progress = ready ? `<div class="cc-main-grid">${H().card("Getting ready", steps(), "A guided path from installation to inference")}${H().card("Quick access", `<div class="cc-shortcuts"><a href="#/components"><strong>Components & updates</strong><span>Check versions and prepare downloads</span></a><a href="#/engine-settings"><strong>Engine configuration</strong><span>Profiles, model files and supported options</span></a><a href="#/recipes"><strong>Run a model</strong><span>Choose and deploy an inference recipe</span></a><a href="#/overview"><strong>Live monitoring</strong><span>Node health, memory and throughput</span></a></div>`)}</div>` : "";
     const lifecycle = d.lifecycle || {};
-    return header + invalid + initial + controller() + (notice ? `<p class="cc-notice" role="status">${esc(notice)}</p>` : "") + progress
+    const next = `<section class="card cc-next" aria-labelledby="cc-next-title"><span class="cc-eyebrow">Keep things moving</span><h2 id="cc-next-title">Next steps</h2><a class="cc-next-link" href="#/turns"><strong>Review GPU turns</strong><span>See holders and waiting tickets <b aria-hidden="true">↗</b></span></a><a class="cc-next-link" href="#/components"><strong>Check components</strong><span>Review versions and node tools <b aria-hidden="true">↗</b></span></a><button type="button" class="cc-next-link" data-page-action="cc-manage-nodes"><strong>Manage nodes</strong><span>Connections and SSH identities <b aria-hidden="true">↓</b></span></button><p class="cc-queue-note">Engines start only inside a GPU ticket queue. Hydraweave reads the queue; it never writes it.</p></section>`;
+    return header + invalid + initial + summary + weave() + `<div class="cc-home-grid">${engineCatalog()}${next}</div>`
+      + `<div class="cc-setup-heading" id="cc-node-management" tabindex="-1"><span class="cc-eyebrow">Workspace management</span><h2>Keep your cluster ready.</h2></div>` + controller() + (notice ? `<p class="cc-notice" role="status">${esc(notice)}</p>` : "") + progress
       + (ready ? H().card("Your nodes", nodes() + `<div class="cc-card-footer">${action("Add node", "add-node", {}, H().mutationReason())}${link("All machines", "#/devices")}${link("Topology & links", "#/topology")}</div>`, "Connected explicitly; status comes from each machine") : "")
       + H().card("Where does Hydraweave run?", `<p>The panel runs on <strong>${esc(d.controller?.hostname || "this computer")}</strong>. The request router can run here or on a configured Linux node. The engine's rank 0 is a compute role and does not have to host the panel.</p><p class="hint">${esc(typeof d.recommendation === "string" ? d.recommendation : d.recommendation?.detail || d.recommendation?.note || "For regular use, choose an always-on controller. A laptop can connect to it through an SSH tunnel.")}</p>${lifecycle.note ? `<div class="cc-lifecycle"><strong>${esc(lifecycle.mode || "Process lifecycle")}</strong><p>${esc(lifecycle.note)}</p></div>` : ""}${ready ? action("Choose router location", "router", {}, H().mutationReason()) : ""}`);
   }
@@ -52,10 +114,10 @@
     const input = (key,label,value,placeholder="",type="text") => `<label class="field" for="cc-node-${key}">${esc(label)}<input class="inp" id="cc-node-${key}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" spellcheck="false" ${lock}></label>`;
     const peers = Object.entries(e.peer_ssh || {}).map(([mid,alias]) => `${mid}=${alias}`).join("\n");
     UI().open({title:id ? `Edit ${id}` : "Add compute node", confirm:appendPeersOnly ? "Save peer aliases" : frozen ? "Close" : id ? "Save node" : "Add node", body:
-      `<p class="hint">Use a private network address and an SSH account that already has access to the machine. You will verify its host key after adding it.</p>${frozen ? `<p class="banner warn">${esc(frozen)}</p>` : ""}${appendPeersOnly ? '<p class="hint">You can add aliases for newly configured peer nodes. Existing aliases cannot be changed or removed. Saving records the configuration; it does not test SSH or change running processes.</p>' : ""}<div class="two">${input("id","Node name",e.id || "","halo-1")}${input("address","Private IP address",e.http_address || "","192.168.1.20")}</div><div class="two">${input("ssh","SSH account or configured alias",e.ssh_target || "","user@192.168.1.20")}${input("root","Install directory on this node",e.install_root || "","/home/user/hydraweave-node")}</div>
+      `<p class="hint">Use a private network address and an SSH account that already has access to the machine. You will verify its host key after adding it.</p>${frozen ? `<p class="banner warn">${esc(frozen)}</p>` : ""}${appendPeersOnly ? '<p class="hint">You can add aliases for newly configured peer nodes. Existing aliases cannot be changed or removed. Saving records the configuration; it does not test SSH or change running processes.</p>' : ""}<div class="two">${input("id","Node name",e.id || "","cluster2")}${input("address","Private IP address",e.http_address || "","192.168.1.20")}</div><div class="two">${input("ssh","SSH account or configured alias",e.ssh_target || "","user@192.168.1.20")}${input("root","Install directory on this node",e.install_root || "","/home/user/hydraweave-node")}</div>
       <div class="cc-lifecycle"><label class="check"><input type="checkbox" id="cc-node-lab" ${e.lab_mode ? "checked" : ""} ${lock}>Use the existing lab turn manager</label><p>Start profile uses GPU leases from this node’s lab directory. It must already contain <code>gpu-turn.sh</code>; paired profiles also need <code>gpu-turn-pair.sh</code>. Preparing node tools does not install these scripts.</p>${input("labdir","Lab directory on node (required for Start profile)",e.lab_dir || "","/home/user/gpu-lab")}<p>Without lab mode, you can register the node for monitoring and use the separate Qwen service workflow.</p></div>
       <label class="field" for="cc-node-gpus">GPU identifiers (one per line, optional)<textarea class="inp" id="cc-node-gpus" rows="2" spellcheck="false" placeholder="gpu0" ${lock}>${esc((e.devices || []).map(g => g.id).join("\n"))}</textarea><span class="hint">Register only the devices you want Hydraweave to use. Hardware checks report their actual capabilities.</span></label>
-      <details ${appendPeersOnly ? "open" : ""}><summary>Advanced connection settings</summary><div class="cc-form-stack"><div class="two"><label class="field" for="cc-node-os">System<select class="inp" id="cc-node-os" ${lock}>${["linux","windows"].map(v => `<option value="${v}" ${e.os === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label><label class="field" for="cc-node-access">Connection<select class="inp" id="cc-node-access" ${lock}>${["ssh","local"].map(v => `<option value="${v}" ${e.access === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label></div>${input("port","SSH port",e.ssh_port ?? 22,"22","number")}<label class="field" for="cc-node-peers">Peer SSH aliases (one node=alias per line)<textarea class="inp" id="cc-node-peers" rows="2" spellcheck="false" placeholder="halo-2=peer-host" ${appendPeersOnly ? "" : lock}>${esc(peers)}</textarea><span class="hint">Used for direct transfers between already configured nodes.</span></label></div></details>`,
+      <details ${appendPeersOnly ? "open" : ""}><summary>Advanced connection settings</summary><div class="cc-form-stack"><div class="two"><label class="field" for="cc-node-os">System<select class="inp" id="cc-node-os" ${lock}>${["linux","windows"].map(v => `<option value="${v}" ${e.os === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label><label class="field" for="cc-node-access">Connection<select class="inp" id="cc-node-access" ${lock}>${["ssh","local"].map(v => `<option value="${v}" ${e.access === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label></div>${input("port","SSH port",e.ssh_port ?? 22,"22","number")}<label class="field" for="cc-node-peers">Peer SSH aliases (one node=alias per line)<textarea class="inp" id="cc-node-peers" rows="2" spellcheck="false" placeholder="cluster2=cluster2" ${appendPeersOnly ? "" : lock}>${esc(peers)}</textarea><span class="hint">Used for direct transfers between already configured nodes.</span></label></div></details>`,
       submit: async () => {
         if (frozen && !appendPeersOnly) return;
         const value = key => document.getElementById(`cc-node-${key}`).value.trim();
@@ -120,7 +182,8 @@
     if (!button || button.disabled) return;
     try {
       const a = button.dataset.pageAction, mid = button.dataset.machine;
-      if (a === "cc-initialize") { button.disabled = true; await UI().post("setup/initialize",{}); notice="Workspace created. Add your compute nodes to continue."; H().announce(notice); await H().refresh(); }
+      if (a === "cc-manage-nodes") { const target = document.getElementById("cc-node-management"); target?.scrollIntoView({block:"start"}); target?.focus({preventScroll:true}); }
+      else if (a === "cc-initialize") { button.disabled = true; await UI().post("setup/initialize",{}); notice="Workspace created. Add your compute nodes to continue."; H().announce(notice); await H().refresh(); }
       else if (a === "cc-add-node") await openMachine();
       else if (a === "cc-edit-node") await openMachine(mid);
       else if (a === "cc-trust-node") await trustNode(mid);
@@ -132,6 +195,8 @@
   (window.HydraweavePages ||= {})["control-center"] = {
     title:"Home",group:"Control center",order:1,home:true,
     icon:'<path d="M3 9l7-6 7 6v8h-5v-5H8v5H3z"/>',
-    endpoints:() => ["setup"],render,
+    endpoints:() => ["setup", ...(H().pages.turns ? ["turns"] : [])],
+    ready:() => !!H().state.docs.setup,
+    error:() => H().state.errors.setup || "",render,
   };
 })();
