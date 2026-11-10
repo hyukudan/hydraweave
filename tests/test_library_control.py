@@ -150,7 +150,8 @@ class RecordedReplyTests(unittest.TestCase):
             obj["machines"][2]["lab_dir"] = "/srv/lab"
             obj["machines"][2]["install_root"] = "/opt/lab"          # the extra root lies inside it
             inventory = downloads.inventory(parse(obj), "halo-2", store, now=10)
-        self.assertEqual(node.call_args.args[2]["roots"], ["/opt/assets", "/opt/lab/models"])
+        # The lab_dir's models directory is a configured root by default (machine model_roots absent).
+        self.assertEqual(node.call_args.args[2]["roots"], ["/opt/assets", "/srv/lab/models", "/opt/lab/models"])
         root = inventory["roots"][0]
         self.assertEqual((root["source"], root["truncated"], inventory["scanned_at"]), ("prefs", ["depth"], 10))
         statuses = {unit["manifest"]["status"] for unit in root["units"]}
