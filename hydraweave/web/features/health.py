@@ -94,12 +94,36 @@ def owner_of(api):
 def acquire(store, owner, now):
     """Take or renew the evaluator lease; the generation when held, else None."""
     prepare(store)
+    _expire_dead_owner(store, owner)
     store.execute(
         "INSERT INTO health_lease(name, owner, generation, until) VALUES ('evaluator', ?, 1, ?) "
         "ON CONFLICT(name) DO UPDATE SET generation=CASE WHEN health_lease.owner=excluded.owner "
         "THEN health_lease.generation ELSE health_lease.generation + 1 END, owner=excluded.owner, until=excluded.until "
         "WHERE health_lease.owner=excluded.owner OR health_lease.until < ?", (owner, now + LEASE_TTL, now))
     return held(store, owner, now)
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)      # POSIX only: signal 0 tests existence (on Windows os.kill would end the process)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True          # exists, owned by another user
+    return True
+
+
+def _expire_dead_owner(store, owner):
+    """A restarted portal takes over at once from its own dead predecessor instead of waiting out LEASE_TTL (the
+    store belongs to this controller, so an owner's pid is a process of this host)."""
+    if os.name != "posix":
+        return
+    rows = store.execute("SELECT owner FROM health_lease WHERE name='evaluator'")
+    if not rows or rows[0][0] == owner:
+        return
+    head = str(rows[0][0]).split("-", 1)[0]
+    if head.isdigit() and int(head) != os.getpid() and not _pid_alive(int(head)):
+        store.execute("UPDATE health_lease SET until=0 WHERE name='evaluator' AND owner=?", (rows[0][0],))
 
 
 def held(store, owner, now):

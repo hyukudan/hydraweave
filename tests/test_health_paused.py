@@ -37,3 +37,15 @@ class PausedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeaseTakeoverTests(unittest.TestCase):
+    def test_a_dead_predecessor_lease_is_expired_and_a_live_one_kept(self):
+        for alive, expired in ((False, True), (True, False)):
+            store = mock.Mock()
+            store.execute.side_effect = lambda sql, params=(): [("424242-abc",)] if sql.startswith("SELECT") else []
+            with self.subTest(alive=alive), mock.patch.object(health.os, "name", "posix"), \
+                    mock.patch.object(health, "_pid_alive", return_value=alive):
+                health._expire_dead_owner(store, "1-ours")
+            updates = [c for c in store.execute.call_args_list if c.args[0].startswith("UPDATE")]
+            self.assertEqual(bool(updates), expired)
