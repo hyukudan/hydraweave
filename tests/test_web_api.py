@@ -831,7 +831,7 @@ class TransportTests(unittest.TestCase):
     def test_cli_ui_only_calls_server(self):
         with patch("hydraweave.web.server.serve") as serve, patch("sys.stdout", new_callable=io.StringIO):
             self.assertEqual(cli.main(["ui", "--port", "18701", "--no-browser"]), 0)
-            serve.assert_called_once_with(18701, no_browser=True)
+            serve.assert_called_once_with(18701, no_browser=True, listen=None)
 
 
 if __name__ == "__main__":
