@@ -99,6 +99,7 @@ def job(cluster, machine_id, job_id, cancel=False):
 # family ``hydraweave models`` both call these functions. Node work goes through the node tool's model verbs; the
 # control machine's own roots are read in process with the same module (node/hydraweave_models.py).
 
+import functools as _functools
 import hashlib as _hashlib
 import importlib.util as _importlib_util
 import json as _json
@@ -209,13 +210,26 @@ def learn_home(machine):
                          "answers") from None
 
 
+def _model_roots(machine):
+    """The machine's configured model directories (``model_roots``, default ``<lab_dir>/models``)."""
+    from .config import model_roots_of
+    roots = []
+    for value in model_roots_of(machine):
+        try:
+            roots.append(_absolute_for(machine, value))
+        except ValueError:
+            continue
+    return roots
+
+
 def configured_bases(cluster, machine):
-    """The roots the configuration gives a machine: its install root and the parents of its configured assets
-    (and of the control machine's ``control_path`` assets); an extra root must lie inside one of them. A home
+    """The roots the configuration gives a machine: its install root, its model roots (``model_roots``, default
+    ``<lab_dir>/models``) and the parents of its configured assets (and of the control machine's ``control_path``
+    assets); an extra root must lie inside one of them. A home
     directory (an asset kept directly in it) is never one: it would open the whole home. An ssh node's asset
     directories count only once this process knows that node's home (``learn_home``; the portal's node poll learns
     it at its first read): until then a saved root inside one is not used, and a save learns it first."""
-    bases = [machine.install_root]
+    bases = [machine.install_root] + _model_roots(machine)
     if getattr(machine, "access", None) == "ssh":
         from . import remote
         if remote.known_home(machine) is None:
@@ -246,7 +260,7 @@ def inside_bases(machine, value, bases):
 
 def library_roots(cluster, store=None):
     """{machine id: [{path, source}]}: parents of the configured assets (``control_path`` ones belong to the control
-    machine) and the operator's extra roots in prefs ``library/roots``."""
+    machine), the machines' model roots and the operator's extra roots in prefs ``library/roots``."""
     roots = {mid: [] for mid in cluster.machines}
     local = control_machine(cluster)
 
@@ -264,6 +278,9 @@ def library_roots(cluster, store=None):
             if local is not None and "control_path" in asset:
                 add(local.id, str(_PureWindowsPath(asset["control_path"]).parent if local.os == "windows"
                                   else PurePosixPath(asset["control_path"]).parent), "config")
+    for mid, machine in cluster.machines.items():
+        for path in _model_roots(machine):
+            add(mid, path, "config")
     extra = _pref(store, LIBRARY_PREFS, {})
     if isinstance(extra, dict):
         for mid, values in extra.items():
@@ -358,7 +375,8 @@ def inventory(cluster, machine_id, store=None, now=None):
     now = _time.time() if now is None else now
     if not roots:
         return {"machine": machine.id, "scanned_at": now, "roots": [],
-                "why": {"roots": "no model roots configured for this machine (config assets or prefs library/roots)"}}
+                "why": {"roots": "no model roots configured for this machine (machine model_roots or lab_dir, config "
+                                 "assets or prefs library/roots)"}}
     paths = [row["path"] for row in roots]
     if _is_local(machine):
         reply = models_module().run("models", {"roots": paths})
@@ -371,7 +389,108 @@ def inventory(cluster, machine_id, store=None, now=None):
     sources = {row["path"]: row["source"] for row in roots}
     for row in reply.get("roots", []):
         row["source"] = sources.get(row.get("path"), "config")
+        for unit in row.get("units") or []:
+            if isinstance(unit, dict):
+                unit.update(engine_of(cluster, machine, row.get("path"), unit))
     return {"machine": machine.id, "scanned_at": now, "roots": reply.get("roots", []), "cache": reply.get("cache")}
+
+
+# --- engine family of a model unit (controller side) -----------------------------------------------------------
+
+# (family, unit name pattern), first match wins: h3 before minimax (the h3 image files are named minimax_h3_*).
+FAMILY_RULES = (
+    ("h3-image", re.compile(r"(?:^|[^a-z0-9])h3(?:[^a-z0-9]|$)")),
+    ("qwen-replicas", re.compile(r"qwen")),
+    ("ds41-pair", re.compile(r"deepseek|ds41|dspark")),
+    ("minimax-pair", re.compile(r"minimax")),
+    ("glm", re.compile(r"glm")),
+    ("gemma", re.compile(r"nemotron|gemma|(?:^|[^a-z0-9])e4b(?:[^a-z0-9]|$)")),
+)
+INFERRED = "inferred from name"
+CONFIGURED = "config asset"
+
+
+@_functools.lru_cache(maxsize=1)
+def _family_presets():
+    return {family: tuple(names) for family, names in family_presets_uncached().items()}
+
+
+def family_presets():
+    """{engine family: [preset names]} from hydraweave/presets (a variant counts under its ``family``)."""
+    return {family: list(names) for family, names in _family_presets().items()}
+
+
+def family_presets_uncached():
+    from . import config as _config
+    result = {}
+    for name in _config.PRESET_NAMES:
+        try:
+            result.setdefault(_config.family(name), []).append(name)
+        except (OSError, ValueError):
+            continue
+    return result
+
+
+def family_of(name):
+    """The engine family a model unit name belongs to, or None."""
+    lowered = str(name).lower()
+    return next((family for family, pattern in FAMILY_RULES if pattern.search(lowered)), None)
+
+
+def _profile_presets(cluster, machine_id, asset_names):
+    """Presets of this machine's profiles that launch one of these assets."""
+    from . import config as _config
+    found = []
+    for name, profile in (cluster.profiles or {}).items():
+        if not isinstance(profile, dict):
+            continue
+        kind = profile.get("preset", name)
+        mids = profile.get("nodes") or [profile.get("rank0"), profile.get("rank1")]
+        if machine_id not in mids:
+            continue
+        try:
+            wanted = _config.preset(kind).get("assets", [])
+        except (OSError, ValueError):
+            continue
+        if any(asset in wanted for asset in asset_names) and kind not in found:
+            found.append(kind)
+    return found
+
+
+def engine_of(cluster, machine, root, unit):
+    """{"engine": {family, presets, basis, assets, why?}} for one scanned unit: the family by name pattern
+    ("inferred from name"), or "config asset" when a configured asset of this machine lies in the unit."""
+    flavour = _PureWindowsPath if machine.os == "windows" else PurePosixPath
+    name = unit.get("name")
+    if not isinstance(root, str) or not isinstance(name, str):
+        return {"engine": {"family": None, "presets": [], "basis": INFERRED, "assets": [], "why": "unit not named"}}
+    try:
+        base = _parts(machine, str(flavour(root) / name))
+    except (TypeError, ValueError):
+        base = None
+    assets = []
+    for asset_name, asset in sorted((cluster.assets.get(machine.id) or {}).items()):
+        try:
+            if base is not None and _parts(machine, asset["path"])[:len(base)] == base:
+                assets.append(asset_name)
+        except (KeyError, TypeError, ValueError):
+            continue
+    family = family_of(name)
+    presets = _profile_presets(cluster, machine.id, assets) if assets else []
+    if presets:
+        from . import config as _config
+        try:
+            family = _config.family(presets[0])
+        except (OSError, ValueError):
+            pass
+    else:
+        presets = family_presets().get(family, []) if family else []
+    row = {"family": family, "presets": presets, "basis": CONFIGURED if assets else INFERRED, "assets": assets[:16]}
+    if family is None:
+        row["why"] = "no engine family matches this name"
+    elif not presets:
+        row["why"] = "no preset"
+    return {"engine": row}
 
 
 # --- RTX PRO big-job ledger guard (control machine) -------------------------------------------------------------

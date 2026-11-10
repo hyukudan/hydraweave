@@ -1,7 +1,8 @@
 """Model library (F36): model units per machine.
 
-GET library -> hydraweave/ui-library-v1: every machine with its model roots (config assets and prefs
-    ``library/roots``), its last scan, verification results and library jobs kept from earlier releases, and the
+GET library -> hydraweave/ui-library-v1: every machine with its model roots (machine ``model_roots``, default
+    ``<lab_dir>/models``; config assets; prefs ``library/roots``), its last scan (units with ``format``, ``quant``,
+    ``size_bytes`` from the node and ``engine`` {family, presets, basis, assets} mapped here), verification results and library jobs kept from earlier releases, and the
     RTX big-job ledger guard state. It reads the portal store only: no node call, no file named by the client,
     nothing created. Copies between machines and model verification are not part of this release; the document
     says so (``copy``, ``verify_job``) and there is no route that starts either.
@@ -49,6 +50,16 @@ def _ledger(api, store):
     return downloads.ledger_guard(api.config_path, store)
 
 
+def _engines(cluster, machine, inventory):
+    """Each unit's engine family against the current configuration (also for inventories kept by older scans)."""
+    if not isinstance(inventory, dict):
+        return
+    for root in inventory.get("roots") or []:
+        for unit in (root.get("units") or []) if isinstance(root, dict) else []:
+            if isinstance(unit, dict):
+                unit.update(downloads.engine_of(cluster, machine, root.get("path"), unit))
+
+
 def overview(api, query):
     if query:
         raise ValueError("library takes no query arguments")
@@ -67,11 +78,12 @@ def overview(api, query):
     machines = []
     for machine in cluster.machines.values():
         inventory = store.get("library/inventory", machine.id) if store is not None else None
+        _engines(cluster, machine, inventory)
         row = {"id": machine.id, "os": machine.os, "access": machine.access, "lab_mode": machine.lab_mode,
                "roots": roots.get(machine.id, []), "inventory": inventory, "why": {}}
         if not row["roots"]:
-            row["why"]["roots"] = "no model roots: none of the configured assets is on this machine and prefs " \
-                                  "library/roots has none"
+            row["why"]["roots"] = "no model roots: the machine has no model_roots or lab_dir, none of the " \
+                                  "configured assets is on it and prefs library/roots has none"
         elif inventory is None:
             row["why"]["inventory"] = "not scanned yet" if store is not None else why["inventory"]
         machines.append(row)

@@ -942,8 +942,8 @@ control-machine lab verification needs the RTX ledger guard. Those failures are 
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
-| `GET library` | Roots, last scans/verifications, recent jobs and ledger guard | None | Sync; no audit | 400 query |
-| `POST library/roots` | Replace extra model roots for machine | Exactly `machine`: id, `roots`: array ≤16 absolute directory strings ≤1024 for machine OS, no controls/.. | Sync; audited | 400 path/list; 404 machine |
+| `GET library` | Roots, last scans/verifications, recent jobs and ledger guard; each scanned unit has `format` (gguf/exl3/safetensors/other), `quant`, `quant_source` (config/header/name), `size_bytes` and `engine` {`family`, `presets`, `basis` ("inferred from name" or "config asset"), `assets`, `why?`} | None | Sync; no audit | 400 query |
+| `POST library/roots` | Replace extra model roots for machine | Exactly `machine`: id, `roots`: array ≤16 absolute directory strings ≤1024 for machine OS, no controls/.., each inside the install root, a machine `model_roots` entry (default `<lab_dir>/models`) or an asset directory | Sync; audited | 400 path/list; 404 machine |
 | `POST library/ledger-accept` | Accept current RTX ledger guard baseline | Empty object | Sync; audited | 400 extra keys/unconfigured, oversized or changed ledger; 503 I/O/timeout |
 | `POST library/scan` | Scan selected/all machines and retain inventories | `machine?`: id | Audited job; no admission/hold; deadline 600 s | 400 fields; 404 machine; 409 another scan of machine within 600 s |
 

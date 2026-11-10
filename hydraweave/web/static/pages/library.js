@@ -23,7 +23,7 @@
   }
 
   function unitRows(machine, root) {
-    const {esc, cells, display} = H();
+    const {esc, cells, display, unavailable} = H();
     // Copies between machines are not part of this release: the control is shown disabled with the reason.
     const copyWhy = doc()?.copy?.available ? "" : doc()?.copy?.why || "copies between machines are not available";
     // Model verification is held in this release too (nothing starts it): disabled with the reason.
@@ -33,10 +33,14 @@
       const status = manifest.status || "unknown";
       const busy = view.busy ? "Another library request is being sent" : "";
       const verifyBlocker = verifyWhy || busy || (verifiable(status) ? "" : status === "none" ? "No manifest entries to verify against" : "The scan reached a bound in this unit");
+      const engine = unit.engine || {};
+      const engineText = engine.family ? `${engine.family}${engine.presets?.length ? ` · ${engine.presets.join(", ")}` : ` · ${engine.why || "no preset"}`}` : "";
       return cells([
         `<span class="mono lib-unit">${esc(unit.name)}</span>`,
         `<span class="hide-n">${esc(unit.kind || "?")}</span>`,
-        size(unit.bytes, manifest.why || "not measured"),
+        unit.format ? `${esc(unit.format)}${unit.quant ? ` <span class="hint">${esc(unit.quant)}</span>` : ""}` : unavailable("scan again to classify"),
+        engineText ? `${esc(engineText)} <span class="hint">${esc(engine.basis || "")}</span>` : unavailable(engine.why || "not mapped"),
+        size(unit.size_bytes ?? unit.bytes, manifest.why || "not measured"),
         `<span class="hide-n">${display(unit.files, manifest.why || "not counted")}</span>`,
         `<span class="hide-n">${unit.newest_mtime ? esc(when(unit.newest_mtime)) : H().unavailable(manifest.why || "no files")}</span>`,
         `${pill(status, statusClass(status))}${manifest.unlisted ? ` <span class="hint">${esc(manifest.unlisted)} not listed</span>` : ""}${manifest.missing ? ` <span class="hint">${esc(manifest.missing)} missing</span>` : ""}`,
@@ -58,7 +62,7 @@
     else body = (inventory.roots || []).map(root => {
       const notes = [root.error ? `unavailable · ${root.error}` : "", root.truncated?.length ? `scan bounds reached: ${root.truncated.join(", ")} (affected units show unknown)` : "",
         root.other_files ? `${root.other_files} other files at the top level` : ""].filter(Boolean);
-      return `<h3 class="lib-root"><span class="mono">${esc(root.path)}</span> ${tag(root.source || "config")} <span class="hint">free ${size(root.free_bytes, "not reported")}</span></h3>${notes.map(n => `<p class="hint">${esc(n)}</p>`).join("")}${root.error ? "" : table(["Unit", ["Kind", "hide-n"], "Size", ["Files", "hide-n"], ["Newest file", "hide-n"], "Manifest", ["Last verify", "hide-n"], "Actions"], unitRows(machine, root), `Model units in ${root.path}`)}`;
+      return `<h3 class="lib-root"><span class="mono">${esc(root.path)}</span> ${tag(root.source || "config")} <span class="hint">free ${size(root.free_bytes, "not reported")}</span></h3>${notes.map(n => `<p class="hint">${esc(n)}</p>`).join("")}${root.error ? "" : table(["Unit", ["Kind", "hide-n"], "Format / quant", "Engine", "Size", ["Files", "hide-n"], ["Newest file", "hide-n"], "Manifest", ["Last verify", "hide-n"], "Actions"], unitRows(machine, root), `Model units in ${root.path}`)}`;
     }).join("");
     return card(machine.id, head + body, subtitle);
   }
