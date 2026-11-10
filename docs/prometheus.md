@@ -41,7 +41,9 @@ state, in-flight and assigned/completed/failed counts). The service itself is no
 
 ## Security
 
-- The listener accepts only a **loopback** address; any other listen address is refused. LAN exposure is a later phase.
+- The listener binds a **loopback** address by default. `--listen 0.0.0.0:18701` (or one interface address) serves a
+  Prometheus server elsewhere; there is no authentication, and a warning is printed. DNS names in `Host` other
+  than this machine's own are refused.
 - Only `GET /metrics` is served (a query string is ignored); the `Host` header must be the listen address or `localhost` with the same port; other methods get 405.
 - No key or key path appears in the output. Engine `/metrics` and `/api/status` are the components' public endpoints.
 

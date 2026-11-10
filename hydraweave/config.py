@@ -379,11 +379,15 @@ def parse(obj: dict) -> Cluster:
                 raise ConfigError(f"pc.recipe_dirs[{index}]: expected an absolute path")
     if "recipe_core" in pc and not Path(text(pc["recipe_core"], "pc.recipe_core")).is_absolute():
         raise ConfigError("pc.recipe_core: expected an absolute path")
-    for key in ("router_listen", "ui_listen"):
-        if key in pc:
-            endpoint = listen(pc[key], f"pc.{key}")
-            if key == "ui_listen" and endpoint["address"] != "127.0.0.1":
-                raise ConfigError("UI must listen on 127.0.0.1")
+    if "router_listen" in pc:
+        listen(pc["router_listen"], "pc.router_listen")
+    if "ui_listen" in pc:
+        # Any interface may serve the portal (0.0.0.0 for a headless node); the portal warns that it has no login.
+        from . import bind
+        try:
+            bind.listen(text(pc["ui_listen"], "pc.ui_listen"), "pc.ui_listen")
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from None
     if "cuda" in pc:
         cuda = record(pc["cuda"], "pc.cuda", optional=("pro_uuid", "reservation", "grants", "host_grant"))
         if "pro_uuid" in cuda:

@@ -14,7 +14,7 @@ The controller, request router and inference rank 0 are different roles:
 
 | Role | What runs there | Placement |
 |---|---|---|
-| Controller | Hydraweave CLI, loopback portal, configuration and control jobs | Windows workstation or Linux machine |
+| Controller | Hydraweave CLI, portal (loopback by default), configuration and control jobs | Windows workstation or Linux machine |
 | Router | TensorMeld request endpoint and routing | Controller or supported configured Linux SSH node |
 | Inference worker | Engine, model files and GPU allocations | Configured Linux SSH worker |
 | Rank 0 | First worker of a paired engine; usually the pair's HTTP endpoint | Chosen by the deployment profile |
@@ -28,7 +28,22 @@ For interactive work, the Windows workstation remains a valid controller. A remo
 putting the inference data path through the workstation, subject to the selected engine's constraints.
 Moving the router does not move the portal or its state.
 
-The portal remains bound to loopback. To use a Linux controller from a desktop:
+The portal binds `127.0.0.1:18700` by default. There are two ways to use a controller that has no screen.
+
+**Listen on the network** (like ComfyUI's `--listen`), for example on a headless Strix Halo node:
+
+```sh
+hydraweave ui --listen 0.0.0.0 --port 18700 --no-browser
+```
+
+Then open `http://<node address>:18700` from any machine on the LAN. `--listen` takes `0.0.0.0` or `::` for every
+interface, or one interface address. The same value can be saved as `pc.ui_listen` (for example `"0.0.0.0:18700"`);
+the command-line options win. **There is no login**: anyone who can reach that address can configure and start or
+stop the cluster, and the portal prints a warning saying so. Use it only on a trusted network. The portal still
+refuses requests whose `Host` is a DNS name other than this machine's own names (IP addresses are accepted), so a web
+page elsewhere cannot rebind its name to the portal.
+
+**Or keep it on loopback and tunnel**:
 
 ```sh
 # On the controller, from its checkout and Python environment:

@@ -374,10 +374,19 @@ class ServerTests(unittest.TestCase):
             worker.join(5)
         self.assertEqual(first["status"], 200)
 
-    def test_non_loopback_listen_refused(self):
-        for listen in ("192.0.2.10:18701", "10.0.0.1:18701"):
-            with self.assertRaises(ValueError):
+    def test_invalid_listen_refused(self):
+        for listen in ("localhost:18701", "224.0.0.1:18701", "10.0.0.1", "127.0.0.1:70000", "fe80::1%eth0:18701"):
+            with self.subTest(listen=listen), self.assertRaises(ValueError):
                 metrics_export.MetricsServer(listen)
+
+    def test_every_interface_listen_warns_and_keeps_the_host_check(self):
+        with metrics_export.MetricsServer("0.0.0.0:0") as server:
+            self.assertTrue(server.lan)
+            port = server.server_port
+            self.assertTrue(server.host_allowed(f"127.0.0.1:{port}"))
+            self.assertTrue(server.host_allowed(f"192.0.2.10:{port}"))
+            self.assertFalse(server.host_allowed(f"attacker.example:{port}"))
+            self.assertFalse(server.host_allowed(f"192.0.2.10:{port + 1}"))
 
 
 class CliTests(unittest.TestCase):
@@ -389,9 +398,9 @@ class CliTests(unittest.TestCase):
         collect.assert_called_once_with(profile="qwen", config_path=cli.config_path())   # this configuration's
         self.assertEqual(stream.getvalue(), "hydraweave_up 1\n")
 
-    def test_serve_refuses_lan_listen(self):
+    def test_serve_refuses_a_name_as_listen_address(self):
         with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(cli.main(["metrics", "serve", "--listen", "192.0.2.10:18701"]), 1)
+            self.assertEqual(cli.main(["metrics", "serve", "--listen", "example.com:18701"]), 1)
 
 
 if __name__ == "__main__":

@@ -193,6 +193,7 @@ hloom status qwen-replicas
 hloom endpoint qwen-replicas                    # the router address for clients
 hloom down qwen-replicas
 hloom ui                                        # the portal on http://127.0.0.1:18700
+hloom ui --listen 0.0.0.0 --no-browser          # headless machine: the portal on every interface, NO login
 ```
 
 ## 8. Upgrade, roll back, uninstall

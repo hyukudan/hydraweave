@@ -165,7 +165,8 @@ class ConfigTests(unittest.TestCase):
                  (("profiles", "qwen-replicas"), "receipt", "unqualified"),
                  (("profiles", "qwen-replicas"), "release_id", "../unqualified"),
                  (("profiles", "qwen-replicas"), "port", 65536),
-                 (("pc",), "ui_listen", "192.0.2.10:18700")]
+                 (("pc",), "ui_listen", "localhost:18700"),
+                 (("pc",), "ui_listen", "224.0.0.1:18700")]
         for path, key, value in cases:
             with self.subTest(path=path, key=key, value=value):
                 obj = example()

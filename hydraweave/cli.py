@@ -448,8 +448,11 @@ def build_parser(parser_class=argparse.ArgumentParser):
     parser = parser_class(prog="hydraweave")
     parser.add_argument("--version", action="version", version=_version())
     commands = parser.add_subparsers(dest="command", required=True)
-    ui = commands.add_parser("ui", help="open the local portal")
-    ui.add_argument("--port", type=int, default=18700)
+    ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
+    ui.add_argument("--listen", metavar="ADDR",
+                    help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "
+                         "interface WITHOUT authentication, e.g. on a headless node")
+    ui.add_argument("--port", type=int, help="port (default: pc.ui_listen, else 18700; 0 picks a free one)")
     ui.add_argument("--no-browser", action="store_true")
     ui.add_argument("--config", type=Path, help="workspace configuration to open or initialize")
     config = commands.add_parser("config").add_subparsers(dest="operation", required=True)
@@ -550,7 +553,7 @@ def build_parser(parser_class=argparse.ArgumentParser):
     metrics = commands.add_parser("metrics", help="Prometheus re-export of router and engine telemetry")
     metrics.add_argument("operation", choices=("dump", "serve"))
     metrics.add_argument("profile", nargs="?")
-    metrics.add_argument("--listen", default="127.0.0.1:18701", help="loopback IP:port (serve only)")
+    metrics.add_argument("--listen", default="127.0.0.1:18701", help="IP:port to bind (serve only; default 127.0.0.1:18701, 0.0.0.0:PORT serves every interface without authentication)")
     # Launch states of every configuration share one runtime directory: these commands show the --config one's.
     for command in (status, logs, metrics):
         scope = command.add_mutually_exclusive_group()
@@ -846,9 +849,10 @@ def main(argv=None):
             return args.ext_run(args)
         release = _admission_hold(args)
         if args.command == "ui":
-            if not 0 <= args.port <= 65535:
+            if args.port is not None and not 0 <= args.port <= 65535:
                 raise ValueError("ui port must be in 0..65535")
-            _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser,
+            listen = None if args.listen is None else _module("hydraweave.bind").address(args.listen, "--listen")
+            _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser, listen=listen,
                                                   **({"config_path": args.config} if args.config else {}))
         elif args.command in ("up", "down") and args.profile is None and not (
                 getattr(args, "recipe", None) or getattr(args, "recipe_inputs", None)):

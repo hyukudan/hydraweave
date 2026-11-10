@@ -112,7 +112,8 @@ def _cluster(api):
 def _ui_port(cluster):
     try:
         listen = (cluster.pc or {}).get("ui_listen") if cluster is not None else None
-        return config.listen(listen, "pc.ui_listen")["port"] if listen else UI_DEFAULT_PORT
+        from hydraweave import bind
+        return bind.listen(listen, "pc.ui_listen")["port"] if listen else UI_DEFAULT_PORT
     except ValueError:
         return UI_DEFAULT_PORT
 
