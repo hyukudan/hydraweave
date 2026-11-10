@@ -347,8 +347,10 @@
     if ($("page-actions").innerHTML !== pageControls) $("page-actions").innerHTML = pageControls;
     const running = profiles().find(p => ["running", "starting", "stopping", "degraded", "error", "failed"].includes(p.state));
     const global = running?.state || (profiles().length ? "stopped" : state.docs.profiles ? "not configured" : "loading");
-    $("global-status").outerHTML = `<span id="global-status">${statusPill(global)}</span>`;
-    $("mobile-status").outerHTML = `<span id="mobile-status">${statusPill(global)}</span>`;
+    // "stopped" is the serving state of the profiles, not of this page: say so in words.
+    const label = global === "stopped" ? t("serve.none", null, "No engine serving") : global;
+    $("global-status").outerHTML = `<span id="global-status">${statusPill(label)}</span>`;
+    $("mobile-status").outerHTML = `<span id="mobile-status">${statusPill(label)}</span>`;
     const local = machines().find(m => m.access === "local");
     $("control-machine").textContent = local ? `Control · ${local.name || local.id}` : "Control · this machine";
     $("version").textContent = doc("settings").version ? `Hydraweave ${doc("settings").version}` : "Hydraweave · local portal";
@@ -405,7 +407,7 @@
     const message = document.hidden ? t("conn.paused", null, "Polling paused in background. Controls resume after authoritative state is fetched.") : !navigator.onLine ? t("conn.offline", null, "Offline. Displaying the last received state.") : stale ? `${t("conn.stale", {time: formatTime(oldest / 1000)}, `Stale · as of ${formatTime(oldest / 1000)}.`)} ${errors.join(" · ")}` : !state.fresh ? t("conn.refreshing", null, "Refreshing authoritative state before enabling actions…") : "";
     $("connection").hidden = !message;
     $("connection").textContent = message;
-    renderHeartbeat(stale);
+    renderHeartbeat(stale, Math.max(0, Math.round((Date.now() - oldest) / 1000)));
   }
   function renderJob() {
     const panel = $("job-panel"), job = state.launchRefusal || state.job, active = !state.launchRefusal && activeJob();
@@ -413,9 +415,27 @@
     if (!job) return;
     panel.innerHTML = `<div class="row"><b>${esc(job.action || "Action")} · ${statusPill(job.state || job.status)}</b><span class="mono">${esc(job.id || job.job || "")}</span>${active && (job.action === "up" || job.action?.includes("/")) ? button(["up", "recipes/deploy"].includes(job.action) ? "Cancel start" : "Cancel job", "cancel-job") : ""}${active && job.arguments?.profile ? button("Stop profile", "stop", {style: "dan"}) : ""}</div><p>${display(job.progress, "waiting for progress")}</p>${["up", "recipes/deploy"].includes(job.action) && (job.id || job.job) ? window.HydraweaveLaunch?.render(state.docs["launch/" + (job.id || job.job)]) || (state.launchErrors?.["launch/" + (job.id || job.job)] ? '<p class="hint">Launch timeline unavailable</p>' : "") : ""}${job.error ? `<p class="field-error" role="alert">${display(job.error)}</p><a class="btn" href="#/logs">View logs</a>` : ""}${job.result != null ? `<details><summary>Result (redacted)</summary><pre class="raw">${esc(JSON.stringify(job.result, null, 2))}</pre></details>` : ""}`;
   }
+  // A portal restarted under a page that stayed open answers its old CSRF token with 403: read the current token
+  // from the portal's own page (same origin only) and send the write once more.
+  async function freshToken() {
+    const html = await (await fetch("/", {cache: "no-store", credentials: "same-origin"})).text();
+    const token = new DOMParser().parseFromString(html, "text/html").querySelector('meta[name="hydraweave-csrf"]')?.content;
+    const meta = document.querySelector('meta[name="hydraweave-csrf"]');
+    if (token && meta) meta.content = token;
+    return token;
+  }
   async function request(endpoint, options = {}) {
-    const response = await fetch(api + endpoint, {cache: "no-store", credentials: "same-origin", ...options});
-    const body = await response.json();
+    let response = await fetch(api + endpoint, {cache: "no-store", credentials: "same-origin", ...options});
+    let body = await response.json();
+    const sent = options.headers?.["X-Hydraweave-CSRF"];
+    if (response.status === 403 && sent && body.error === "invalid CSRF token") {
+      const token = await freshToken().catch(() => null);
+      if (token && token !== sent) {
+        response = await fetch(api + endpoint, {cache: "no-store", credentials: "same-origin", ...options,
+                                                headers: {...options.headers, "X-Hydraweave-CSRF": token}});
+        body = await response.json();
+      }
+    }
     if (!response.ok) throw Object.assign(new Error(body.error || `HTTP ${response.status}`), {status: response.status});
     return body;
   }
@@ -787,6 +807,8 @@
     $("sidebar").classList.remove("open"); $("menu").setAttribute("aria-expanded", "false"); $("menu").setAttribute("aria-label", "Open navigation menu");
     $("main").innerHTML = ""; state.lastExternal = null; linkDone = "";
     render(); refresh(); $("main").focus({preventScroll: true});
+    // A new page starts at its top; the previous page's scroll offset must not carry over (deep links scroll themselves).
+    if (!hashQuery().get("section")) window.scrollTo(0, 0);
   });
   document.addEventListener("visibilitychange", () => { state.generation++; state.fresh = false; if (document.hidden) pollAbort?.abort(); render(); resetPolling(); });
   addEventListener("online", () => { state.fresh = false; render(); resetPolling(); });
@@ -1059,11 +1081,11 @@
     }).join("")}` : "";
     if ($("nav-machines").innerHTML !== html) $("nav-machines").innerHTML = html;
   }
-  function renderHeartbeat(stale) {
+  function renderHeartbeat(stale, age = 0) {
     const el = $("heartbeat");
     if (!el) return;
     const paused = document.hidden || !navigator.onLine;
-    const text = paused ? t("beat.paused", null, "Paused") : stale || !state.fetched.devices ? t("beat.stale", null, "Stale") : t("beat.live", {s: prefs().refresh_s}, `Live · ${prefs().refresh_s} s`);
+    const text = paused ? t("beat.paused", null, "Paused") : stale || !state.fetched.devices ? t("beat.stale", null, "Stale") : t("beat.updated", {s: age}, `Status updated ${age} s ago`);
     const style = paused ? "off" : stale || !state.fetched.devices ? "warn" : "ok";
     if (el.textContent !== text) el.textContent = text;
     el.className = `pill p-${style} heartbeat`;

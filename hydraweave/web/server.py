@@ -72,12 +72,12 @@ class PortalServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64     # feature pages poll several documents at once; the default backlog of 5 refuses bursts
 
-    def __init__(self, port=18700, *, api=None, static_dir=None, listen="127.0.0.1"):
+    def __init__(self, port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
         self.listen_address = bind.address(listen)
         self.address_family = bind.family(self.listen_address)
         self.api = api if api is not None else API()
         self.static_dir = Path(static_dir) if static_dir else STATIC_DIR
-        self.csrf_token = secrets.token_urlsafe(32)
+        self.csrf_token = _token(token_file)
         super().__init__((self.listen_address, port), Handler)
         self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
@@ -359,9 +359,37 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = _method
 
 
-def create_server(port=18700, *, api=None, static_dir=None, listen="127.0.0.1"):
+def create_server(port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
     """Create the portal server (loopback unless `listen` says otherwise); port=0 is useful for isolated tests."""
-    return PortalServer(port, api=api, static_dir=static_dir, listen=listen)
+    return PortalServer(port, api=api, static_dir=static_dir, listen=listen, token_file=token_file)
+
+
+TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+def _token(path=None):
+    """The CSRF token pages embed. With a file (the portal's runtime directory), the same token survives a portal
+    restart, so pages that stay open keep working; the file is private to this user (0600) and never served."""
+    if path is None:
+        return secrets.token_urlsafe(32)
+    path = Path(path)
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        if TOKEN_RE.fullmatch(value):
+            return value
+    except (OSError, UnicodeError):
+        pass
+    value = secrets.token_urlsafe(32)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(4))
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as stream:
+            stream.write(value)
+        os.replace(temporary, path)
+    except OSError:
+        pass  # an unwritable runtime directory only costs open pages a reload after a restart
+    return value
 
 
 def _configured_listen(api):
@@ -402,7 +430,12 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
     configured = _configured_listen(api) if listen is None or port is None else None
     listen = listen if listen is not None else (configured["address"] if configured else "127.0.0.1")
     port = port if port is not None else (configured["port"] if configured else 18700)
-    with create_server(port, api=api, listen=listen) as server:
+    from hydraweave import secrets as runtime
+    try:
+        token_file = runtime.runtime_dir() / "portal-csrf"
+    except Exception:  # noqa: BLE001 - no runtime directory: a per-process token, as before
+        token_file = None
+    with create_server(port, api=api, listen=listen, token_file=token_file) as server:
         if server.lan:
             print(bind.LAN_WARNING.format(what="the Hydraweave portal",
                                           listen=bind.url_host(server.listen_address, server.server_port)),

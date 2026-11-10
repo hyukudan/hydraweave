@@ -83,6 +83,62 @@ class PortalTests(unittest.TestCase):
                 server.shutdown()
                 thread.join(5)
 
+    def _serve(self, server):
+        import threading
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .05}, daemon=True)
+        thread.start()
+        return thread
+
+    @staticmethod
+    def _post(port, host, origin, token):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        body = b'{"component": "not-a-component"}'
+        connection.putrequest("POST", "/hydraweave/api/components/check", skip_host=True)
+        for name, value in (("Host", host), ("Origin", origin), ("X-Hydraweave-CSRF", token),
+                            ("Content-Type", "application/json"), ("Content-Length", str(len(body)))):
+            connection.putheader(name, value)
+        connection.endheaders()
+        connection.send(body)
+        response = connection.getresponse()
+        text = response.read().decode("utf-8", "replace")
+        connection.close()
+        return response.status, text
+
+    def test_a_write_through_the_lan_address_passes_csrf_and_foreign_origins_do_not(self):
+        with portal.create_server(0, listen="0.0.0.0") as server:
+            thread = self._serve(server)
+            try:
+                port, token = server.server_port, server.csrf_token
+                lan, name = f"192.0.2.10:{port}", f"{bind._local_names() and sorted(bind._local_names())[0]}:{port}"
+                for host in (lan, name, f"127.0.0.1:{port}"):
+                    status, text = self._post(port, host, "http://" + host, token)
+                    # CSRF and Origin passed: the action itself answers (an unknown component is refused by it).
+                    self.assertNotIn("CSRF", text, host)
+                    self.assertNotIn("Origin", text, host)
+                    self.assertNotEqual(status, 403, host)
+                self.assertEqual(self._post(port, lan, "http://evil.example", token)[0], 403)
+                self.assertEqual(self._post(port, lan, "http://" + lan, "x" * 43)[0], 403)
+                self.assertEqual(self._post(port, f"evil.example:{port}", f"http://evil.example:{port}", token)[0], 403)
+            finally:
+                server.shutdown()
+                thread.join(5)
+
+    def test_the_token_survives_a_restart_when_kept_in_the_runtime_directory(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portal-csrf"
+            with portal.create_server(0, token_file=path) as first:
+                token = first.csrf_token
+            with portal.create_server(0, token_file=path) as second:
+                self.assertEqual(second.csrf_token, token)
+            path.write_text("tampered", encoding="ascii")
+            with portal.create_server(0, token_file=path) as third:
+                self.assertNotEqual(third.csrf_token, token)
+                self.assertRegex(third.csrf_token, r"^[A-Za-z0-9_-]{43}$")
+        with portal.create_server(0) as a, portal.create_server(0) as b:
+            self.assertNotEqual(a.csrf_token, b.csrf_token)
+
     def test_default_portal_is_loopback(self):
         with portal.create_server(0) as server:
             self.assertFalse(server.lan)
