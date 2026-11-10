@@ -12,9 +12,9 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import rtx
-from hyperloom.config import ConfigError, parse
-from hyperloom.render import render_router, validate_router
+from hydraweave import rtx
+from hydraweave.config import ConfigError, parse
+from hydraweave.render import render_router, validate_router
 from tests.test_config import example
 
 DS41_SIZES = json.loads(read_fixture(Path(__file__).parent / "fixtures" / "vramplan" / "ds41-sizes.json"))
@@ -23,7 +23,7 @@ _PATCHES = []
 
 def setUpModule():
     # The placement plan reads the model header; the example's asset path is not a real file.
-    from hyperloom.placement import ds41
+    from hydraweave.placement import ds41
     _PATCHES.append(mock.patch.object(ds41, "sizes", return_value=DS41_SIZES))
     _PATCHES[-1].start()
 
@@ -50,7 +50,7 @@ def rtx_example(reservation_s=900):
     obj["pc"]["cuda"] = {"pro_uuid": PRO, "reservation": None if reservation_s is None else {
         "owner": "operator", "approval": "coord 21:00 main ACK PC-BIG", "expires_at": _utc(reservation_s),
         "vram_cap_gib": 90, "host_gib": 72, "free_commit_floor_gib": 4}}
-    obj["assets"]["workstation"] = {"ds41_model": {"path": "C:/hyperloom/assets/ds41.gguf", "bytes": 0, "sha256": "0" * 64}}
+    obj["assets"]["workstation"] = {"ds41_model": {"path": "C:/hydraweave/assets/ds41.gguf", "bytes": 0, "sha256": "0" * 64}}
     obj["profiles"]["ds41-rtx"] = dict(obj["profiles"]["ds41-pair"], preset="ds41-pair-long",
                                        prefill_service={"preset": "rtx-prefill-ds41", "machine": "workstation",
                                                         "device": "rtx-pro"})
@@ -74,7 +74,7 @@ class PresetTests(unittest.TestCase):
                 rtx.service_preset(name)
 
     def test_long_pair_variant_runs_as_the_pair(self):
-        from hyperloom.config import family, preset
+        from hydraweave.config import family, preset
         long = preset("ds41-pair-long")
         self.assertEqual(family("ds41-pair-long"), "ds41-pair")
         self.assertTrue(long["qualified"])
@@ -203,7 +203,7 @@ class RenderTests(unittest.TestCase):
             rtx.effective_cap(None, 200)
 
     def test_an_unplannable_model_only_blocks_a_capped_start(self):
-        from hyperloom.placement import ds41
+        from hydraweave.placement import ds41
         with mock.patch.object(ds41, "sizes", side_effect=OSError("no header")):
             self.assertIsNone(self.render().placement)
             with self.assertRaises(ConfigError):
@@ -225,7 +225,7 @@ class RenderTests(unittest.TestCase):
         # The lab window's line (model --port --positions 32768 --host-gib --host-commit-floor-gib 14
         # --host-pin-wait-s 90 --exact) plus loopback bind, the reservation's VRAM cap and the keys: unchanged when
         # no --vram-cap-gib is given (nothing is planned).
-        self.assertEqual(argv[1:], ["C:/hyperloom/assets/ds41.gguf", "--host", "127.0.0.1", "--port", "8095",
+        self.assertEqual(argv[1:], ["C:/hydraweave/assets/ds41.gguf", "--host", "127.0.0.1", "--port", "8095",
                                     "--positions", "32768", "--vram-cap-gib", "90", "--host-gib", "72",
                                     "--host-commit-floor-gib", "14", "--host-pin-wait-s", "90", "--exact",
                                     "--api-key", KEY_A, "--handoff-api-key", KEY_B])
@@ -329,7 +329,7 @@ class RenderTests(unittest.TestCase):
 
 class RouterTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom rtx ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave rtx ")
         self.addCleanup(self.tmp.cleanup)
         self.key = Path(self.tmp.name) / "service.key"
         self.key.write_text("synthetic-test-token\n", encoding="ascii")
@@ -352,7 +352,7 @@ class RouterTests(unittest.TestCase):
 
     def test_router_must_be_local(self):
         self.obj["router"]["machine"] = "halo-1"
-        self.obj["router"]["api_key_file"] = "/opt/hyperloom/secrets/router.key"
+        self.obj["router"]["api_key_file"] = "/opt/hydraweave/secrets/router.key"
         with self.assertRaisesRegex(ConfigError, "loopback-only"):
             render_router(parse(self.obj), "ds41-rtx")
 
@@ -940,15 +940,15 @@ class UpDownTests(unittest.TestCase):
 
     @staticmethod
     def modules():
-        from hyperloom import orchestrate, secrets
+        from hydraweave import orchestrate, secrets
         from tests import test_orchestrate
         return orchestrate, secrets, test_orchestrate
 
     def rtx_cluster(self):
-        from hyperloom.config import Machine
+        from hydraweave.config import Machine
         _, _, fixtures = self.modules()
         cluster = fixtures.cluster_fixture(pair=True)
-        cluster.machines["workstation"] = Machine("workstation", "windows", "local", "127.0.0.1", None, 22, "C:/hyperloom",
+        cluster.machines["workstation"] = Machine("workstation", "windows", "local", "127.0.0.1", None, 22, "C:/hydraweave",
                                                   True, [{"id": "rtx-pro", "type": "nvidia", "uuid": PRO}])
         settings = cluster.profiles.pop("ds41-pair")
         cluster.profiles["ds41-rtx"] = dict(settings, preset="ds41-pair-long", release_id=fixtures.RELEASE,

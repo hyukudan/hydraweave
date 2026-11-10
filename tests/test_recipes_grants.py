@@ -11,8 +11,8 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom import config, rtx
-from hyperloom.recipes import apply, core, devices, grants, reader, session
+from hydraweave import config, rtx
+from hydraweave.recipes import apply, core, devices, grants, reader, session
 from tests import test_recipes
 from tests.test_config import example
 
@@ -148,9 +148,9 @@ class StrictCoreTests(unittest.TestCase):
 
     def setUp(self):
         CandidateTests.setUp(self)
-        executable = os.environ.get("HYPERLOOM_TS_RECIPE")
+        executable = os.environ.get("HYDRAWEAVE_TS_RECIPE")
         if not executable:
-            self.skipTest("set HYPERLOOM_TS_RECIPE for strict CPU binding parity")
+            self.skipTest("set HYDRAWEAVE_TS_RECIPE for strict CPU binding parity")
         self.backend = core.CoreBackend(core.Core(executable))
         self.recipe = test_recipes.PlacementSchemaTests.document()
         self.recipe["match"]["devices"][0]["name"] = "class-0"

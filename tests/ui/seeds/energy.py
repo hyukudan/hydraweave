@@ -14,7 +14,7 @@ def _bulk(store, batches):
 
 
 def seed(store, now):
-    from hyperloom.web.features import energy
+    from hydraweave.web.features import energy
 
     store.describe("node_gpu_power_watts", "gauge", unit="W", interval=60)
     store.describe("node_cpu_power_watts", "gauge", unit="W", interval=60)

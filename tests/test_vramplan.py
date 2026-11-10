@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom import modelfiles, vramplan
-from hyperloom.placement import ds41, minimax, qwen
-from hyperloom.vramplan import GIB, Inputs, Model, PlanError, Unit
+from hydraweave import modelfiles, vramplan
+from hydraweave.placement import ds41, minimax, qwen
+from hydraweave.vramplan import GIB, Inputs, Model, PlanError, Unit
 
 FIXTURES = Path(__file__).parent / "fixtures" / "vramplan"
 
@@ -465,7 +465,7 @@ class DescriptorTests(unittest.TestCase):
         return "host" if "pinned on the host" in text else text
 
     def test_same_plans_as_strix_stream(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         cases = json.loads(read_fixture(GOLDEN / "ss-plan-expected.json"))["cases"]
         self.assertEqual(len(cases), 34)
         self.assertEqual({c["expected"].get("refused") for c in cases}, {None, "nothing-fits", "host"})
@@ -487,7 +487,7 @@ class DescriptorTests(unittest.TestCase):
                                  (want["peak_bytes"], want["pinned_bytes"], want["disk_bytes"]))
 
     def test_dynamic_slots_same_tiers_conservative_peak(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         for case in json.loads(read_fixture(GOLDEN / "ss-plan-expected.json"))["dynamic_cases"]:
             with self.subTest(cap=case["cap_gib"]):
                 d = self.desc(case["descriptor"])
@@ -503,13 +503,13 @@ class DescriptorTests(unittest.TestCase):
                 self.assertGreaterEqual(p.peak_bytes, case["expected"]["peak_bytes"])
 
     def test_non_streamable_units_billed_at_the_pool_stride(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         d = self.desc("mixed-pinned-disk")
         fixed = dict(D.model(d).fixed)
         self.assertEqual(fixed["non-streamable units (pool stride)"], 6 * (-(-70_000_001 // 4096) * 4096))
 
     def test_malformed_descriptors_are_plan_errors(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         base = self.desc("mixed-pinned-disk")
         layer2 = base["layers"][2]
         bad_top = [{"fixed_device": [{"name": "x", "bytes": -100 * GIB}]}, {"host_fixed": [{"name": "x", "bytes": -1}]},
@@ -533,7 +533,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(D.load(dict(base, **{"x-note": "free"}))["x-note"], "free")
 
     def test_descriptor_files_are_bounded_and_clean(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         with tempfile.TemporaryDirectory() as d:
             deep = Path(d) / "deep.json"
             deep.write_text("[" * 100000 + "]" * 100000)
@@ -552,7 +552,7 @@ class DescriptorTests(unittest.TestCase):
             D.model(self.desc("moe-ranked"), ring_slots=-1)
 
     def test_descriptor_rules_match_strix_stream(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         base = self.desc("moe-ranked")
         for change in ({"schema": "x"}, {"order": "random"}, {"tiers": "ssd"}):
             with self.subTest(change=change), self.assertRaises(PlanError):
@@ -563,7 +563,7 @@ class DescriptorTests(unittest.TestCase):
                 D.load(dict(base, layers=[layer] + base["layers"][1:]))
 
     def test_renamed_schema_id_reads_the_same(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         base = self.desc("moe-ranked")
         old = vramplan.plan(D.model(D.load(base)), Inputs(48, host_gib=63))
         new = vramplan.plan(D.model(D.load(dict(base, schema="tierstream/desc-v1"))), Inputs(48, host_gib=63))
@@ -571,7 +571,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(D.plan_v1(base, new)["schema"], "strix-stream/plan-v1")
 
     def test_plan_v1_letters_cover_every_unit(self):
-        from hyperloom.placement import desc as D
+        from hydraweave.placement import desc as D
         d = self.desc("blob-prefix")
         p = vramplan.plan(D.model(d), Inputs(48, host_gib=63))
         rows = D.plan_v1(d, p)["tiers"]
@@ -584,7 +584,7 @@ class HeteroTests(unittest.TestCase):
     """DS decode across the RTX PRO and the pair: the time models reproduce their measured calibration points."""
 
     def setUp(self):
-        from hyperloom.placement import hetero
+        from hydraweave.placement import hetero
         self.hetero = hetero
         self.curve = hetero.curve_from_csv(FIXTURES / "ds41-hitrate.csv")
 
@@ -642,18 +642,18 @@ class HeteroTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_unknown_engine(self):
-        from hyperloom import placement
+        from hydraweave import placement
         with self.assertRaises(PlanError):
             placement.plan("nope", "m", Inputs(8))
 
     def test_cli_lists_every_engine(self):
-        from hyperloom import cli, placement
+        from hydraweave import cli, placement
         self.assertEqual(cli.VRAMPLAN_ENGINES, placement.ENGINES)
 
     def test_cli_three_tier_needs_a_cache_dir_and_a_host_budget(self):
         import contextlib
         import io
-        from hyperloom import cli
+        from hydraweave import cli
         base = ["vramplan", "minimax-rtx-prefill", "--model", "m", "--vram-cap-gib", "92", "--positions", "8192"]
         for extra, word in ((["--blob-cache", " ", "--host-gib", "60"], "directory"), (["--blob-cache", "D:/c"], "host-gib")):
             err = io.StringIO()
@@ -664,7 +664,7 @@ class RegistryTests(unittest.TestCase):
     def test_cli_refuses_flags_that_do_not_apply(self):
         import contextlib
         import io
-        from hyperloom import cli
+        from hydraweave import cli
         for argv in (["vramplan", "ds41-node", "--model", "m.gguf", "--vram-cap-gib", "8", "--layers", "3"],
                      ["vramplan", "ds41-node", "--model", "m.gguf", "--vram-cap-gib", "8",
                       "--placement-out", "p.json"]):
@@ -674,7 +674,7 @@ class RegistryTests(unittest.TestCase):
             self.assertIn(argv[-2], err.getvalue())
 
     def test_ds41_prefill_needs_a_host_budget(self):
-        from hyperloom import placement
+        from hydraweave import placement
         with self.assertRaises(PlanError):
             placement.plan("ds41-rtx-prefill", "m", Inputs(48), positions=8192)
 

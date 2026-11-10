@@ -1,4 +1,4 @@
-"""Security checks through TCP against the real ``hyperloom ui`` CLI/server."""
+"""Security checks through TCP against the real ``hydraweave ui`` CLI/server."""
 import importlib.util
 import http.client
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 import unittest
 
 
-spec = importlib.util.spec_from_file_location("hyperloom_ui_smoke", Path(__file__).with_name("ui") / "smoke.py")
+spec = importlib.util.spec_from_file_location("hydraweave_ui_smoke", Path(__file__).with_name("ui") / "smoke.py")
 smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
 
@@ -36,7 +36,7 @@ class PortalSecurityTests(unittest.TestCase):
         self.assertTrue(parser.token, "index.html must expose the per-launch CSRF token")
         self.token = parser.token
         self.headers = {"Origin": self.server.origin, "Content-Type": "application/json",
-                        "X-Hyperloom-CSRF": self.token}
+                        "X-Hydraweave-CSRF": self.token}
 
     def post(self, action="up", *, headers=None, body=None):
         return self.server.request("POST", smoke.API + action,
@@ -115,9 +115,9 @@ class PortalSecurityTests(unittest.TestCase):
         for token in (None, "wrong-token"):
             headers = dict(self.headers)
             if token is None:
-                del headers["X-Hyperloom-CSRF"]
+                del headers["X-Hydraweave-CSRF"]
             else:
-                headers["X-Hyperloom-CSRF"] = token
+                headers["X-Hydraweave-CSRF"] = token
             for action in MUTATIONS:
                 with self.subTest(token=token, action=action):
                     self.assertEqual(self.post(action, headers=headers)[0], 403)
@@ -165,7 +165,7 @@ class PortalSecurityTests(unittest.TestCase):
 
     def test_duplicate_security_headers_are_refused(self):
         headers = [("Host", f"127.0.0.1:{self.server.port}"), *self.headers.items(), ("Content-Length", "2")]
-        for name, expected in (("Host", 403), ("Origin", 403), ("X-Hyperloom-CSRF", 403),
+        for name, expected in (("Host", 403), ("Origin", 403), ("X-Hydraweave-CSRF", 403),
                                ("Content-Type", 415), ("Content-Length", 411)):
             with self.subTest(header=name):
                 value = next(value for key, value in headers if key == name)
@@ -186,7 +186,7 @@ class PortalSecurityTests(unittest.TestCase):
     def test_preflight_grants_no_cross_origin_access(self):
         status, headers, _ = self.server.request("OPTIONS", smoke.API + "up", headers={
             "Origin": "http://192.0.2.10", "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "X-Hyperloom-CSRF, Content-Type"})
+            "Access-Control-Request-Headers": "X-Hydraweave-CSRF, Content-Type"})
         self.assertGreaterEqual(status, 400)
         self.assert_no_cors(headers)
         self.assert_no_mutation()
@@ -217,7 +217,7 @@ class PortalSecurityTests(unittest.TestCase):
         smoke.eventually(lambda: any(row["action"] == "down" for row in self.server.calls()))
 
     def test_static_files_do_not_expose_source_or_directory_listings(self):
-        for path in ("/../api.py", "/%2e%2e/api.py", "/hyperloom/api.py", "/static/",
+        for path in ("/../api.py", "/%2e%2e/api.py", "/hydraweave/api.py", "/static/",
                      "/%5c..%5capi.py", "/tests/", "/cluster.json"):
             with self.subTest(path=path):
                 self.assertEqual(self.server.request("GET", path)[0], 404)
@@ -237,7 +237,7 @@ class PortalSecurityTests(unittest.TestCase):
 
         result = smoke.eventually(completed)
         self.assertEqual(result["state"], "succeeded", result)
-        audit = self.server.directory / "hyperloom/audit.jsonl"
+        audit = self.server.directory / "hydraweave/audit.jsonl"
         rows = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(any(row["action"] == "up" and row["result"].get("state") == "succeeded" for row in rows))
         self.assertNotIn(self.token, audit.read_text(encoding="utf-8"))

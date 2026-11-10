@@ -11,8 +11,8 @@ from tests.test_placement_privacy import private
 
 
 def test_06_unmatched_4090_and_matched_policy_agree_across_views(identity):
-    from hyperloom.web import api
-    from hyperloom.web.features import machines
+    from hydraweave.web import api
+    from hydraweave.web.features import machines
     raw = dict(uuid=identity, id=identity, name="NVIDIA RTX 4090")
     declared = [dict(uuid="other", name=raw["name"], excluded=False)]
     assert api._accelerator(raw, {}, {}, declared)["excluded"]

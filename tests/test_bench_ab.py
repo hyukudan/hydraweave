@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures" / "bench"))
 import support  # noqa: E402
 from fake_server import FakeServer  # noqa: E402
 
-from hyperloom.bench import ab, targets  # noqa: E402
-from hyperloom.cliext import bench as bench_cli  # noqa: E402
-from hyperloom.web.api import redact  # noqa: E402
+from hydraweave.bench import ab, targets  # noqa: E402
+from hydraweave.cliext import bench as bench_cli  # noqa: E402
+from hydraweave.web.api import redact  # noqa: E402
 
 
 def arms(model_a="m-1", model_b="m-1", tokenizer_a="tok-1", tokenizer_b="tok-1"):

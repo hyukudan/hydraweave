@@ -1,4 +1,4 @@
-"""`hyperloom usb4`: the same node verb and summary as the portal page, printed as text or JSON."""
+"""`hydraweave usb4`: the same node verb and summary as the portal page, printed as text or JSON."""
 
 from tests.portable_fixtures import read_fixture
 import contextlib
@@ -9,9 +9,9 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from hyperloom import cli, config
-from hyperloom.cliext import usb4 as command
-from hyperloom.web.features import usb4
+from hydraweave import cli, config
+from hydraweave.cliext import usb4 as command
+from hydraweave.web.features import usb4
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = {name: json.loads(read_fixture(ROOT / f"tests/fixtures/usb4/node-{name}.json"))
@@ -21,7 +21,7 @@ REPORTS = {name: json.loads(read_fixture(ROOT / f"tests/fixtures/usb4/node-{name
 class FakeAPI:
     def __init__(self):
         machines = {mid: config.Machine(mid, system, "ssh" if system == "linux" else "local", "192.0.2.1", mid, 22,
-                                        "/opt/hyperloom/" + mid, True, [])
+                                        "/opt/hydraweave/" + mid, True, [])
                     for mid, system in (("workstation", "windows"), ("halo-1", "linux"), ("halo-2", "linux"))}
         self._cluster = config.Cluster(machines, {}, {}, {}, {}, {})
 

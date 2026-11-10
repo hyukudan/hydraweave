@@ -9,8 +9,8 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import pc_big, placement_supervision, rtx
-from hyperloom.recipes import preflight
+from hydraweave import pc_big, placement_supervision, rtx
+from hydraweave.recipes import preflight
 from tests.test_placement_supervision import policy
 from tests.test_recipes_grants import NOW
 from tests.test_rtx import _binary_spec

@@ -1,4 +1,4 @@
-# UI-SPEC — `hyperloom` portal
+# UI-SPEC — `hydraweave` portal
 
 Status: design for main/user review (2026-10-23); sections 9-11 answer the second implementation review. Author: the product design session (independent review). Builder: coding workers, following SPEC.md §2.4 and this file.
 
@@ -37,7 +37,7 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 | 7 | **Settings & pairing** | pairing flow, trusted machines and revocation, secrets storage and rotation, lab rules, config file / versions / import–export | `img/settings-*.png` |
 
 **Global chrome**
-- **Left sidebar** (collapses to a top bar with a menu and a bottom tab bar under 760 px; section 12). It holds the brand, search, the grouped screens and feature pages, the machine list, the control machine and the hyperloom version / lab mode.
+- **Left sidebar** (collapses to a top bar with a menu and a bottom tab bar under 760 px; section 12). It holds the brand, search, the grouped screens and feature pages, the machine list, the control machine and the Hydraweave version / lab mode.
 - **Page header:** title, context tags (active profile, "Production preset · exact"), and the primary actions on the right.
 - **Global status** is shown in the narrow top bar as "Running / Stopped / Degraded".
 
@@ -60,10 +60,10 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 - **"Discovered, not paired" table:** name, OS, accelerators, announced-from address, key fingerprint, and a Pair button.
 - **Why:** it answers "what do I have and is it healthy" in one glance, and the per-device minimum headroom shows the binding constraint.
 - **Data sources:**
-  - `hyperloom-node gpu` / `doctor` (sysfs, hwmon, `usb4stream-describe`, `uname`, ROCm version);
+  - `hydraweave-node gpu` / `doctor` (sysfs, hwmon, `usb4stream-describe`, `uname`, ROCm version);
   - `tensormeld probe` (OS, RAM, NVIDIA devices; request TM-R3 adds UUID/PCI, CPU model, AMD memory);
   - `nvidia-smi -i <uuid>` on the PC;
-  - roles come from `hyperloom`'s own lease/process state.
+  - roles come from `hydraweave`'s own lease/process state.
 
 ### 3.2 Topology & links
 - **Shows:**
@@ -88,7 +88,7 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 ### 3.8 Recipes & profiles (`#/recipes`)
 - **Header:** the model and the deployment profile (the configured profiles serving that model). A model no profile
   serves can be read and edited, not checked or deployed; the controls say so.
-- **Active:** for each profile hyperloom launched: the recipe, production/untuned, the RTX service started or why not,
+- **Active:** for each profile Hydraweave launched: the recipe, production/untuned, the RTX service started or why not,
   each input as launched and whether it changed or was deleted since; **routes**: requests admitted per route with an
   RTX/nodes split bar, refusals, failed hand-offs, the per-request records (route, attempts, outcome, status, first
   byte) when the router keeps them, else "unavailable · needs the router's request log", and the route state's age.
@@ -106,7 +106,7 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 - **Actions:** Deploy… (enabled only after a preview that passes and matches the current fields and layers; the dialog
   lists what stops, what starts, the service decision, and that nothing stops if anything differs), Save as my recipe…
   (a copy with the changed fields), probes as jobs (probe, read model headers, add a disk receipt, probe with it).
-- Every answer shows its equivalent command line (`hyperloom recipe ...`). API: docs/api.md.
+- Every answer shows its equivalent command line (`hydraweave recipe ...`). API: docs/api.md.
 
 ### 3.4 Engines
 - **Start dialog** (SPEC §16.2): "Router runs on" (default: this machine, or any paired machine) and the machines/devices to link, pre-filled from the profile; unreachable declared machines block the start with their name.
@@ -157,7 +157,7 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 
 ### 3.7 Settings & pairing
 - **Pairing wizard (3 steps):**
-  1. On the new machine, `hyperloom-node pair` shows a one-time code and its key fingerprint.
+  1. On the new machine, `hydraweave-node pair` shows a one-time code and its key fingerprint.
   2. The operator types the code in the portal, compares the fingerprint, and picks the role: GPU worker or observer only.
   3. Keys are exchanged, and the machine then accepts commands only from this portal.
   - "Discovery only announces; it never grants access."
@@ -229,10 +229,10 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 
 ## 8. Build notes for implementation
 - **Stack:**
-  - stdlib `http.server` serving `hyperloom/web/static/` (one `index.html`, `app.css` derived from `ds.css`, `app.js`);
+  - stdlib `http.server` serving `hydraweave/web/static/` (one `index.html`, `app.css` derived from `ds.css`, `app.js`);
   - vanilla JS with hash routing (`#/devices`, `#/stats`, …);
   - **no CDN, no npm, no build step**; the portal works offline.
-- **API:** `GET /hyperloom/api/{devices,topology,models,profiles,stats,logs,settings}` returns JSON. Mutations are `POST` with JSON plus the `X-Hyperloom-CSRF` header; Host and Origin are checked (SPEC §2.4).
+- **API:** `GET /hydraweave/api/{devices,topology,models,profiles,stats,logs,settings}` returns JSON. Mutations are `POST` with JSON plus the `X-Hydraweave-CSRF` header; Host and Origin are checked (SPEC §2.4).
   - Each widget maps to one field in those documents.
   - Missing data comes back as `null` with a `why` string, and the UI renders "unavailable · <why>".
 - **Fidelity:** the built screens must match the mockups in layout, components and states. Pixel-exact is not required, but the reviewer compares side by side at 1440 and 390 px in both themes.
@@ -246,18 +246,18 @@ Every widget renders from exactly one source. "Request" means the widget stays h
 | Screen / widget | Source (schema / endpoint) | Derivation / window | Request |
 |---|---|---|---|
 | Devices: OS, RAM, NICs, NVIDIA name / memory / driver | `tensormeld probe` (`schema_version 1`) | as reported | TM-R14 for UUID / PCI / index, CPU model, CUDA version |
-| Devices: CPU model, disk free, AMD VRAM/GTT, ROCm, kernel, USB4 driver, layout | `hyperloom-node doctor` / `gpu` (`/proc/cpuinfo`, `statvfs`, sysfs `mem_info_*`, ROCm package version, `uname -r`, `/sys/module/thunderbolt_stream`, `/run/usb4stream-layout.json`) | passive reads | — |
+| Devices: CPU model, disk free, AMD VRAM/GTT, ROCm, kernel, USB4 driver, layout | `hydraweave-node doctor` / `gpu` (`/proc/cpuinfo`, `statvfs`, sysfs `mem_info_*`, ROCm package version, `uname -r`, `/sys/module/thunderbolt_stream`, `/run/usb4stream-layout.json`) | passive reads | — |
 | Devices: GPU %, temperature, power | NVIDIA `nvidia-smi -i <uuid>`; AMD hwmon + `gpu_busy_percent` | 2 s poll | — (unavailable if the sysfs node is missing) |
-| Devices: roles, GPU-turn countdown | hyperloom lease state (`run/<lease>.json`, deadline from the lease spec) | countdown = deadline − server time; never derived from browser polling | — |
+| Devices: roles, GPU-turn countdown | Hydraweave lease state (`run/<lease>.json`, deadline from the lease spec) | countdown = deadline − server time; never derived from browser polling | — |
 | Topology: Ethernet bandwidth / RTT | `tensormeld link-probe` receipt (`link-probe-v1`: `rtt_us_p50`/`p99` at the stated payload, `bulk.bytes_per_s`) | dated receipt, labelled RTT | — |
 | Topology: USB4 cable state / warnings | `usb4stream-describe` JSON (`version`, `topology`) | current state only | R11 (versioned contract) |
 | Topology / Stats: USB4 per-cable rate and latency, retrain history | — | — | **R18** (engine/driver per-stream counters and latency histogram) |
 | Stats: USB4 exchange mean | engine `/api/status` exchange totals (`deepseek41_serve_main.cpp` exchange counters) | mean over window | — |
-| Models: presence / verified | hyperloom asset manifest + `hyperloom-node verify-model` | sha256 or size-only | — |
-| Models: proposals | hyperloom **profile adapter** over `plan-hetero` output (SPEC §13.5) | qualified profiles only; receipt numbers labelled "receipt", model estimates labelled "estimate" | R17, TM-R15 |
+| Models: presence / verified | Hydraweave asset manifest + `hydraweave-node verify-model` | sha256 or size-only | — |
+| Models: proposals | Hydraweave **profile adapter** over `plan-hetero` output (SPEC §13.5) | qualified profiles only; receipt numbers labelled "receipt", model estimates labelled "estimate" | R17, TM-R15 |
 | Engines: processes, state, ready-after, sha | `supervise` events (READY / POISONED / STOPPED, start time, exe sha) | — | — |
-| Engines: effective configuration | hyperloom rendered argv/env + preset provenance today; component `/config` later | — | E-C2/E-C3 |
-| Engines: change history / rollback | hyperloom config versions (audit log) | — | — |
+| Engines: effective configuration | Hydraweave rendered argv/env + preset provenance today; component `/config` later | — | E-C2/E-C3 |
+| Engines: change history / rollback | Hydraweave config versions (audit log) | — | — |
 | Stats: throughput | engine `/metrics` `strix_generated_tokens_total` | rate over 10 s windows, reset-aware; "completed" | — |
 | Stats: TTFT | engine `/api/status` recent requests `queue_ms + prefill_ms` | p50/p95 over the last N=50 requests, with n shown; "engine-side" | client TTFT only from bench receipts; router first-byte via R7 (labelled "router first byte") |
 | Stats: queue | engine `/metrics` `strix_queue_{waiting,running}`; router `/api/status` `waiting` | latest | — |
@@ -266,10 +266,10 @@ Every widget renders from exactly one source. "Request" means the widget stays h
 | Stats: step breakdown | engine `/api/status` step summary | critical-path accounting per step | **R16 / E-C5** |
 | Stats: memory headroom | DeepSeek `/api/status` device free/total; AMD sysfs; `nvidia-smi` | latest | — |
 | Stats: recent requests (route column) | engine `/api/status` recent (completed only) + router request correlation | join by request id | **R7** (router request log with ids); until then the route column is hidden |
-| Logs | `supervise` captured stdout/stderr + hyperloom actions | parsed events | — |
-| Settings: trusted machines | hyperloom pinned host keys (MVP); agent enrollments later | — | TM-R10..R12 |
-| Settings: secrets | hyperloom DPAPI store (ctypes `CryptProtectData`) / node 0600 files | — | — |
-| Recipes: catalog, trade-offs, fields | `GET recipes`, `GET recipes/<id>` (= `hyperloom recipe list/show`) | the recipe files' own `[[x-predicted]]` rows | — |
+| Logs | `supervise` captured stdout/stderr + Hydraweave actions | parsed events | — |
+| Settings: trusted machines | Hydraweave pinned host keys (MVP); agent enrollments later | — | TM-R10..R12 |
+| Settings: secrets | Hydraweave DPAPI store (ctypes `CryptProtectData`) / node 0600 files | — | — |
+| Recipes: catalog, trade-offs, fields | `GET recipes`, `GET recipes/<id>` (= `hydraweave recipe list/show`) | the recipe files' own `[[x-predicted]]` rows | — |
 | Recipes: check, explain, preview, deploy | `POST recipes/{validate,explain,plan}`, job `recipes/deploy` (= the CLI) | live probes, or a named saved observation | — |
 | Recipes: active and routes | `GET recipes/active`, `GET recipes/routes`: launch record + router `prefill_routes` | admitted counts since the router started; per-request records | TensorMeld `router/recipe-routes-recent` for `recent` |
 
@@ -293,7 +293,7 @@ Disabled controls always name their blocker (phase or request id).
 
 ## 11. Additional rules from the second review
 
-- **Rollback:** only `hyperloom` configuration versions roll back. Reservations, GPU-turn approvals, pairings and secrets are not configuration and cannot be rolled back. Every restore is revalidated against current permissions, assets, qualification and leases. **Stop and cancel never wait behind a confirmation dialog or a running job.**
+- **Rollback:** only `hydraweave` configuration versions roll back. Reservations, GPU-turn approvals, pairings and secrets are not configuration and cannot be rolled back. Every restore is revalidated against current permissions, assets, qualification and leases. **Stop and cancel never wait behind a confirmation dialog or a running job.**
 - **Accessibility (adds to §7):**
   - contrast tokens meet AA (light `--text-3 #646c7b`, status colours darkened; dark primary buttons use dark text);
   - native labelled controls (`<label for>`, radio groups for segmented controls);
@@ -314,8 +314,8 @@ Disabled controls always name their blocker (phase or request id).
 ## 12. Portal shell
 
 The shell (`app.js`, `app.css`, `index.html`, `pages/shell-i18n.js`, `assets/*`) frames every screen and feature page.
-Feature pages keep the page registry contract (`window.HyperloomPages`); the shell only adds helpers to
-`window.Hyperloom`.
+Feature pages keep the page registry contract (`window.HydraweavePages`); the shell only adds helpers to
+`window.Hydraweave`.
 
 ### 12.1 Sidebar, header and freshness
 - **Groups:** Workspace, Inference, Benchmarks, Operations (then any other group a page names). Core screens:
@@ -342,7 +342,7 @@ Feature pages keep the page registry contract (`window.HyperloomPages`); the she
   "for N min"; "+N more" and a link to the health page. Without the health feature nothing is shown; a failing
   summary shows "Exceptions unavailable · why".
 - **Banner:** red, while `banner` is set ("GPU thermal slowdown on …"); announced once per distinct text.
-- **Tab title** `(n) Hyperloom · <page>` with the active count; **favicon** gets a red dot (any critical) or an amber
+- **Tab title** `(n) Hydraweave · <page>` with the active count; **favicon** gets a red dot (any critical) or an amber
   dot (otherwise any active finding).
 - **Stale summary** (the producer says so, its evaluation is older than 90 s, or it could not be fetched within the
   view's stale limit): findings stay visible as last known with "evaluation stale since HH:MM", the banner reads
@@ -358,18 +358,18 @@ Feature pages keep the page registry contract (`window.HyperloomPages`); the she
   its blocker and does not run. Stop and other destructive actions are not offered here.
 - **Deep links:** `#/<page>[?query]`; `#/engines?profile=<id>`, `#/recipes?recipe=<id>`,
   `#/settings?section=preferences|appearance|data|panels|notifications|related`.
-- **Filter boxes for pages:** `Hyperloom.filter(id, {label, placeholder, statuses})` renders a labelled search box
-  (and a status select); `Hyperloom.filterValue(id)` → `{text, status}`; `Hyperloom.matches(text, query)`.
+- **Filter boxes for pages:** `Hydraweave.filter(id, {label, placeholder, statuses})` renders a labelled search box
+  (and a status select); `Hydraweave.filterValue(id)` → `{text, status}`; `Hydraweave.matches(text, query)`.
 
 ### 12.4 Themes, density, languages, units
 - Themes: System, Light, Dark, True black (`data-theme="dark"` + `data-shade="black"`: dark rules keep applying; its
   own tokens meet the same AA pairs, checked by the contrast test). Density: Comfortable, Compact (targets stay
   ≥ 32 px, 44 px narrow).
 - Languages: English, Spanish; switching is instant (navigation, header, palette, strip, settings, states).
-  `HyperloomI18n.t(key, vars, fallback)`, `.add(lang, table)` and `.onchange(fn)` let pages translate their own text;
+  `HydraweaveI18n.t(key, vars, fallback)`, `.add(lang, table)` and `.onchange(fn)` let pages translate their own text;
   the core screen bodies are English for now.
-- Units and time: `Hyperloom.temperature(celsius)` (°C or °F), `Hyperloom.time(epoch, withDate)` and
-  `Hyperloom.zone()` follow the preferences; stored values stay UTC epoch and °C. "Local" is the control machine's
+- Units and time: `Hydraweave.temperature(celsius)` (°C or °F), `Hydraweave.time(epoch, withDate)` and
+  `Hydraweave.zone()` follow the preferences; stored values stay UTC epoch and °C. "Local" is the control machine's
   zone: its IANA name when the portal knows it, else this browser's zone when it agrees with the portal's offset, else
   the portal's fixed offset (the settings page says which).
 
@@ -379,7 +379,7 @@ Feature pages keep the page registry contract (`window.HyperloomPages`); the she
   desktop notifications, and links to settings other features keep (energy price and currency, thresholds, alert
   channels, MQTT, retention, collector intervals) or "unavailable · needs the <x> feature".
 - Stored by the portal (`GET prefs`, `POST prefs/save`, audited; store namespace `prefs/ui`, one key per field, a
-  default has no row) and mirrored in the browser for the first paint. CLI: `hyperloom prefs show|set key=value …`.
+  default has no row) and mirrored in the browser for the first paint. CLI: `hydraweave prefs show|set key=value …`.
   A change applies at once and saves in order; if a save fails the value stays in this browser only and says so.
 
 ### 12.6 Narrow screens
@@ -387,16 +387,16 @@ Feature pages keep the page registry contract (`window.HyperloomPages`); the she
   without it); the current tab is marked; content keeps clear of the bar; the Menu button keeps every other page.
 
 ### 12.7 Explanations and empty/error states
-- `Hyperloom.info(text, {observer, basis})`: an "i" button (32 px target, 44 px narrow) whose tooltip (hover, focus
+- `Hydraweave.info(text, {observer, basis})`: an "i" button (32 px target, 44 px narrow) whose tooltip (hover, focus
   or click; Escape closes) says what the value is, its observer and whether it is measured or estimated. The shell's
   own metrics carry one (device KPIs, GPU memory / busy, temperature, power, stats KPIs and charts, engine memory,
   USB4 exchange, links); feature pages add theirs.
-- `Hyperloom.problem({title, why, retry, next})`: an error card with Retry and a next step (open logs, settings).
+- `Hydraweave.problem({title, why, retry, next})`: an error card with Retry and a next step (open logs, settings).
 
 ### 12.8 Installable shell
 - `assets/manifest.webmanifest` (standalone, scope `/`) with SVG and PNG icons.
 - `/sw.js` (served from `assets/` only while listed there) answers only GET requests for `/app.js`, `/app.css`,
   `/recipes.js`, `/pages/*.js|css` and `/assets/*.svg|png|webmanifest`: network first, its cached copy only when the
-  network fails. Navigations, the CSRF page, `/hyperloom/api/*`, POSTs and the worker file itself are never
+  network fails. Navigations, the CSRF page, `/hydraweave/api/*`, POSTs and the worker file itself are never
   intercepted or cached. When the portal stops serving `/sw.js`, the page (on load) and the worker (on a navigation)
-  unregister it and delete the `hyperloom-shell-*` caches.
+  unregister it and delete the `hydraweave-shell-*` caches.

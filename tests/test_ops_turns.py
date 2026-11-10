@@ -12,15 +12,15 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import config
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API
-from hyperloom.web.features import ops, turns
+from hydraweave import config
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API
+from hydraweave.web.features import ops, turns
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "ops"
-spec = importlib.util.spec_from_file_location("hyperloom_turns_under_test", ROOT / "node" / "hyperloom_turns.py")
+spec = importlib.util.spec_from_file_location("hydraweave_turns_under_test", ROOT / "node" / "hydraweave_turns.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 
@@ -294,7 +294,7 @@ def cluster_of(lab_dir="/opt/lab"):
                 "halo-2": config.Machine("halo-2", "linux", "ssh", "192.0.2.11", "halo-2", 22, "/opt/hl", True,
                                          [{"id": "gpu"}], lab_dir)}
     profiles = {"qwen-replicas": {"nodes": ["halo-1", "halo-2"]}}
-    raw = {"schema": "hyperloom/cluster-v1", "machines": [], "assets": {}, "profiles": profiles}
+    raw = {"schema": "hydraweave/cluster-v1", "machines": [], "assets": {}, "profiles": profiles}
     return config.Cluster(machines, {}, profiles, {}, {}, raw)
 
 
@@ -320,7 +320,7 @@ class TurnsPortalTests(APIFixture, TreeMixin, unittest.TestCase):
         turns._replies.clear()
 
     def reply(self, holder, turn_list, coordinator, now, pair_q=None, single_q=None, first_ts=None):
-        return {"schema": "hyperloom/node-v1", "verb": "turns", "now": now, "present": True, "holder": holder,
+        return {"schema": "hydraweave/node-v1", "verb": "turns", "now": now, "present": True, "holder": holder,
                 "coordinator": coordinator, "flags": {}, "long_ok": {}, "turns": turn_list, "events": [],
                 "queues": {"single-q": single_q or [], "pair-q": pair_q if coordinator else None},
                 "unverified": {"single-q": [], "pair-q": []}, "stale_tickets": {"single-q": 0, "pair-q": 0},
@@ -425,7 +425,7 @@ class TurnsPortalTests(APIFixture, TreeMixin, unittest.TestCase):
     def test_document_reads_the_collector_cache_only(self):
         calls = []
         with mock.patch.object(ops, "_node_call", lambda api, m, verb, payload: calls.append((m.id, verb)) or
-                               {"schema": "hyperloom/node-v1", "verb": "turns", "now": 1.0, "present": False, "why": {}}):
+                               {"schema": "hydraweave/node-v1", "verb": "turns", "now": 1.0, "present": False, "why": {}}):
             doc = self.api.read("turns", {})
             self.assertEqual(calls, [])
             self.assertIsNone(doc["ledger"]["state"])

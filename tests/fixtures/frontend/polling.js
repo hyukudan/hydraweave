@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const source = fs.readFileSync("hyperloom/web/static/app.js", "utf8");
+const source = fs.readFileSync("hydraweave/web/static/app.js", "utf8");
 const poll = source.slice(source.indexOf("  async function refresh()"), source.indexOf("  function fetchDocument("));
 const gate = source.match(/  const mutationReason = .*;/)[0];
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -93,7 +93,7 @@ function harness() {
     const panel = {hidden: true, innerHTML: ""};
     Object.assign(running.context, {$: () => panel, esc: String, statusPill: String,
       display: String, button: (label, action) => `<button data-action="${action}">${label}</button>`,
-      window: {HyperloomLaunch: {render: () => ""}}});
+      window: {HydraweaveLaunch: {render: () => ""}}});
     vm.runInContext(source.slice(source.indexOf("  function renderJob()"), source.indexOf("  async function request(")) +
       "\nrenderJob();", running.context);
     assert.equal(panel.hidden, false);
@@ -107,8 +107,8 @@ function harness() {
   assert.equal(hanging.context.reason(), "");
   // Real timeline renderer retains ETA while roster is incomplete and labels requested stops.
   const window = {};
-  vm.runInNewContext(fs.readFileSync("hyperloom/web/static/pages/launch.js", "utf8"), {window});
-  const html = window.HyperloomLaunch.render({job_state: "running", elapsed_s: 20,
+  vm.runInNewContext(fs.readFileSync("hydraweave/web/static/pages/launch.js", "utf8"), {window});
+  const html = window.HydraweaveLaunch.render({job_state: "running", elapsed_s: 20,
     eta: {n: 3, seconds: 100}, phases: [{id: "ready", label: "All READY", state: "pending"},
       {id:"stopping", label:"Stop previous profiles", state:"running", detail:{stopped:[], requested:["old"]}}]});
   assert.ok(html.includes("Estimated remaining 80 s"));

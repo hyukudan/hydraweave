@@ -1,14 +1,14 @@
-"""`hyperloom recipe export` / `import` (hyperloom/recipes/bundle.py): a recipe and its overrides layers as one data-only
+"""`hydraweave recipe export` / `import` (hydraweave/recipes/bundle.py): a recipe and its overrides layers as one data-only
 bundle, checked whole before anything is written into the user directories."""
 import hashlib
 import json
 import unittest
 from unittest import mock
 
-from hyperloom import orchestrate
-from hyperloom.recipes import bundle, service
-from hyperloom.recipes.reader import RecipeError
-from hyperloom.web import recipes as recipe_web
+from hydraweave import orchestrate
+from hydraweave.recipes import bundle, service
+from hydraweave.recipes.reader import RecipeError
+from hydraweave.web import recipes as recipe_web
 from tests.recipe_fixtures import isolated
 from tests.test_recipes_service import QWEN, run_cli, user_ds
 
@@ -142,7 +142,7 @@ class BundleTests(unittest.TestCase):
         # Bundle order a, c, b: a lowers the device memory to 89, c raises it to 100, b's budget is 90. With b kept,
         # writing a first would leave a, b installed (90 exceeds 89): c is written first, and an import stopped after
         # one layer leaves c, b, which resolves.
-        from hyperloom.recipes import core, session
+        from hydraweave.recipes import core, session
         changes = [("a", [(MEMORY, 89.0)]), ("c", [(MEMORY, 100.0)]), ("b", [(BUDGET, 90.0)])]
         for mode in ("reuse", "new"):
             with self.subTest(mode=mode), isolated() as env:
@@ -218,7 +218,7 @@ class BundleTests(unittest.TestCase):
 
     def test_a_replacement_never_changes_the_format(self):
         # TOML replaced by JSON (or back) would need two file operations; it is refused before any write.
-        from hyperloom.recipes import reader, session
+        from hydraweave.recipes import reader, session
         with isolated() as env:
             cluster = orchestrate.load_cluster(env.config)
             path = user_ds()
@@ -233,7 +233,7 @@ class BundleTests(unittest.TestCase):
 
     def test_export_checks_the_bytes_it_bundles(self):
         # The listing says overrides layer, but the file now holds a tuning profile: the bytes decide.
-        from hyperloom.recipes import session
+        from hydraweave.recipes import session
         with isolated() as env:
             cluster = orchestrate.load_cluster(env.config)
             path = user_ds()

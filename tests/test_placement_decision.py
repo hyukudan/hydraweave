@@ -11,9 +11,9 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import procs
-from hyperloom.recipes import commands, content_cache, core, preflight, reader, runtime, session
-from hyperloom.recipes.reader import RecipeError
+from hydraweave import procs
+from hydraweave.recipes import commands, content_cache, core, preflight, reader, runtime, session
+from hydraweave.recipes.reader import RecipeError
 
 from tests import test_recipes, test_placement_render
 from tests.placement_fixtures import identity, files
@@ -71,7 +71,7 @@ def test_3_cached_predict_limit_survives_decision_serialization(monkeypatch, fla
 
 
 def test_3_decision_uses_the_admitted_allocation_reference(monkeypatch):
-    from hyperloom.recipes import commands, content_cache
+    from hydraweave.recipes import commands, content_cache
 
     fixture = test_placement_render.PlacementRenderTests()
     fixture.setUp()

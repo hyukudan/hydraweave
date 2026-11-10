@@ -13,10 +13,10 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import admission, cli, orchestrate
-from hyperloom.config import parse
-from hyperloom.recipes import core, grants, launch, preflight, reader, runtime, service, session
-from hyperloom.web.api import API, APIError
+from hydraweave import admission, cli, orchestrate
+from hydraweave.config import parse
+from hydraweave.recipes import core, grants, launch, preflight, reader, runtime, service, session
+from hydraweave.web.api import API, APIError
 from tests import test_recipes, test_rtx
 from tests.test_recipes_grants import NOW, window
 

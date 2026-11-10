@@ -7,8 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from hyperloom.recipes import core, reader, service, session
-from hyperloom.recipes.reader import RecipeError
+from hydraweave.recipes import core, reader, service, session
+from hydraweave.recipes.reader import RecipeError
 from tests.recipe_fixtures import isolated
 
 
@@ -187,9 +187,9 @@ class PlacementEditTests(unittest.TestCase):
         self.assertEqual(resolved.recipe["routes"][0]["components"]["arena"]["units"], 123)
 
     def test_tierstream_layer_and_copy_parity(self):
-        executable = os.environ.get("HYPERLOOM_TS_RECIPE")
+        executable = os.environ.get("HYDRAWEAVE_TS_RECIPE")
         if not executable:
-            self.skipTest("set HYPERLOOM_TS_RECIPE for CPU layer/copy parity")
+            self.skipTest("set HYDRAWEAVE_TS_RECIPE for CPU layer/copy parity")
         backend = core.CoreBackend(core.Core(executable))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "base.json"

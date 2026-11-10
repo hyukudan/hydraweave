@@ -10,8 +10,8 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom.recipes import content_cache, runtime
-from hyperloom import rtx
+from hydraweave.recipes import content_cache, runtime
+from hydraweave import rtx
 
 from tests.test_recipes_grants import window
 

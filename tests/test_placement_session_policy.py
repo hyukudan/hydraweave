@@ -17,9 +17,9 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import rtx, assets
-from hyperloom.recipes import apply, facts, sysmem, probe, topology
-from hyperloom.recipes import commands, reader, session, content_cache, core, descriptors, launch, preflight, runtime
+from hydraweave import rtx, assets
+from hydraweave.recipes import apply, facts, sysmem, probe, topology
+from hydraweave.recipes import commands, reader, session, content_cache, core, descriptors, launch, preflight, runtime
 
 from tests import test_recipes
 from tests.placement_fixtures import identity
@@ -151,7 +151,7 @@ def test_live_source_accepts_policy_without_mutation(monkeypatch):
     monkeypatch.setattr(commands.facts, "gather", lambda *a, **kw: gathered.append(kw))
     monkeypatch.setattr(commands, "cache", lambda: None)
     source = commands.live_source(None)
-    from hyperloom.recipes import runtime
+    from hydraweave.recipes import runtime
     monkeypatch.setattr(runtime, "preset", lambda: {"engine_sha": None})
     source(SimpleNamespace(pc="local"), policy=(False, True))
     assert gathered[0]["placement"] is True
@@ -278,10 +278,10 @@ def test_16_effective_layer_selects_placement_and_policy(tmp_path, monkeypatch, 
 
 
 def test_16_verified_live_identity_activates_profile_through_real_core(tmp_path, monkeypatch):
-    executable = os.environ.get("HYPERLOOM_TS_RECIPE")
-    golden = os.environ.get("HYPERLOOM_PLACEMENT_GOLDEN")
+    executable = os.environ.get("HYDRAWEAVE_TS_RECIPE")
+    golden = os.environ.get("HYDRAWEAVE_PLACEMENT_GOLDEN")
     if not executable or not golden:
-        pytest.skip("set HYPERLOOM_TS_RECIPE and HYPERLOOM_PLACEMENT_GOLDEN for real CPU admission")
+        pytest.skip("set HYDRAWEAVE_TS_RECIPE and HYDRAWEAVE_PLACEMENT_GOLDEN for real CPU admission")
     components = json.loads((Path(golden) / "g4/J2-components.json").read_bytes())
     binary = tmp_path / "bin" / "replica.exe"
     binary.parent.mkdir()

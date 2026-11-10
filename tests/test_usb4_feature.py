@@ -9,10 +9,10 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from hyperloom import config
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.features import usb4
+from hydraweave import config
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.features import usb4
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = {name: json.loads(read_fixture(ROOT / f"tests/fixtures/usb4/node-{name}.json"))
@@ -31,7 +31,7 @@ class FakeAPI:
     def __init__(self, clock):
         self.clock = clock
         self.telemetry = Store(":memory:", clock=clock)
-        machines = {mid: config.Machine(mid, system, access, "192.0.2.%d" % i, mid, 22, "/opt/hyperloom/" + mid, True,
+        machines = {mid: config.Machine(mid, system, access, "192.0.2.%d" % i, mid, 22, "/opt/hydraweave/" + mid, True,
                                         [{"id": "gpu"}])
                     for i, (mid, system, access) in enumerate((("workstation", "windows", "local"),
                                                                 ("halo-1", "linux", "ssh"), ("halo-2", "linux", "ssh")))}
@@ -43,7 +43,7 @@ class FakeAPI:
         return self._cluster
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
 
 
 def report(machine, data_counts=None, journal=None, **changes):
@@ -257,7 +257,7 @@ class CollectorTests(unittest.TestCase):
     def test_node_failure_keeps_the_last_summary_and_marks_sources(self):
         self.replies = {"halo-1": report("halo-1"), "halo-2": report("halo-2")}
         self.run_at(1_800_000_000.0)
-        self.replies["halo-1"] = {"schema": "hyperloom/node-v1", "verb": "usb4", "error": "unknown verb usb4"}
+        self.replies["halo-1"] = {"schema": "hydraweave/node-v1", "verb": "usb4", "error": "unknown verb usb4"}
         self.run_at(1_800_000_010.0)
         node = self.store.get(usb4.NODE_NS, "halo-1")
         self.assertEqual(node["error"], "unknown verb usb4")
@@ -304,7 +304,7 @@ class GateTests(unittest.TestCase):
 
     def setUp(self):
         import tempfile
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-usb4-gate-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-usb4-gate-")
         self.addCleanup(temporary.cleanup)
         self.clock = Clock()
         self.api = FakeAPI(self.clock)
@@ -327,7 +327,7 @@ class GateTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def test_a_busy_or_running_machine_is_skipped_without_waiting(self):
-        from hyperloom import nodegate
+        from hydraweave import nodegate
         self.block.set()
         usb4.sample(self.api, 1_800_000_000.0)
         before = self.api.telemetry.get(usb4.NODE_NS, "halo-2")["summary"]["collected_at"]
@@ -349,7 +349,7 @@ class GateTests(unittest.TestCase):
         self.block.set()
 
     def test_a_worker_that_cannot_start_gives_the_gate_back(self):
-        from hyperloom import nodegate
+        from hydraweave import nodegate
         real = threading.Thread
 
         class NoThread(real):
@@ -455,7 +455,7 @@ class DocumentTests(unittest.TestCase):
         with mock.patch.object(usb4, "fetch", side_effect=AssertionError("a GET called a node")), \
                 mock.patch.object(usb4, "_cached_stats", side_effect=AssertionError("a GET read the snapshot")):
             doc = usb4.document(self.api, {})
-        self.assertEqual(doc["schema"], "hyperloom/ui-usb4-v1")
+        self.assertEqual(doc["schema"], "hydraweave/ui-usb4-v1")
         self.assertEqual([m["id"] for m in doc["machines"]], ["halo-1", "halo-2"])
         self.assertIn("not collected yet", doc["machines"][0]["why"]["summary"])
         self.assertEqual(doc["full_rate"]["gbps"], 40.0)
@@ -482,7 +482,7 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(registry.collectors["usb4"][1], 30.0)          # paced: one node read per 30 s
 
     def test_document_through_the_portal_api_is_redacted_and_strict(self):
-        from hyperloom.web.api import API, APIError
+        from hydraweave.web.api import API, APIError
         import tempfile
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -493,21 +493,21 @@ class DocumentTests(unittest.TestCase):
                   audit_path=Path(directory.name) / "audit.jsonl")
         api.orchestrate.load_cluster.return_value = self.api.cluster()
         document = api.read("usb4", {})
-        self.assertEqual(document["schema"], "hyperloom/ui-usb4-v1")
+        self.assertEqual(document["schema"], "hydraweave/ui-usb4-v1")
         with self.assertRaises(APIError) as caught:
             api.read("usb4", {"x": "1"})
         self.assertEqual(caught.exception.status, 400)
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

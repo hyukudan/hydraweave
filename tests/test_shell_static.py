@@ -12,9 +12,9 @@ import threading
 import unittest
 from unittest import mock
 
-from hyperloom.web import features, server
-from hyperloom.web.api import API
-from hyperloom.web.features import prefs
+from hydraweave.web import features, server
+from hydraweave.web.api import API
+from hydraweave.web.features import prefs
 from tests.ui import smoke
 
 
@@ -63,9 +63,9 @@ class ShellFilesTests(unittest.TestCase):
         pattern = re.search(r"const STATIC = /(.+)/;\n", source)[1]
         static = re.compile(pattern)
         for path in ("/app.js", "/app.css", "/recipes.js", "/pages/history.js", "/pages/timeseries.css",
-                     "/assets/icon.svg", "/assets/icon-192.png", "/assets/manifest.webmanifest", "/hyperloom/app.js"):
+                     "/assets/icon.svg", "/assets/icon-192.png", "/assets/manifest.webmanifest", "/hydraweave/app.js"):
             self.assertTrue(static.fullmatch(path), path)
-        for path in ("/", "/index.html", "/hyperloom/", "/hyperloom/api/devices", "/hyperloom/api/prefs/save", "/sw.js",
+        for path in ("/", "/index.html", "/hydraweave/", "/hydraweave/api/devices", "/hydraweave/api/prefs/save", "/sw.js",
                      "/assets/sw.js", "/pages/../app.js", "/pages/sub/x.js", "/assets/x.json", "/favicon.ico", "/app.js/"):
             self.assertFalse(static.fullmatch(path), path)
         handler = source[source.index('self.addEventListener("fetch"'):]
@@ -73,7 +73,7 @@ class ShellFilesTests(unittest.TestCase):
         self.assertLess(handler.index('request.mode === "navigate"'), handler.index("respondWith"))
         self.assertLess(handler.index('request.method !== "GET"'), handler.index("respondWith"))
         self.assertIn("url.search", handler)
-        self.assertIn('PREFIX = "hyperloom-shell-"', source)
+        self.assertIn('PREFIX = "hydraweave-shell-"', source)
         self.assertIn("self.registration.unregister()", source)
 
 
@@ -120,7 +120,7 @@ class ServiceWorkerRouteTests(unittest.TestCase):
         self.assertEqual(self.request("HEAD", "/sw.js")[:1], (200,))
         address, port = self.server.server_address[:2]
         self.assertEqual(self.request("GET", "/sw.js", host=f"{address}:{port + 1}")[0], 403)
-        for path in ("/hyperloom/sw.js", "/sw.js/", "/SW.js", "/sw.js%00", "/assets/../sw.js", "/sw.json"):
+        for path in ("/hydraweave/sw.js", "/sw.js/", "/SW.js", "/sw.js%00", "/assets/../sw.js", "/sw.json"):
             self.assertEqual(self.request("GET", path)[0], 404, path)
         self.assertEqual(self.request("POST", "/sw.js")[0], 403)   # no Origin/CSRF: refused before anything
 
@@ -168,11 +168,11 @@ class ShellScriptContractTests(unittest.TestCase):
         self.script = (STATIC / "app.js").read_text(encoding="utf-8")
 
     def test_page_registry_contract_is_unchanged(self):
-        self.assertIn("const pages = window.HyperloomPages || {};", self.script)
+        self.assertIn("const pages = window.HydraweavePages || {};", self.script)
         for hook in ("page?.render", "page.title", "page.icon", ".order ??", "?.group", ".endpoints?.()", "feature.ready",
                      "feature.error", ".actions()", "feature.after", ".refresh?.()", "?.home"):
             self.assertIn(hook, self.script, hook)
-        exports = self.script[self.script.index("window.Hyperloom = {"):]
+        exports = self.script[self.script.index("window.Hydraweave = {"):]
         exports = exports[:exports.index("};")]
         for name in ("esc", "display", "unavailable", "statusPill", "tag", "button", "card", "table", "cells", "kv", "empty",
                      "rows", "request", "mutate", "refresh", "render", "announce", "doc", "machines", "meter", "kpi", "chart",

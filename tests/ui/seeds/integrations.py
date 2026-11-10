@@ -60,7 +60,7 @@ def seed(store, now):
     threading.Thread(target=_serve, args=(listener,), daemon=True).start()
     store.put("prefs/integrations", "mqtt", {
         "enabled": True, "host": LOOPBACK, "port": listener.getsockname()[1], "tls": False, "topic_prefix": "lab",
-        "username": "lab-portal", "client_id": "hyperloom-fixture", "interval_s": 10, "revision": 1,
+        "username": "lab-portal", "client_id": "hydraweave-fixture", "interval_s": 10, "revision": 1,
         "credential_ref": "integrations-mqtt-5eed0001"})
     store.describe("node_load1", "gauge", interval=5)
     for offset in range(0, 600, 5):

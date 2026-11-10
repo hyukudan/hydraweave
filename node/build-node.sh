@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Compatibility fallback for deployed build jobs from before the rename.
+for suffix in CONFIGURE CTEST_REGEX TRELLIS_MODE TRELLIS_API TRELLIS_CONFIGURE; do
+    current="HYDRAWEAVE_$suffix"
+    old="HYPERLOOM_$suffix"
+    if [[ ! -v "$current" && -v "$old" ]]; then
+        printf '%s is deprecated; use %s.\n' "$old" "$current" >&2
+        printf -v "$current" '%s' "${!old}"
+        export "$current"
+    fi
+done
+
 if (( $# < 5 )); then
     echo 'usage: build-node.sh <src-engine> <src-trellis|-> <build-dir> <out-bin> <targets...>' >&2
     exit 2
@@ -15,16 +26,16 @@ export HIP_PATH=/opt/rocm/core-10.1
 configure=()
 while IFS= read -r flag; do
     [[ -z "$flag" ]] || configure+=("$flag")
-done <<< "${HYPERLOOM_CONFIGURE:-}"
-# Per-family trellis recipe (hyperloom/engines.py): ds41 links the archive through STRIX_DS41_TRELLIS_*
-# (adapter HYPERLOOM_TRELLIS_API, v12 unless the preset says otherwise); minimax points STRIX_MINIMAX_TRELLIS_DIR at
+done <<< "${HYDRAWEAVE_CONFIGURE:-}"
+# Per-family trellis recipe (hydraweave/engines.py): ds41 links the archive through STRIX_DS41_TRELLIS_*
+# (adapter HYDRAWEAVE_TRELLIS_API, v12 unless the preset says otherwise); minimax points STRIX_MINIMAX_TRELLIS_DIR at
 # a tree with include/strix_trellis.h and build-qualification-v03/libstrix_trellis.a, the layout its CMake expects.
-mode=${HYPERLOOM_TRELLIS_MODE:-ds41}
-api=${HYPERLOOM_TRELLIS_API:-v12}
+mode=${HYDRAWEAVE_TRELLIS_MODE:-ds41}
+api=${HYDRAWEAVE_TRELLIS_API:-v12}
 trellis_configure=()
 while IFS= read -r flag; do
     [[ -z "$flag" ]] || trellis_configure+=("$flag")
-done <<< "${HYPERLOOM_TRELLIS_CONFIGURE:-}"
+done <<< "${HYDRAWEAVE_TRELLIS_CONFIGURE:-}"
 if [[ "$trellis" != - ]]; then
     case "$mode" in
         ds41) trellis_build="$build/trellis" ;;
@@ -47,7 +58,7 @@ if [[ "$trellis" != - ]]; then
     fi
 fi
 cmake -S "$engine" -B "$build/engine" -G Ninja "${configure[@]}"
-regex=${HYPERLOOM_CTEST_REGEX:?a named host-only ctest subset is required}
+regex=${HYDRAWEAVE_CTEST_REGEX:?a named host-only ctest subset is required}
 ctest --test-dir "$build/engine" --show-only=json-v1 -R "$regex" > "$build/tests.json"
 # CTest provides the executable paths, so only the selected host test targets are built.
 python3 - "$build/tests.json" > "$build/test-targets" <<'PY'

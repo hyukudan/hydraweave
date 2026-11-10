@@ -29,7 +29,7 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom.web.features import usb4
+    from hydraweave.web.features import usb4
     reports = {name: json.loads(read_fixture(FIXTURES / f"node-{name}.json"))
                for name in ("halo-1", "halo-2")}
     started = time.time()

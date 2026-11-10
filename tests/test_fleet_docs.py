@@ -10,10 +10,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API, APIError
-from hyperloom.web.features import machines, overview
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API, APIError
+from hydraweave.web.features import machines, overview
 
 from tests.test_fleet_support import FakeAPI, bump, host, lab, nvidia_csv, pair_records, replica_records
 
@@ -27,7 +27,7 @@ def control_answer(commit_gib=60, rtx_free_gib=None):
     cards = machines.parse_nvidia(gpus, apps)
     if rtx_free_gib is not None:
         cards[0]["memory_used_bytes"] = cards[0]["memory_total_bytes"] - int(rtx_free_gib * GIB)
-    return {"schema": "hyperloom/node-v1", "verb": "host", "checks": {
+    return {"schema": "hydraweave/node-v1", "verb": "host", "checks": {
         "uptime_s": {"status": "ok", "value": 7200.0},
         "memory": {"status": "ok", "value": {"MemTotal": 128 * GIB, "MemAvailable": 64 * GIB, "CommitTotal": 100 * GIB,
                                              "CommitLimit": (100 + commit_gib) * GIB, "CommitAvailable": commit_gib * GIB}},
@@ -142,7 +142,7 @@ class DocumentTests(unittest.TestCase):
         self.collect(1_800_000_005.0)
         self.api.telemetry.event("health", "warning", "GPU hot", machine="halo-1")
         doc = machines.machine_document(self.api, "halo-1", {})
-        self.assertEqual(doc["schema"], "hyperloom/ui-machine-v1")
+        self.assertEqual(doc["schema"], "hydraweave/ui-machine-v1")
         self.assertEqual(doc["status"], "online")
         self.assertEqual(doc["gpus"][0]["power_sensor"], "PPT")
         self.assertIn("power_limit_w", doc["gpus"][0]["why"])
@@ -266,7 +266,7 @@ class PortalTests(unittest.TestCase):
                 mock.patch.object(API, "_snapshot", side_effect=AssertionError("snapshot refresh from a GET")):
             for endpoint in ("overview", "machines/halo-1", "machines/workstation", "fleet/thresholds"):
                 document = self.api.read(endpoint, {})
-                self.assertTrue(document["schema"].startswith("hyperloom/ui-"), endpoint)
+                self.assertTrue(document["schema"].startswith("hydraweave/ui-"), endpoint)
             with self.assertRaises(APIError) as caught:
                 self.api.read("machines/nope", {})
             self.assertEqual(caught.exception.status, 404)
@@ -289,9 +289,9 @@ class PortalTests(unittest.TestCase):
 class TextRuleTests(unittest.TestCase):
     """This package's files carry no address literals, home paths, lab host names, user names or review identities."""
 
-    FILES = ["node/hyperloom_observe.py", "hyperloom/web/features/machines.py", "hyperloom/web/features/overview.py",
-             "hyperloom/cliext/telemetry.py", "hyperloom/web/static/pages/overview.js", "hyperloom/web/static/pages/overview.css",
-             "hyperloom/web/static/pages/machine.js", "hyperloom/web/static/pages/machine.css", "tests/ui/seeds/fleet.py",
+    FILES = ["node/hydraweave_observe.py", "hydraweave/web/features/machines.py", "hydraweave/web/features/overview.py",
+             "hydraweave/cliext/telemetry.py", "hydraweave/web/static/pages/overview.js", "hydraweave/web/static/pages/overview.css",
+             "hydraweave/web/static/pages/machine.js", "hydraweave/web/static/pages/machine.css", "tests/ui/seeds/fleet.py",
              "tests/test_fleet_node.py", "tests/test_fleet_collect.py", "tests/test_fleet_docs.py", "tests/test_fleet_support.py"]
     # Stored encoded so this file stays clean itself.
     WORDS = [codecs.decode(w, "rot13") for w in ("pyhfgre1", "pyhfgre2", "fretvb", "fbypbqrk", "pbqrk", "pynhqr", "bchf", "fbaarg", "tcg-")]
@@ -321,14 +321,14 @@ class TextRuleTests(unittest.TestCase):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

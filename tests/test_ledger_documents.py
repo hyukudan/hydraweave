@@ -5,10 +5,10 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import APIError
-from hyperloom.web.features import ledger
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import APIError
+from hydraweave.web.features import ledger
 from tests.test_ledger_collector import HOUR, make_api
 
 

@@ -17,11 +17,11 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, modelfiles
-from hyperloom.paths import repo_root
-from hyperloom.recipes import apply, core, descriptors, facts, launch, probe, reader, session
-from hyperloom.recipes.reader import GIB_BYTES, RecipeError, StaleProfile
-from hyperloom.recipes.service import BUILTIN_DIR
+from hydraweave import cli, modelfiles
+from hydraweave.paths import repo_root
+from hydraweave.recipes import apply, core, descriptors, facts, launch, probe, reader, session
+from hydraweave.recipes.reader import GIB_BYTES, RecipeError, StaleProfile
+from hydraweave.recipes.service import BUILTIN_DIR
 
 FIXTURES = Path(__file__).parent / "fixtures" / "recipes"
 MM = (FIXTURES / "minimax-lab.toml").read_text(encoding="utf-8")
@@ -62,7 +62,7 @@ def availability(**changes):
     return data
 
 
-# The MiniMax fixture's units groups are a strix-stream placement; hyperloom's service mapping takes only the budget.
+# The MiniMax fixture's units groups are a strix-stream placement; hydraweave's service mapping takes only the budget.
 PLAIN = mm('chunk_tokens = 4096\n\n[[routes.placement.rtx.units]]\nid = "layers"\nclass = "blob"\nresident = 32\n'
            'pinned = 16\nrest = "disk"\n', '')
 
@@ -232,7 +232,7 @@ class PlacementSchemaTests(unittest.TestCase):
             "qwen3.8-flash-next.lab.toml": "3d77634953f4855e8523ccc50e20dae131b7f9eb4a17258e995bb12cfc183bc0",
         }
         for name, sha in shipped.items():
-            text = (repo_root() / "hyperloom/recipes/examples" / name).read_text(encoding="utf-8")
+            text = (repo_root() / "hydraweave/recipes/examples" / name).read_text(encoding="utf-8")
             self.assertEqual(reader.resolve(text).canonical_sha256(), sha)
         # Renamed layer schemas are compatible too; the old output identity stays unchanged.
         layer = {"schema": "tierstream/recipe-overrides-v1", "recipe": reader.parse(MM)["name"],
@@ -354,9 +354,9 @@ class PlacementSchemaTests(unittest.TestCase):
                     self.assertEqual(self.parse(doc)["routes"][0]["components"][ident], value)
 
     def test_tierstream_parser_and_canonical_parity(self):
-        executable = os.environ.get("HYPERLOOM_TS_RECIPE") or shutil.which("ts-recipe")
+        executable = os.environ.get("HYDRAWEAVE_TS_RECIPE") or shutil.which("ts-recipe")
         if not executable:
-            self.skipTest("set HYPERLOOM_TS_RECIPE to a placement-capable Tierstream CLI for CPU parity")
+            self.skipTest("set HYDRAWEAVE_TS_RECIPE to a placement-capable Tierstream CLI for CPU parity")
         with tempfile.TemporaryDirectory(prefix="hl-schema-") as tmp:
             path = Path(tmp) / "recipe.json"
 
@@ -379,7 +379,7 @@ class PlacementSchemaTests(unittest.TestCase):
                 result = validate(doc)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 canonical = json.loads(result.stdout)
-                # Re-read the authoritative canonical form into Hyperloom's established normalized shape.
+                # Re-read the authoritative canonical form into Hydraweave's established normalized shape.
                 left, right = self.parse(doc), self.parse(canonical)
                 left.pop("_written")
                 right.pop("_written")
@@ -420,7 +420,7 @@ SHA = "e" * 64
 
 
 def compiled(recipe, context=None):
-    """Requirements and running credits as hyperloom compiles them (cap model), for the bound fixture devices."""
+    """Requirements and running credits as hydraweave compiles them (cap model), for the bound fixture devices."""
     bound = {"binding": BINDING, "roles": {"rtx": "service", "pair": "decode"}, "why": {}}
     reqs = apply.requirements(recipe, SHA, context or ctx(), bound)
     running = [apply.running_entry(r, SHA, reqs) for r in ("decode_pair", "prefill_nodes")]
@@ -629,7 +629,7 @@ class ApplyTests(unittest.TestCase):
             self.deploy(big, context=dataclasses.replace(ctx(), limits=dict(LIMITS, service_positions=32768)))
         with self.assertRaisesRegex(RecipeError, "max_batch: 8 > the engine's --slots 4"):
             self.deploy(context=dataclasses.replace(ctx(), limits=dict(LIMITS, node_batch=4)))
-        with self.assertRaisesRegex(RecipeError, "does not set --context and hyperloom does not know"):
+        with self.assertRaisesRegex(RecipeError, "does not set --context and hydraweave does not know"):
             self.deploy(context=dataclasses.replace(ctx(), limits=dict(LIMITS, node_context=None)))
         with self.assertRaisesRegex(RecipeError, "runs one prompt at a time"):
             self.deploy(PLAIN.replace("max_context_tokens = 32768\nmax_batch = 1\ndevice_gib",
@@ -791,7 +791,7 @@ class DescriptorTests(unittest.TestCase):
 
 
 def fake_cluster():
-    from hyperloom.config import Cluster, Machine
+    from hydraweave.config import Cluster, Machine
     machines = {"pc": Machine("pc", "windows", "local", "127.0.0.1", None, 22, "C:/hl", True,
                               [{"id": "rtx-pro", "type": "nvidia", "uuid": GPU}]),
                 "n1": Machine("n1", "linux", "ssh", "192.0.2.10", "n1", 22, "/opt/hl", True, [{"id": "gpu"}]),
@@ -819,7 +819,7 @@ class SessionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.dir = Path(temporary.name)
         self.cluster = fake_cluster()
-        # These tests exercise the session plumbing on a MiniMax-shaped profile; hyperloom has no cited MiniMax prefill
+        # These tests exercise the session plumbing on a MiniMax-shaped profile; hydraweave has no cited MiniMax prefill
         # facts (test_minimax_local_prefill_is_refused_without_engine_facts), so a synthetic one stands in here.
         for patcher in (mock.patch.dict(facts.FAMILY_PREFILL_BATCH, {"minimax-pair": MM_PREFILL_FACT}),
                         mock.patch.dict(facts.FAMILY_PREFILL_CHUNK, {"minimax-pair": ("--prefill-chunk", 4096)})):
@@ -833,7 +833,7 @@ class SessionTests(unittest.TestCase):
             evaluation = session.evaluate(self.cluster, "mm", self.recipe, session.Layers(),
                                           session.saved_source(saved_facts(self.dir / "f.json")))
         self.assertIsNone(evaluation.decision)
-        self.assertIn("max_batch: hyperloom has no cited prefill concurrency for minimax-pair", evaluation.refusal)
+        self.assertIn("max_batch: hydraweave has no cited prefill concurrency for minimax-pair", evaluation.refusal)
 
     def test_evaluate_from_saved_facts_without_a_service(self):
         evaluation = session.evaluate(self.cluster, "mm", self.recipe, session.Layers(),
@@ -883,7 +883,7 @@ class SessionTests(unittest.TestCase):
         fields = {f["path"]: f for f in json.loads(out.getvalue())["fields"]}
         self.assertEqual(fields["routes.prefill_long.when.prompt_tokens_min"]["layer"], "override")
         out = io.StringIO()
-        with redirect_stdout(out), mock.patch("hyperloom.cli._cluster", return_value=self.cluster):
+        with redirect_stdout(out), mock.patch("hydraweave.cli._cluster", return_value=self.cluster):
             code = cli.main(["recipe", "explain", str(self.recipe), "mm", "--facts", str(saved_facts(self.dir / "f.json")),
                              "--prompt-tokens", "9000", "--link-down", "pc-nodes"])
         self.assertEqual(code, 0)
@@ -900,7 +900,7 @@ class SessionTests(unittest.TestCase):
         record["facts"] = dict(bad, model="minimax-m3.1-flash")
         (self.dir / "bad.json").write_text(json.dumps(record))
         out = io.StringIO()
-        with redirect_stdout(out), mock.patch("hyperloom.cli._cluster", return_value=self.cluster):
+        with redirect_stdout(out), mock.patch("hydraweave.cli._cluster", return_value=self.cluster):
             code = cli.main(["recipe", "validate", str(self.recipe), "mm", "--facts", str(self.dir / "bad.json")])
         self.assertEqual(code, 1)
         self.assertRegex(json.loads(out.getvalue())["match"][0], r"memory 64(\.00)? GiB.*|.*110 GiB.*memory 64 GiB")
@@ -941,19 +941,19 @@ class LaunchTests(unittest.TestCase):
         exe.chmod(0o755)
         bat = self.dir / "ss-recipe.bat"
         bat.write_bytes(b"")
-        with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": str(exe)}):
+        with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": str(exe)}):
             self.assertEqual(core.locate(), str(exe))
         for bad in ("ss-recipe.exe", str(self.dir / "missing.exe")) + ((str(bat),) if os.name == "nt" else ()):
-            with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": bad}):
+            with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": bad}):
                 self.assertIsNone(core.locate(), bad)
         # PATH: relative entries (the current directory) are never searched.
         cwd = os.getcwd()
         os.chdir(self.dir)
         try:
-            with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": "",
+            with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": "",
                                               "PATH": os.pathsep.join([".", ""])}):
                 self.assertIsNone(core.locate())
-            with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": "",
+            with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": "",
                                               "PATH": str(self.dir)}):
                 self.assertEqual(core.locate(), str(exe))
         finally:
@@ -969,14 +969,14 @@ class LaunchTests(unittest.TestCase):
             (directory / (name + suffix)).write_bytes(b"")
             (directory / (name + suffix)).chmod(0o755)
         ts, ss = str(new / ("ts-recipe" + suffix)), str(old / ("ss-recipe" + suffix))
-        clear = {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": ""}
+        clear = {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": ""}
         with mock.patch.dict(os.environ, dict(clear, PATH=os.pathsep.join([str(old), str(new)]))):
             self.assertEqual(core.locate(), ts)                                  # the new name wins on PATH
         with mock.patch.dict(os.environ, dict(clear, PATH=str(old))):
             self.assertEqual(core.locate(), ss)
-        with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": ts, "HYPERLOOM_SS_RECIPE": ss}):
+        with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": ts, "HYDRAWEAVE_SS_RECIPE": ss}):
             self.assertEqual(core.locate(), ts)
-        with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": "", "HYPERLOOM_SS_RECIPE": ss}):
+        with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": "", "HYDRAWEAVE_SS_RECIPE": ss}):
             self.assertEqual(core.locate(), ss)
         cluster = lambda path: mock.Mock(raw={"pc": {"recipe_core": str(path)}})
         with mock.patch.dict(os.environ, dict(clear, PATH="")):
@@ -1076,7 +1076,7 @@ class LaunchTests(unittest.TestCase):
             facts.Cache(self.dir / "facts.json").put_evidence("n1", "/m", receipt)
 
     def test_node_poller_survives_any_bad_answer(self):
-        from hyperloom import orchestrate
+        from hydraweave import orchestrate
         state = {"machines": {"n1": {}, "n2": {}}, "known_hosts": None}
         polled = {"n1": {"free_ram_gib": 20.0, "at": 1.0}}
         answers = iter([{"checks": []}, TypeError("bad")])           # parsing raises; the call raises
@@ -1107,7 +1107,7 @@ class LaunchTests(unittest.TestCase):
         self.assertIsNone(cache.declaration("n1", "d" * 64))                            # another launch: nothing
         bad = [(dict(good, machine="n2"), "names n2"), (dict(good, rank=1), "rank 1"),
                (dict(good, launch_sha256="d" * 64), "the launch changed"),
-               (dict(good, schema="x"), "expected hyperloom/engine-describe-v1"),
+               (dict(good, schema="x"), "expected hydraweave/engine-describe-v1"),
                (dict(good, output=dict(output, schema="x")), "one strix/engine-capabilities-v1 mode"),
                (dict(good, output=dict(output, modes=[output["modes"][0], output["modes"][0]])), "one strix"),
                (dict(good, output={**output, "modes": [{"memory": [{"rank": 1}]}]}), "no memory entry for rank 0"),
@@ -1139,8 +1139,8 @@ class LaunchTests(unittest.TestCase):
 
     def test_describe_commands_are_the_exact_launch_plus_the_declaration_flag(self):
         from tests import test_rtx
-        from hyperloom import render
-        from hyperloom.config import parse
+        from hydraweave import render
+        from hydraweave.config import parse
         obj = test_rtx.rtx_example()
         cluster = parse(obj)
         rows = facts.describe_commands(cluster, "ds41-rtx")
@@ -1170,8 +1170,8 @@ class LaunchTests(unittest.TestCase):
     def test_router_follows_the_release_auth(self):
         # Review #2: a key-enabled MiniMax release is reached over the LAN with its key, from either router placement.
         from tests import test_rtx
-        from hyperloom import engines, render
-        from hyperloom.config import parse
+        from hydraweave import engines, render
+        from hydraweave.config import parse
         obj = test_rtx.rtx_example()
         obj["profiles"]["mm"] = {"preset": "minimax-pair", "rank0": "halo-1", "rank1": "halo-2", "port": 18601,
                                  "release_id": "0" * 12}
@@ -1203,8 +1203,8 @@ class LaunchTests(unittest.TestCase):
     def test_saved_declarations_and_the_final_launch_are_rechecked(self):
         # Review #3: a saved runtime row for another launch is a refusal reason, not a pass.
         from tests import test_rtx
-        from hyperloom import render
-        from hyperloom.config import parse
+        from hydraweave import render
+        from hydraweave.config import parse
         cluster = parse(test_rtx.rtx_example())
         context = dataclasses.replace(ctx(), profile="ds41-rtx", nodes=["halo-1", "halo-2"])
         current = {r["machine"]: r["launch_sha256"] for r in facts.describe_commands(cluster, "ds41-rtx")}
@@ -1237,8 +1237,8 @@ class LaunchTests(unittest.TestCase):
         launch.verify_launch(launch_obj, cluster, "ds41-rtx", altered, {})
 
     def test_release_auth_binds_the_lan_only_for_that_release(self):
-        from hyperloom import engines
-        from hyperloom.config import ConfigError
+        from hydraweave import engines
+        from hydraweave.config import ConfigError
         keyed = ["{binary}", "--bind", "{address}", "--api-key-file", "{key_file}"]
         presets = {"mm-old": {"family": "minimax-pair"},
                    "mm-new": {"family": "minimax-pair", "serve_auth": "key-file", "argv": keyed},
@@ -1256,8 +1256,8 @@ class LaunchTests(unittest.TestCase):
 
     def test_release_auth_needs_the_key_on_the_command_line(self):
         # A keyed release whose argv does not pass {key_file} after a key flag would serve the LAN unauthenticated.
-        from hyperloom import engines
-        from hyperloom.config import ConfigError
+        from hydraweave import engines
+        from hydraweave.config import ConfigError
         argvs = {"none": ["{binary}", "--bind", "{address}"],
                  "no-flag": ["{binary}", "--bind", "{address}", "{key_file}"],
                  "other-flag": ["{binary}", "--model", "{key_file}"],
@@ -1312,7 +1312,7 @@ class LaunchTests(unittest.TestCase):
 
     def test_plan_service_refuses_instead_of_clamping(self):
         from tests import test_rtx
-        from hyperloom.config import parse
+        from hydraweave.config import parse
         cluster = parse(test_rtx.rtx_example())
         with mock.patch.object(launch.rtx, "plan_placement", return_value=None):
             self.assertEqual(launch.plan_service(cluster, "ds41-rtx", 88.0, 48.0, free_physical_gib=100.0), (None, None))
@@ -1326,7 +1326,7 @@ class LaunchTests(unittest.TestCase):
 
     def test_exact_host_and_whole_gib(self):
         from tests import test_rtx
-        from hyperloom.config import parse
+        from hydraweave.config import parse
         cluster = parse(test_rtx.rtx_example())
         plan = mock.Mock(flags={"--vram-cap-gib": "80", "--host-gib": "31"})
         plan.to_dict.return_value = {"flags": plan.flags, "disk_gib": 0}
@@ -1339,7 +1339,7 @@ class LaunchTests(unittest.TestCase):
 
     def test_generation_default_follows_the_launch(self):
         from tests import test_rtx
-        from hyperloom.config import parse
+        from hydraweave.config import parse
         obj = test_rtx.rtx_example()
         obj["profiles"]["ds41-rtx"].setdefault("overrides", {})["--default-max-tokens"] = 4096
         cluster = parse(obj)
@@ -1383,7 +1383,7 @@ class UpWithRecipeTests(unittest.TestCase):
         patches = [mock.patch.dict(os.environ, {launch.STUB_ENV: "1"}),
                    mock.patch.object(launch.core, "locate", return_value=None),
                    mock.patch.object(launch.render, "router_policies", return_value=("nodes", "rtx", "auto", "routes")),
-                   mock.patch("hyperloom.render.validate_router"),
+                   mock.patch("hydraweave.render.validate_router"),
                    mock.patch.object(launch.render, "check_route_table", side_effect=_check_table),
                    mock.patch.object(launch.rtx, "pro_busy", return_value=None),
                    mock.patch.object(launch, "plan_service", side_effect=self.plan)]
@@ -1432,7 +1432,7 @@ class UpWithRecipeTests(unittest.TestCase):
         orch = self.harness.modules()[0]
         cluster = self.harness.rtx_cluster()
         cluster.pc["cuda"] = deepcopy(test_rtx.rtx_example()["pc"]["cuda"])     # the operator's PC-BIG grant
-        with mock.patch("hyperloom.recipes.commands.live_source", return_value=self.source):
+        with mock.patch("hydraweave.recipes.commands.live_source", return_value=self.source):
             return orch.up(cluster, "ds41-rtx", recipe=self.options)
 
     def test_route_table_refused_by_the_pinned_router_stops_before_any_lease(self):
@@ -1471,7 +1471,7 @@ class UpWithRecipeTests(unittest.TestCase):
         self.assertEqual(self.planned, [])
 
     def test_planner_refusal_skips_the_service_before_any_lease(self):
-        self.plan_why = "no saved header descriptor; run `hyperloom recipe probe <profile> --descriptors`"
+        self.plan_why = "no saved header descriptor; run `hydraweave recipe probe <profile> --descriptors`"
         state = self.up()
         verbs = [verb for _, verb, _ in self.calls]
         self.assertNotIn("service-render", verbs)
@@ -1504,8 +1504,8 @@ class UpWithRecipeTests(unittest.TestCase):
 
 
 def _tensormeld_routes():
-    """The router's selector from the pinned TensorMeld, or from HYPERLOOM_TM_SRC (a TensorMeld src dir)."""
-    for root in (os.environ.get("HYPERLOOM_TM_SRC"), str(repo_root() / "third_party" / "tensormeld" / "src")):
+    """The router's selector from the pinned TensorMeld, or from HYDRAWEAVE_TM_SRC (a TensorMeld src dir)."""
+    for root in (os.environ.get("HYDRAWEAVE_TM_SRC"), str(repo_root() / "third_party" / "tensormeld" / "src")):
         if root and (Path(root) / "tensormeld" / "prefill_routes.py").is_file():
             # Other tests may have imported the pinned tensormeld package already: import this one in isolation and
             # put theirs back.
@@ -1526,7 +1526,7 @@ def _tensormeld_routes():
 
 
 def _check_table(table):
-    """The router's own table parser when a TensorMeld with routes is reachable (HYPERLOOM_TM_SRC), else accept."""
+    """The router's own table parser when a TensorMeld with routes is reachable (HYDRAWEAVE_TM_SRC), else accept."""
     routes = _tensormeld_routes()
     if routes is None:
         return None
@@ -1538,22 +1538,22 @@ def _check_table(table):
 
 
 def _core():
-    """The real recipe core (ts-recipe or ss-recipe) named by HYPERLOOM_TS_RECIPE or HYPERLOOM_SS_RECIPE, when it can
+    """The real recipe core (ts-recipe or ss-recipe) named by HYDRAWEAVE_TS_RECIPE or HYDRAWEAVE_SS_RECIPE, when it can
     run here."""
-    executable = os.environ.get("HYPERLOOM_TS_RECIPE") or os.environ.get("HYPERLOOM_SS_RECIPE")
+    executable = os.environ.get("HYDRAWEAVE_TS_RECIPE") or os.environ.get("HYDRAWEAVE_SS_RECIPE")
     if not executable or not Path(executable).is_file() or (executable.endswith(".exe") and os.name != "nt"):
         return None
     return core.CoreBackend(core.Core(executable))
 
 
 EXAMPLES = BUILTIN_DIR   # strix-stream 4f95e1d recipes/examples, the deployable files, unchanged (portal catalog)
-# What hyperloom knows of each family's engine today (facts.FAMILY_PREFILL_*): only DS has cited prefill facts.
+# What hydraweave knows of each family's engine today (facts.FAMILY_PREFILL_*): only DS has cited prefill facts.
 LAB = {"deepseek-v4.1-flash": dict(topology="pair", caps=("import-state-parked",), prefill_batch=(1, None),
                                    prefill_chunk=4096),
        "minimax-m3.1-flash": dict(topology="pair", caps=(), prefill_chunk=None,
-                                  prefill_batch=(None, "hyperloom has no cited prefill concurrency for minimax-pair")),
+                                  prefill_batch=(None, "hydraweave has no cited prefill concurrency for minimax-pair")),
        "qwen3.8-flash-next": dict(topology="replicas", caps=(), prefill_chunk=1024,
-                                  prefill_batch=(None, "hyperloom has no cited prefill concurrency for qwen-replicas"))}
+                                  prefill_batch=(None, "hydraweave has no cited prefill concurrency for qwen-replicas"))}
 
 
 class LabExampleTests(unittest.TestCase):
@@ -1584,9 +1584,9 @@ class LabExampleTests(unittest.TestCase):
             # With synthetic free RAM the next refusal is the recipe's own field (R3), still a refusal.
             ("deepseek-v4.1-flash.lab", 300.0, r"prefill_pair.placement.pair.chunk_tokens: 0 \(whole prompt\) != the "
                                                "engine's prefill pieces of 4096"),
-            ("qwen3.8-flash-next.lab", 300.0, r"prefill_replicas.placement.nodes.max_batch: hyperloom has no cited "
+            ("qwen3.8-flash-next.lab", 300.0, r"prefill_replicas.placement.nodes.max_batch: hydraweave has no cited "
                                               "prefill concurrency for qwen-replicas"),
-            ("minimax-m3.1-flash.lab", 124.0, r"prefill_pair.placement.pair.max_batch: hyperloom has no cited prefill "
+            ("minimax-m3.1-flash.lab", 124.0, r"prefill_pair.placement.pair.max_batch: hydraweave has no cited prefill "
                                               "concurrency for minimax-pair"),
             ("deepseek-v4.1-flash.lab-hetero", 124.0, r"execute = hetero decode needs a profile whose engine runs it"),
         ]
@@ -1648,7 +1648,7 @@ class ConformanceTests(unittest.TestCase):
     def test_router_equals_stub(self):
         routes = _tensormeld_routes()
         if routes is None:
-            self.skipTest("TensorMeld without prefill_routes (set HYPERLOOM_TM_SRC to a src dir that has it)")
+            self.skipTest("TensorMeld without prefill_routes (set HYDRAWEAVE_TM_SRC to a src dir that has it)")
         resolved, bound, decision, sha = self.prepare(core.StubBackend())
         # The PRO route plans a file tier: its member needs disk_available too (review #2).
         decision["requirements"] = apply.with_disk(decision["requirements"], {"prefill_long"}, "rtx", GIB_BYTES, sha)
@@ -1672,7 +1672,7 @@ class ConformanceTests(unittest.TestCase):
     def test_stub_equals_core(self):
         backend = _core()
         if backend is None:
-            self.skipTest("no recipe core here (set HYPERLOOM_TS_RECIPE or HYPERLOOM_SS_RECIPE to its executable)")
+            self.skipTest("no recipe core here (set HYDRAWEAVE_TS_RECIPE or HYDRAWEAVE_SS_RECIPE to its executable)")
         resolved, bound, decision, sha = self.prepare(backend)
         stub = reader.parse(PLAIN)
         self.assertEqual(resolved.recipe["routes"], stub["routes"])          # the core's document reads back the same

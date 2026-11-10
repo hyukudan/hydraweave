@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import modelfiles
-from hyperloom.placement import desc
-from hyperloom.recipes import commands, content_cache, core, descriptors, launch, placement, reader
+from hydraweave import modelfiles
+from hydraweave.placement import desc
+from hydraweave.recipes import commands, content_cache, core, descriptors, launch, placement, reader
 
 
 class ContentCacheTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""Operator picks use the core's emitted layer and semantic re-plan; no Hyperloom sizing fallback."""
+"""Operator picks use the core's emitted layer and semantic re-plan; no Hydraweave sizing fallback."""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import cli
-from hyperloom.recipes import commands, core, reader, service, session, solver
-from hyperloom.web.features import planner as web_planner
+from hydraweave import cli
+from hydraweave.recipes import commands, core, reader, service, session, solver
+from hydraweave.web.features import planner as web_planner
 from tests import test_recipes
 
 
@@ -174,7 +174,7 @@ class SolverTests(unittest.TestCase):
     def test_cached_configuration_revalidates_manifest_at_pick_time(self):
         request = json.loads(self.bundle.read_bytes())
         request["inputs"]["choices"][0]["components"] = {
-            "schema": "hyperloom/components-ref-v1", "build_sha256": "a" * 64,
+            "schema": "hydraweave/components-ref-v1", "build_sha256": "a" * 64,
             "receipts_sha256": "b" * 64, "flags": {}}
         request["inputs"]["choices"][0]["selected_content"] = {"target": "local-only"}
         self.bundle.write_bytes(json.dumps(request).encode())

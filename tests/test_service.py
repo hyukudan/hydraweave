@@ -15,18 +15,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import cli, orchestrate, secrets, service
-from hyperloom.orchestrate import OrchestrationError
-from hyperloom.render import ProcessSpec
+from hydraweave import cli, orchestrate, secrets, service
+from hydraweave.orchestrate import OrchestrationError
+from hydraweave.render import ProcessSpec
 from tests.test_orchestrate import RELEASE, FakeRemote, cluster_fixture
 
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "node"))
-loader = importlib.util.spec_from_file_location("service_under_test", REPO / "node" / "hyperloom_service.py")
+loader = importlib.util.spec_from_file_location("service_under_test", REPO / "node" / "hydraweave_service.py")
 node = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(node)
-install_loader = importlib.util.spec_from_file_location("install_for_service_test", REPO / "node" / "hyperloom_install.py")
+install_loader = importlib.util.spec_from_file_location("install_for_service_test", REPO / "node" / "hydraweave_install.py")
 node_install = importlib.util.module_from_spec(install_loader)
 install_loader.loader.exec_module(node_install)
 SECRET = "f" * 64
@@ -59,7 +59,7 @@ class NodeCase(unittest.TestCase):
         self.home.mkdir()
         for name in ("etc", "run", "log", "releases/" + RELEASE + "/bin"):
             (self.root / name).mkdir(parents=True)
-        (self.root / ".hyperloom-root").write_text("a" * 32)
+        (self.root / ".hydraweave-root").write_text("a" * 32)
         self.policy({"lab_dir": None, "asset_paths": []})
         self.binary = self.root / "releases" / RELEASE / "bin" / "strix-hip-decode-token"
         self.binary.write_bytes(b"")
@@ -162,7 +162,7 @@ class NodeServiceTests(NodeCase):
         self.plain()
         reply = node.run("service-install", self.payload)
         self.assertNotIn("error", reply)
-        unit = (self.units / "hl-qwen-replicas.service").read_text()
+        unit = (self.units / "hydraweave-qwen-replicas.service").read_text()
         spec_file = self.root / "etc" / "service-qwen-replicas.json"
         self.assertEqual(unit, node.UNIT.format(profile="qwen-replicas", root=self.root,
                                                 python="/usr/bin/python3", spec=spec_file))
@@ -171,8 +171,8 @@ class NodeServiceTests(NodeCase):
             self.assertIn(line, unit)
         self.assertNotIn(SECRET, unit + spec_file.read_text())
         self.assertNotIn("Environment", unit)
-        self.assertEqual(self.systemctl.calls, [["show-environment"], ["is-active", "hl-qwen-replicas.service"],
-                                                ["daemon-reload"], ["is-enabled", "hl-qwen-replicas.service"]])
+        self.assertEqual(self.systemctl.calls, [["show-environment"], ["is-active", "hydraweave-qwen-replicas.service"],
+                                                ["daemon-reload"], ["is-enabled", "hydraweave-qwen-replicas.service"]])
         self.assertEqual((reply["enabled"], reply["unit_file_state"]), (False, "disabled"))
         for name in node.COPIED:
             self.assertTrue((self.root / "bin" / name).is_file())
@@ -190,9 +190,9 @@ class NodeServiceTests(NodeCase):
         self.systemctl.enabled = "enabled"
         reply = node.run("service-install", self.payload)
         self.assertEqual((reply["enabled"], reply["unit_file_state"]), (True, "enabled"))
-        self.assertNotIn(["enable", "hl-qwen-replicas.service"], self.systemctl.calls)
+        self.assertNotIn(["enable", "hydraweave-qwen-replicas.service"], self.systemctl.calls)
         node.run("service-install", dict(self.payload, enable=True))
-        self.assertIn(["enable", "hl-qwen-replicas.service"], self.systemctl.calls)
+        self.assertIn(["enable", "hydraweave-qwen-replicas.service"], self.systemctl.calls)
 
     def test_interpreter_is_not_resolved(self):
         with patch.object(node.sys, "executable", "/usr/local/../bin/python3"):
@@ -210,7 +210,7 @@ class NodeServiceTests(NodeCase):
         for value in ("/opt/hyper loom", "/opt/%h", "relative", "/opt/../etc", '/opt/"x"'):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 node.safe(value)
-        self.assertEqual(node.safe("/opt/hyperloom/halo-1"), "/opt/hyperloom/halo-1")
+        self.assertEqual(node.safe("/opt/hydraweave/halo-1"), "/opt/hydraweave/halo-1")
 
     def test_running_unit_is_not_replaced_or_removed(self):
         self.systemctl.active = "active"
@@ -228,7 +228,7 @@ class NodeServiceTests(NodeCase):
 
     def test_remove_checks_the_user_manager_first_and_resets_failed(self):
         self.units.mkdir()
-        unit = self.units / "hl-qwen-replicas.service"
+        unit = self.units / "hydraweave-qwen-replicas.service"
         unit.write_text("x")
         spec_file = self.write_spec()
         self.systemctl.fail = {"show-environment"}
@@ -239,16 +239,16 @@ class NodeServiceTests(NodeCase):
         lid = self.record("hl-svc-qwen-replicas", state="ready")
         self.assertTrue(node.run("service-remove", self.payload)["removed"])
         self.assertFalse(unit.exists() or spec_file.exists())
-        self.assertEqual(self.systemctl.calls, [["show-environment"], ["is-active", "hl-qwen-replicas.service"],
-                                                ["disable", "hl-qwen-replicas.service"], ["daemon-reload"],
-                                                ["reset-failed", "hl-qwen-replicas.service"]])
+        self.assertEqual(self.systemctl.calls, [["show-environment"], ["is-active", "hydraweave-qwen-replicas.service"],
+                                                ["disable", "hydraweave-qwen-replicas.service"], ["daemon-reload"],
+                                                ["reset-failed", "hydraweave-qwen-replicas.service"]])
         self.assertEqual(node.lease.read_json(node.lease.record_path(self.root, lid))["state"], "failed")
 
     def test_start_stop_go_through_systemctl_user_without_blocking(self):
         for verb, word in (("service-start", "start"), ("service-stop", "stop")):
             self.assertEqual(node.run(verb, self.payload)["requested"], word)
-        self.assertEqual(self.systemctl.calls, [["start", "--no-block", "hl-qwen-replicas.service"],
-                                                ["stop", "--no-block", "hl-qwen-replicas.service"]])
+        self.assertEqual(self.systemctl.calls, [["start", "--no-block", "hydraweave-qwen-replicas.service"],
+                                                ["stop", "--no-block", "hydraweave-qwen-replicas.service"]])
 
     def test_start_is_refused_while_a_lease_is_live(self):
         self.record("hl-qwen-halo-1-abcd")
@@ -379,7 +379,7 @@ class LeaseExclusionTests(NodeCase):
         child.assert_not_called()
 
     def test_lab_install_and_uninstall_refuse_while_a_unit_is_installed(self):
-        (self.root / ".hyperloom-root").write_text("b" * 32)
+        (self.root / ".hydraweave-root").write_text("b" * 32)
         (self.root / "src").mkdir()
         spec_file = self.root / "etc" / "service-qwen-replicas.json"
         spec_file.write_text("{}")
@@ -393,7 +393,7 @@ class LeaseExclusionTests(NodeCase):
         self.assertNotIn("error", node_install.run("uninstall", {"root": self.root.as_posix()}))
 
     def test_install_ignores_service_records_of_a_previous_boot(self):
-        (self.root / ".hyperloom-root").write_text("b" * 32)
+        (self.root / ".hydraweave-root").write_text("b" * 32)
         lid = self.record("hl-svc-qwen-replicas", state="ready", boot_id=OTHER_BOOT, profile="qwen-replicas")
         self.assertEqual(node_install.active_leases(self.root), [])
         node.lease.write_json(node.lease.record_path(self.root, lid),

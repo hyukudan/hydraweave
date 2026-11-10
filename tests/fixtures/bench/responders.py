@@ -3,7 +3,7 @@ responder that makes the expected calls, and a demo responder with reasoning. Te
 
 import json
 
-from hyperloom.bench import quality, tools
+from hydraweave.bench import quality, tools
 
 
 INSTRUCTION_REPLIES = {

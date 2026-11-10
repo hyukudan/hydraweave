@@ -12,11 +12,11 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import config
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API, redact
-from hyperloom.web.features import endpoints
+from hydraweave import config
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API, redact
+from hydraweave.web.features import endpoints
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "endpoints"
@@ -98,7 +98,7 @@ def cluster():
     for mid, system, access, address in (("workstation", "windows", "local", "127.0.0.1"),
                                           ("halo-1", "linux", "ssh", "192.0.2.10"),
                                           ("halo-2", "linux", "ssh", "192.0.2.11")):
-        machines[mid] = config.Machine(mid, system, access, address, mid, 22, "/opt/hyperloom", True, [{"id": "gpu"}])
+        machines[mid] = config.Machine(mid, system, access, address, mid, 22, "/opt/hydraweave", True, [{"id": "gpu"}])
     return config.Cluster(machines, {}, {}, {}, {}, {})
 
 
@@ -370,7 +370,7 @@ class CollectorTests(Base):
         return self.api.feature_post("endpoints/save", {"label": "box", "host": "127.0.0.1", "port": port, **extra})[1]["target"]
 
     def test_sampler_rounds_read_each_target_at_most_once_per_cycle(self):
-        from hyperloom import pollbudget
+        from hydraweave import pollbudget
         server = self.serve({"/v1/models": MODELS})
         self.add(server.port)
         with mock.patch.object(pollbudget, "ENGINE_CYCLE_S", 30.0):        # the real cadence (this module unpaces it)
@@ -473,7 +473,7 @@ class CollectorTests(Base):
         second_state = {"uptime": 115.0, "count": 1000}           # matching uptime, a much higher counter
         second = self.engine(second_state, host="127.0.0.2", port=first.port)
         machines = self.cluster.machines
-        machine = lambda address: config.Machine("halo-9", "linux", "ssh", address, "halo-9", 22, "/opt/hyperloom", True, [])
+        machine = lambda address: config.Machine("halo-9", "linux", "ssh", address, "halo-9", 22, "/opt/hydraweave", True, [])
         machines["halo-9"] = machine("127.0.0.1")
         saved = self.api.feature_post("endpoints/save", {"label": "box", "host": "halo-9", "port": first.port})[1]["target"]
         endpoints.collect(self.api, self.clock())
@@ -694,8 +694,8 @@ class CollectorTests(Base):
 class TextRuleTests(unittest.TestCase):
     def test_package_files_carry_only_loopback_and_documentation_addresses(self):
         root = Path(__file__).resolve().parents[1]
-        files = [root / "hyperloom/web/features/endpoints.py", root / "hyperloom/cliext/endpoints.py",
-                 root / "hyperloom/web/static/pages/endpoints.js", root / "hyperloom/web/static/pages/endpoints.css",
+        files = [root / "hydraweave/web/features/endpoints.py", root / "hydraweave/cliext/endpoints.py",
+                 root / "hydraweave/web/static/pages/endpoints.js", root / "hydraweave/web/static/pages/endpoints.css",
                  root / "tests/ui/seeds/endpoints.py", *root.glob("tests/test_endpoints_*.py"),
                  *(root / "tests/fixtures/endpoints").iterdir()]
         allowed = [ipaddress.ip_network(n) for n in ("127.0.0.0/8", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")]
@@ -710,14 +710,14 @@ class TextRuleTests(unittest.TestCase):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

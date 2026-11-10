@@ -2,13 +2,13 @@
 
 **Setup**
 - Machines: a Windows control machine and two Strix Halo nodes, `halo-1` and `halo-2` (Ubuntu 26.04.1, Python 3.14, ROCm 10.1.0, gfx1151).
-- Engine pin `70ec42b9`, TensorMeld `7165e98`, hyperloom at the commits listed below.
+- Engine pin `70ec42b9`, TensorMeld `7165e98`, Hydraweave at the commits listed below.
 - Every GPU process ran inside a lab single GPU turn with an `hl-` label, at most 15 minutes. No root, and no kernel, module, configfs or layout changes.
 
 ## Results (Qwen3.8-Flash-Next replicas, preset `qwen-rep-rfix`)
 
 **1. Build**
-- `hyperloom install qwen-replicas --build-on halo-1` built `strix-hip-decode-token` and ran 4 host tests (all passed) in about 2.5 min.
+- `hydraweave install qwen-replicas --build-on halo-1` built `strix-hip-decode-token` and ran 4 host tests (all passed) in about 2.5 min.
 - Two builds produced the same release id, `3533f2a1a303`.
 - `push-release` copied it to halo-2, and the binary sha256 was identical on both nodes.
 
@@ -39,7 +39,7 @@
 - **`down`:** every turn ended, no engine or router process was left, and the router port was free.
 
 **5. Token regression gate** (same binary, two launchers)
-- The lab launcher with the rfix environment, and hyperloom.
+- The lab launcher with the rfix environment, and hydraweave.
 - 8 greedy prompts × 64 tokens with `return_token_ids`.
 - **All 8 identical (478 tokens).**
 
@@ -65,7 +65,7 @@
 
 ## Phase 2 first acceptance: DeepSeek V4.1 Flash pair (preset P17.5 production defaults)
 
-- **Build:** `hyperloom install ds41-pair --build-on halo-1` built strix-trellis and `strix-deepseek41-serve` and ran the host tests. Release `d2c8d71531bc` was pushed to halo-2 with identical shas. The capability check is static (nothing executed).
+- **Build:** `hydraweave install ds41-pair --build-on halo-1` built strix-trellis and `strix-deepseek41-serve` and ran the host tests. Release `d2c8d71531bc` was pushed to halo-2 with identical shas. The capability check is static (nothing executed).
 - **Start:** `up ds41-pair --router local` took one `gpu-turn-pair.sh` turn (`hl-ds41-*`).
   - The first attempt **refused to start** on the layout check, because the lab's layout file has per-stream records; this was fixed in c51a1b6.
   - After the fix, layout 1 was verified on both nodes after acquire, and both ranks were `READY` about 50 s after the turn began.
@@ -79,13 +79,13 @@
 | bench C4 (8 requests) | 8 of 8 | 26.4 tok/s | 72.4 tok/s |
 
   The aggregate figures are wall-clock and include prefill of 3000-character documents; this is a smoke test, not a performance claim.
-- **Token regression gate:** the same binary launched lab-style (inherited user environment, the same flags and identity) against hyperloom (clean environment), 8 greedy prompts: **all 8 identical (290 tokens)**.
+- **Token regression gate:** the same binary launched lab-style (inherited user environment, the same flags and identity) against Hydraweave (clean environment), 8 greedy prompts: **all 8 identical (290 tokens)**.
 - **Stop:** `down` → both ranks printed `STOPPED`; the pair turn was 2 min 44 s; no process was left on either node; `usb4stream-describe` shows 4 of 4 streams openable on both nodes afterwards.
 - **Not yet run for the pair:** the router on a node (covered for Qwen), the negative tests (mismatched releases, same-size wrong asset), and interleaved C1/C4 against the lab launch.
 
 ## Phase 1b portal on real hardware
 
-- **Real data:** `hyperloom ui` against the real config (doctor read-only) shows the three machines with summarized hardware:
+- **Real data:** `hydraweave ui` against the real config (doctor read-only) shows the three machines with summarized hardware:
   - unified VRAM+GTT memory on the Strix Halo nodes;
   - USB4 4/4 streams with cable warnings;
   - the cluster map.

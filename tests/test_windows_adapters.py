@@ -3,7 +3,7 @@ import ctypes as C
 import unittest
 from unittest import mock
 
-from hyperloom import windows_adapters
+from hydraweave import windows_adapters
 
 
 class AdapterTests(unittest.TestCase):

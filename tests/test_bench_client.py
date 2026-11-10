@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures" / "bench"))
 
 from fake_server import FakeServer  # noqa: E402
 
-from hyperloom.bench import client  # noqa: E402
+from hydraweave.bench import client  # noqa: E402
 
 
 BODY = {"model": "fixture-model", "messages": [{"role": "user", "content": "hello there"}], "max_tokens": 6, "stream": True,

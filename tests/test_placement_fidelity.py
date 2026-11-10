@@ -13,8 +13,8 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import replica_spool, rtx, replica_gate
-from hyperloom.recipes import runtime, service
+from hydraweave import replica_spool, rtx, replica_gate
+from hydraweave.recipes import runtime, service
 
 from tests import test_placement_render
 from tests.test_recipes_grants import NOW, window
@@ -35,7 +35,7 @@ def test_3_native_fidelity_uses_pinned_replica_tokens_and_every_device(tmp_path,
         (directory / name).mkdir(parents=True)
     (directory / "ready.json").write_text('{"event":"ready","load_id":7,"pid":42}', encoding="utf-8")
     (tmp_path / "state.json").write_text('{"state":"ready","pid":42}', encoding="utf-8")
-    oracle = {"schema": "hyperloom/replica-oracle-v1", "engine_sha": runtime.replica_args.AUDITED_REVISION,
+    oracle = {"schema": "hydraweave/replica-oracle-v1", "engine_sha": runtime.replica_args.AUDITED_REVISION,
               "chat_prompt": 2, "chat_steps": 2, "chats": [0], "files": {}}
     for name, content in {"state": b"synthetic state", "sequences": b"fixture\t1,2\n",
                           "expected": b'{"event":"chat_end","key":"plain:0#0-0","toks":[3,4,5],"position":4,"next_token":5,"digest":"abc"}\n'}.items():
@@ -112,7 +112,7 @@ def test_3_native_fidelity_uses_pinned_replica_tokens_and_every_device(tmp_path,
         sample[keys[2]] = 1
     observer = mock.Mock()
     observer.sample.side_effect = OSError("unattributable") if fault == "counter" else lambda _: sample
-    monkeypatch.setattr("hyperloom.gpu_counters.Observer", lambda: observer)
+    monkeypatch.setattr("hydraweave.gpu_counters.Observer", lambda: observer)
     http = mock.Mock(side_effect=AssertionError("placement must never use HTTP"))
     monkeypatch.setattr(rtx, "_service", mock.Mock(side_effect=AssertionError("legacy oracle")))
     monkeypatch.setattr(rtx, "_running", lambda _: ({}, service))

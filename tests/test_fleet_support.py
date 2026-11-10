@@ -9,8 +9,8 @@ import socket
 from pathlib import Path
 from types import SimpleNamespace
 
-from hyperloom import config
-from hyperloom.telemetry.store import Store
+from hydraweave import config
+from hydraweave.telemetry.store import Store
 
 
 LOOPBACK = str(ipaddress.IPv4Address(socket.INADDR_LOOPBACK))
@@ -28,7 +28,7 @@ def nvidia_csv():
 
 def machine(mid, os_name="linux", access="ssh", devices=None):
     # The address field is never used by these tests (node calls are faked).
-    return config.Machine(mid, os_name, access, "unused", mid if access == "ssh" else None, 22, "/opt/hyperloom/" + mid,
+    return config.Machine(mid, os_name, access, "unused", mid if access == "ssh" else None, 22, "/opt/hydraweave/" + mid,
                           True, devices or [{"id": "gpu"}])
 
 
@@ -60,7 +60,7 @@ class FakeAPI:
         return self._cluster
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", "server_time": self.clock(), "poll_interval_s": 2, "why": {}, **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", "server_time": self.clock(), "poll_interval_s": 2, "why": {}, **fields}
 
     def node(self, machine, verb, payload=None):
         self.calls.append((machine.id, verb, copy.deepcopy(payload)))

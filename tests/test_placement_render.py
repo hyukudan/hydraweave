@@ -9,9 +9,9 @@ import unittest
 from unittest import mock
 import uuid
 
-from hyperloom.recipes import apply, content_cache, launch, runtime
-from hyperloom.recipes.reader import RecipeError
-from hyperloom import rtx
+from hydraweave.recipes import apply, content_cache, launch, runtime
+from hydraweave.recipes.reader import RecipeError
+from hydraweave import rtx
 from tests.portable_fixtures import read_fixture
 from tests.replica_fake import startup_args
 

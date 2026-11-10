@@ -3,7 +3,7 @@
 import math
 import unittest
 
-from hyperloom.bench import quality
+from hydraweave.bench import quality
 
 
 class SuiteTests(unittest.TestCase):

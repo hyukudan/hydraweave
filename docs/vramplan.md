@@ -17,7 +17,7 @@ has no partial residency.
 
 ## What it does
 
-`hyperloom up <profile> --vram-cap-gib X` now does two things for the RTX prefill service:
+`hydraweave up <profile> --vram-cap-gib X` now does two things for the RTX prefill service:
 
 1. **Plans** what the engine keeps on the RTX PRO for that cap and turns the plan into the engine's own flags.
 2. **Guards** it: the watchdog still kills the service above X (the hard stop is unchanged).
@@ -32,17 +32,17 @@ qualified launch line (the one the fidelity gates passed with) is unchanged, wit
 service record in the profile's state.
 
 ```text
-hyperloom prefill plan <profile> [--vram-cap-gib X]     # passive: the flags `up` would use
-hyperloom vramplan <engine> --model PATH --vram-cap-gib X [--positions N] [--host-gib H] [...]
+hydraweave prefill plan <profile> [--vram-cap-gib X]     # passive: the flags `up` would use
+hydraweave vramplan <engine> --model PATH --vram-cap-gib X [--positions N] [--host-gib H] [...]
 ```
 
 `vramplan` plans any registered engine from its model files alone (headers only, no weights read), including the
-engines that have no hyperloom service preset yet.
+engines that have no Hydraweave service preset yet.
 
 ## How a plan is made
 
-- **Sizes come from the model files.** `hyperloom/modelfiles.py` reads GGUF and safetensors headers and returns every
-  tensor's exact byte size. Each family's memory model (`hyperloom/placement/<family>.py`) maps tensors to what the
+- **Sizes come from the model files.** `hydraweave/modelfiles.py` reads GGUF and safetensors headers and returns every
+  tensor's exact byte size. Each family's memory model (`hydraweave/placement/<family>.py`) maps tensors to what the
   engine allocates, following the engine's own code at its pinned commit.
 - **Fixed device memory** (CUDA context, workspaces, state per token × positions) is reserved first, plus a safety
   margin of max(2 GiB, 3 % of the cap).
@@ -59,11 +59,11 @@ engines that have no hyperloom service preset yet.
 |---|---|---|---|
 | `minimax-rtx-prefill` | `mm-rtx-prefill` (minimax/rtx-prefill 736d1361) | `--resident N` | layers [0, N) on the device (the 3 dense layers count); the rest pinned host, 2 device slots. Blob bytes replay `build_layer` exactly (237,834,240 / 2,864,462,336 B). Three-tier mode with `--blob-cache DIR` (`mm-rtx-prefill` 48ab2724): `--resident N --pinned H --blob-cache DIR`; the device is filled first, then layers are pinned while `--host-gib` lasts, and the rest are read per prompt from 4 KiB-padded blob files through a 4-buffer pinned staging ring (counted as pinned host). A plan with file layers needs at least 2 pinned layers (the engine keeps the first two streamed layers off the file). Without `--blob-cache` there is no disk path: every streamed layer is pinned. |
 | `qwen-rtx-prefill` | `strix-cuda-qwen-prefill-service` (qwen/rtx-prefill-coop 70b93af3) | `--blocks`, `--max-positions` | no partial residency: every tensor but the head and the PLE table (pinned, mapped) is on the device. The cap picks the largest block that fits, or refuses. |
-| `ds41-rtx-prefill` | `strix-cuda-ds41-prefill-service` (9211b07e) | `--vram-cap-gib`, `--host-gib` | the service plans its own per-expert residency from its cap. hyperloom replays that plan (rows-weighted `plan_streamed`, cone rows) to predict residency, peak and pinned host, passes an engine cap of guard cap − margin − context (the engine's cap excludes its CUDA context; the watchdog's does not), and a `--host-gib` no larger than what streams. |
+| `ds41-rtx-prefill` | `strix-cuda-ds41-prefill-service` (9211b07e) | `--vram-cap-gib`, `--host-gib` | the service plans its own per-expert residency from its cap. Hydraweave replays that plan (rows-weighted `plan_streamed`, cone rows) to predict residency, peak and pinned host, passes an engine cap of guard cap − margin − context (the engine's cap excludes its CUDA context; the watchdog's does not), and a `--host-gib` no larger than what streams. |
 | `ds41-rtx-front` | `strix-cuda-ds41-pipeline-front` (D-064) | `--cuts K --layers K --tiers D…` | the longest prefix of whole layers; the pair tail must use `--first-layer K`. Base calibrated from the measured K=22 device use. |
 | `ds41-rtx-hot` | `strix-cuda-ds41-hot-decode` | placement JSON | experts ranked by measured routing frequency (a routes file); writes `tensormeld/hot-expert-placement-v1`. |
 
-Only `rtx-prefill-ds41` is a hyperloom service preset today; it carries
+Only `rtx-prefill-ds41` is a Hydraweave service preset today; it carries
 `"placement": {"engine": "ds41-rtx-prefill", "model_asset": "ds41_model", "unplanned_argv": [...]}` and the argv
 token `{placement}`, which expands to the plan's flags (capped start) or to `unplanned_argv` (no flag). A future MiniMax or Qwen service preset adds the same block with its engine name.
 

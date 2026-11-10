@@ -8,9 +8,9 @@ import threading
 import unittest
 from unittest import mock
 
-from hyperloom.web import features, recipes as recipe_web, server
-from hyperloom.web.api import API, APIError
-from hyperloom.web.features import planner as feature
+from hydraweave.web import features, recipes as recipe_web, server
+from hydraweave.web.api import API, APIError
+from hydraweave.web.features import planner as feature
 from tests.recipe_fixtures import isolated
 
 FLOOR = "limits.host_free_ram_floor_gib"
@@ -22,7 +22,7 @@ class FakeAPI:
         self.recipes = mock.Mock()
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", **fields}
 
 
 def outcome(code, stdout=b"", stderr=b"", why=None):
@@ -96,10 +96,10 @@ class AnswerTests(unittest.TestCase):
         return feature.answer(FakeAPI(), "whatif", self.argv, result)
 
     def test_completed_commands(self):
-        doc = self.answer(outcome(0, b'{"schema": "hyperloom/planner-whatif-v1"}'))
-        self.assertEqual((doc["ok"], doc["exit_code"], doc["result"]["schema"]), (True, 0, "hyperloom/planner-whatif-v1"))
-        self.assertEqual(doc["cli"], "hyperloom whatif ds-user --config cfg.json")      # the hidden flag is not shown
-        refusal = self.answer(outcome(1, b"", b"hyperloom: 13 variants (the base included); at most 12\n"))
+        doc = self.answer(outcome(0, b'{"schema": "hydraweave/planner-whatif-v1"}'))
+        self.assertEqual((doc["ok"], doc["exit_code"], doc["result"]["schema"]), (True, 0, "hydraweave/planner-whatif-v1"))
+        self.assertEqual(doc["cli"], "hydraweave whatif ds-user --config cfg.json")      # the hidden flag is not shown
+        refusal = self.answer(outcome(1, b"", b"hydraweave: 13 variants (the base included); at most 12\n"))
         self.assertEqual((refusal["ok"], refusal["result"], refusal["error"]),
                          (False, None, "13 variants (the base included); at most 12"))
         with_json = self.answer(outcome(1, b'{"scenarios": []}'))
@@ -117,11 +117,11 @@ class AnswerTests(unittest.TestCase):
                 self.answer(result)
             self.assertEqual(caught.exception.status, status)
             self.assertIn(text, str(caught.exception))
-            self.assertIn("CLI: hyperloom whatif ds-user", str(caught.exception))
+            self.assertIn("CLI: hydraweave whatif ds-user", str(caught.exception))
         with self.assertRaisesRegex(ValueError, "bad"):
-            self.answer(outcome(2, b"", b"hyperloom: bad"))
+            self.answer(outcome(2, b"", b"hydraweave: bad"))
         with self.assertRaisesRegex(LookupError, "unknown recipe"):
-            self.answer(outcome(3, b"", b"hyperloom: unknown recipe \"x\""))
+            self.answer(outcome(3, b"", b"hydraweave: unknown recipe \"x\""))
 
     def test_a_busy_runner_is_503(self):
         api = FakeAPI()
@@ -161,45 +161,45 @@ class PortalTests(unittest.TestCase):
         data = None
         if body is not None:
             data = json.dumps(body).encode()
-            headers.update({"Origin": self.server.origin, "X-Hyperloom-CSRF": self.server.csrf_token,
+            headers.update({"Origin": self.server.origin, "X-Hydraweave-CSRF": self.server.csrf_token,
                             "Content-Type": "application/json", "Content-Length": str(len(data))})
         connection.request(method, path, body=data, headers=headers)
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
     def test_page_document_and_capabilities(self):
-        layers = self.env.root / "appdata" / "hyperloom" / "run" / "planner"
-        status, doc = self.request("GET", "/hyperloom/api/planner")
+        layers = self.env.root / "appdata" / "hydraweave" / "run" / "planner"
+        status, doc = self.request("GET", "/hydraweave/api/planner")
         self.assertEqual(status, 200)
-        self.assertEqual(doc["schema"], "hyperloom/ui-planner-v1")
+        self.assertEqual(doc["schema"], "hydraweave/ui-planner-v1")
         self.assertIn({"id": "ds41-rtx", "model": "deepseek-v4.1-flash"}, doc["profiles"])
         self.assertEqual([f["name"] for f in doc["facts"]], ["ds-now"])
         self.assertTrue(doc["placement"]["models"]["deepseek-v4.1-flash"]["available"])
         self.assertFalse(doc["placement"]["models"]["minimax-m3.1-flash"]["available"])
         self.assertEqual(doc["limits"]["variants"], 12)
         self.assertFalse(layers.exists())                                 # a GET writes nothing
-        status, _ = self.request("GET", "/hyperloom/api/planner?x=1")
+        status, _ = self.request("GET", "/hydraweave/api/planner?x=1")
         self.assertEqual(status, 400)
-        status, _ = self.request("GET", "/hyperloom/api/planner/whatif")
+        status, _ = self.request("GET", "/hydraweave/api/planner/whatif")
         self.assertEqual(status, 405)
         capabilities = features.registry().capabilities
         self.assertTrue(capabilities["planner-whatif"]["enabled"])
         self.assertTrue(capabilities["placement-preview"]["enabled"])
 
     def test_whatif_end_to_end(self):
-        status, doc = self.request("POST", "/hyperloom/api/planner/whatif",
+        status, doc = self.request("POST", "/hydraweave/api/planner/whatif",
                                    {"recipe": "deepseek-v4.1-flash.lab", "profile": "ds41-rtx",
                                     "vary": {FLOOR: [8]}})
         self.assertEqual(status, 200, doc)
-        self.assertEqual(doc["schema"], "hyperloom/ui-planner-whatif-v1")
+        self.assertEqual(doc["schema"], "hydraweave/ui-planner-whatif-v1")
         self.assertTrue(doc["ok"])
-        self.assertTrue(doc["cli"].startswith("hyperloom whatif deepseek-v4.1-flash.lab --profile ds41-rtx --vary"))
+        self.assertTrue(doc["cli"].startswith("hydraweave whatif deepseek-v4.1-flash.lab --profile ds41-rtx --vary"))
         result = doc["result"]
         self.assertEqual([v["id"] for v in result["variants"]], ["base", "v1"])
         self.assertEqual(result["variants"][1]["fields"][FLOOR]["value"], 8.0)
-        status, doc = self.request("POST", "/hyperloom/api/planner/whatif", {"recipe": "no-such", "profile": "ds41-rtx"})
+        status, doc = self.request("POST", "/hydraweave/api/planner/whatif", {"recipe": "no-such", "profile": "ds41-rtx"})
         self.assertEqual(status, 404)
-        status, doc = self.request("POST", "/hyperloom/api/planner/whatif",
+        status, doc = self.request("POST", "/hydraweave/api/planner/whatif",
                                    {"recipe": "deepseek-v4.1-flash.lab", "profile": "ds41-pair"})
         self.assertEqual(status, 200)
         self.assertFalse(doc["ok"])

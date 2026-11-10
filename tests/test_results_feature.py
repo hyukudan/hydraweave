@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom.web import features
-from hyperloom.web.api import API, APIError, redact
-from hyperloom.web.features import results
+from hydraweave.web import features
+from hydraweave.web.api import API, APIError, redact
+from hydraweave.web.features import results
 
 
 class ResultsTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ResultsTests(unittest.TestCase):
         self.patch.start()
         self.addCleanup(self.patch.stop)
         self.api = SimpleNamespace(
-            document=lambda name, **fields: {"schema": "hyperloom/ui-" + name + "-v1", **fields},
+            document=lambda name, **fields: {"schema": "hydraweave/ui-" + name + "-v1", **fields},
             cached_snapshot=lambda: {}, clock=lambda: 1000, config_path=Path(self.temp.name) / "cluster.json",
             cluster=lambda: SimpleNamespace(profiles={}))
         self.records = mock.patch.object(results.machines, "launch_records", return_value={}).start()
@@ -162,10 +162,10 @@ class ResultsTests(unittest.TestCase):
         self.running()
         self.latency_patch.stop()
         self.api.snapshot = mock.Mock(side_effect=AssertionError("snapshot refresh"))
-        with mock.patch("hyperloom.telemetry.existing_store", return_value=None), \
+        with mock.patch("hydraweave.telemetry.existing_store", return_value=None), \
                 mock.patch.object(socket.socket, "connect", side_effect=AssertionError("network")), \
                 mock.patch.object(socket, "create_connection", side_effect=AssertionError("network")), \
-                mock.patch("hyperloom.telemetry.Store", side_effect=AssertionError("store creation")):
+                mock.patch("hydraweave.telemetry.Store", side_effect=AssertionError("store creation")):
             row = results.results(self.api, {})["live"][0]
         self.assertEqual(row["model"], "qwen3.8-flash-next")
         self.assertTrue(all(v["why"] for v in row["values"] if v["value"] is None))
@@ -185,7 +185,7 @@ class ResultsTests(unittest.TestCase):
                 mock.patch.object(api, "cached_snapshot", return_value={}):
             result = api.read("results", {})
         self.assertEqual(result["published"]["models"][0]["rows"][0]["note"], redact("password=hunter2"))
-        self.assertEqual(result["schema"], "hyperloom/ui-results-v1")
+        self.assertEqual(result["schema"], "hydraweave/ui-results-v1")
         with self.assertRaises(APIError) as caught:
             api.read("results", {"model": "../x"})
         self.assertEqual(caught.exception.status, 400)

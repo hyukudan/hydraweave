@@ -1,4 +1,4 @@
-"""One set of redaction rules (hyperloom/redaction.py): the node's log search keeps a verbatim copy (it is deployed
+"""One set of redaction rules (hydraweave/redaction.py): the node's log search keeps a verbatim copy (it is deployed
 as standalone files); one case table runs against every implementation, and redaction time stays linear."""
 
 import importlib.util
@@ -8,13 +8,13 @@ import re
 import time
 import unittest
 
-from hyperloom import redaction
-from hyperloom.web import recipes as recipe_web
-from hyperloom.web.api import redact
+from hydraweave import redaction
+from hydraweave.web import recipes as recipe_web
+from hydraweave.web.api import redact
 
 ROOT = Path(__file__).resolve().parent.parent
-NODE_FILE = ROOT / "node" / "hyperloom_logsearch.py"
-spec = importlib.util.spec_from_file_location("hyperloom_logsearch_redaction_under_test", NODE_FILE)
+NODE_FILE = ROOT / "node" / "hydraweave_logsearch.py"
+spec = importlib.util.spec_from_file_location("hydraweave_logsearch_redaction_under_test", NODE_FILE)
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 
@@ -371,7 +371,7 @@ class SharedRulesTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertEqual(text.count(marker), 1, path)
             return text[text.index(marker):text.index(end) + len(end)]
-        self.assertEqual(block(NODE_FILE), block(ROOT / "hyperloom" / "redaction.py"))
+        self.assertEqual(block(NODE_FILE), block(ROOT / "hydraweave" / "redaction.py"))
         # The compiled rules too: pattern source, flags and groups, what ends each value and which values stay,
         # and the code of every function of the block.
         compiled = lambda p: (p.pattern, p.flags, tuple(p.groupindex))
@@ -385,8 +385,8 @@ class SharedRulesTests(unittest.TestCase):
         self.assertIn("_shell_word", functions)
         for name in functions:
             self.assertEqual(getattr(node, name).__code__.co_code, getattr(redaction, name).__code__.co_code, name)
-        # The node tool stays self-contained: it never imports the hyperloom package.
-        self.assertIsNone(re.search(r"^\s*(?:from|import)\s+hyperloom\b", NODE_FILE.read_text(encoding="utf-8"), re.M))
+        # The node tool stays self-contained: it never imports the hydraweave package.
+        self.assertIsNone(re.search(r"^\s*(?:from|import)\s+hydraweave\b", NODE_FILE.read_text(encoding="utf-8"), re.M))
 
     def test_every_implementation_masks_the_secrets_and_keeps_the_text(self):
         for name, implementation in IMPLEMENTATIONS.items():

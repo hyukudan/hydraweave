@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hyperloom import mqtt, secrets
+from hydraweave import mqtt, secrets
 
 
 def read_packet(sock):

@@ -18,7 +18,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = json.loads(read_fixture(ROOT / "tests/fixtures/usb4/tree-halo-2.json"))
-spec = importlib.util.spec_from_file_location("hyperloom_usb4_under_test", ROOT / "node" / "hyperloom_usb4.py")
+spec = importlib.util.spec_from_file_location("hydraweave_usb4_under_test", ROOT / "node" / "hydraweave_usb4.py")
 node = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(node)
 BOOT = "000000000000000000000000000000b1"
@@ -138,7 +138,7 @@ class NodeVerbTests(unittest.TestCase):
 
         with mock.patch.object(Path, "open", watch):
             report = self.collect()
-        self.assertEqual((report["schema"], report["verb"], report["boot_id"]), ("hyperloom/node-v1", "usb4", BOOT))
+        self.assertEqual((report["schema"], report["verb"], report["boot_id"]), ("hydraweave/node-v1", "usb4", BOOT))
         self.assertEqual(report["domains"], {"0": "0000:c7:00.5", "1": "0000:c7:00.6"})
         links = {link["router"]: link for link in report["links"]}
         self.assertEqual(sorted(links), ["0-2", "1-2"])
@@ -317,7 +317,7 @@ class NodeVerbTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 node.validate(bad)
         self.assertEqual(node.validate({"journal": {}}), {"journal": {"boot_id": None, "cursor": None}})
-        big = {"schema": "hyperloom/node-v1", "verb": "usb4", "links": [],
+        big = {"schema": "hydraweave/node-v1", "verb": "usb4", "links": [],
                "journal": {"recent": [{"message": "x" * 300}] * 4000}}
         capped = node.cap(big)
         self.assertTrue(capped["truncated"])
@@ -383,7 +383,7 @@ class NodeVerbTests(unittest.TestCase):
         self.assertFalse(node.same_entry("s=a;i=1;b=" + BOOT, "s=a;i=2;b=" + BOOT))
 
     def test_node_tool_dispatches_the_verb_and_refuses_bad_payloads(self):
-        result = subprocess.run([sys.executable, str(ROOT / "node" / "hyperloom-node"), "usb4"],
+        result = subprocess.run([sys.executable, str(ROOT / "node" / "hydraweave-node"), "usb4"],
                                 input=json.dumps({"bogus": 1}), capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 2)
         self.assertIn("payload accepts only journal", json.loads(result.stdout)["error"])

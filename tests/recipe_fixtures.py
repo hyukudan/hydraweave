@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from unittest import mock
 
-from hyperloom.recipes import service, session
+from hydraweave.recipes import service, session
 from tests.test_rtx import PRO, rtx_example
 
 NODE = {"name": "AMD Radeon 8060S", "memory_gib": 120.0, "host_ram_gib": 125.0, "disk_read_gbytes_ps": 6.5}
@@ -22,7 +22,7 @@ def cluster_document():
 
 
 def facts(model, profile, **availability):
-    """A `hyperloom recipe probe --out` record for the example machines (synthetic: no machine is contacted)."""
+    """A `hydraweave recipe probe --out` record for the example machines (synthetic: no machine is contacted)."""
     inventory = {"cuda": [{"uuid": PRO, "name": "NVIDIA RTX PRO 6000 Blackwell", "memory_gib": 95.6}]}
     gathered = {"model": model,
                 "devices": {PRO: {"name": "NVIDIA RTX PRO 6000 Blackwell", "memory_gib": 95.6, "host_ram_gib": 127.7,
@@ -45,27 +45,27 @@ class Isolated:
     use: APPDATA/LOCALAPPDATA/HOME point into it, and the stub reader is selected unless a core is configured."""
 
     def __init__(self, core=None):
-        # The recipe core when HYPERLOOM_TS_RECIPE (else HYPERLOOM_SS_RECIPE) names it, as core.locate reads them (the
+        # The recipe core when HYDRAWEAVE_TS_RECIPE (else HYDRAWEAVE_SS_RECIPE) names it, as core.locate reads them (the
         # same tests then run on the core), else the stub.
         if core is None:
-            named = os.environ.get("HYPERLOOM_TS_RECIPE") or os.environ.get("HYPERLOOM_SS_RECIPE")
+            named = os.environ.get("HYDRAWEAVE_TS_RECIPE") or os.environ.get("HYDRAWEAVE_SS_RECIPE")
             core = bool(named) and Path(named).is_file()
         self.temporary = tempfile.TemporaryDirectory(prefix="hl-recipes-test-")
         self.root = Path(self.temporary.name)
         env = {"APPDATA": str(self.root / "appdata"), "LOCALAPPDATA": str(self.root / "local"),
                "HOME": str(self.root / "home"), "XDG_CONFIG_HOME": str(self.root / "home" / ".config")}
-        env.update(HYPERLOOM_RECIPE_STUB="1")      # `up --recipe` on the stub is allowed (non-production) in tests
+        env.update(HYDRAWEAVE_RECIPE_STUB="1")      # `up --recipe` on the stub is allowed (non-production) in tests
         if not core:
-            env.update(HYPERLOOM_TS_RECIPE="", HYPERLOOM_SS_RECIPE="")
+            env.update(HYDRAWEAVE_TS_RECIPE="", HYDRAWEAVE_SS_RECIPE="")
         self.patch = mock.patch.dict(os.environ, env)
         self.patch.start()
         # The route table goes through the router's own parser when a TensorMeld with routes is reachable (the pinned
-        # one, or HYPERLOOM_TM_SRC), else it is accepted: the same rule as the recipe tests.
-        from hyperloom import render
+        # one, or HYDRAWEAVE_TM_SRC), else it is accepted: the same rule as the recipe tests.
+        from hydraweave import render
         from tests.test_recipes import _check_table
         self.route_check = mock.patch.object(render, "check_route_table", _check_table)
         self.route_check.start()
-        from hyperloom.cli import config_path
+        from hydraweave.cli import config_path
         self.config = config_path()
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(cluster_document()), encoding="utf-8")

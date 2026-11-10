@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures" / "bench"))
 import responders  # noqa: E402
 import support  # noqa: E402
 
-from hyperloom.bench import history, runs, targets  # noqa: E402
-from hyperloom.web import api as web_api  # noqa: E402
-from hyperloom.web.api import APIError, redact  # noqa: E402
+from hydraweave.bench import history, runs, targets  # noqa: E402
+from hydraweave.web import api as web_api  # noqa: E402
+from hydraweave.web.api import APIError, redact  # noqa: E402
 
 
 def stable(test, document):
@@ -131,8 +131,8 @@ class KindsTests(unittest.TestCase):
 
     def test_prefill_excludes_cache_hits_and_unknown_imports(self):
         self.bench.server.config["prefix_cache"] = True
-        original = __import__("hyperloom.bench.prefill", fromlist=["prompt"]).prompt
-        with mock.patch("hyperloom.bench.prefill.prompt", lambda chars: "same reusable prefix " * 4 + original(chars)):
+        original = __import__("hydraweave.bench.prefill", fromlist=["prompt"]).prompt
+        with mock.patch("hydraweave.bench.prefill.prompt", lambda chars: "same reusable prefix " * 4 + original(chars)):
             record, run = self.bench.run("bench/prefill", {"target": {"target": "fake"}, "sizes": [1024], "trials": 2})
         size = run["summary"]["sizes"][0]
         self.assertEqual(size["counted"], 0)
@@ -180,7 +180,7 @@ class KindsTests(unittest.TestCase):
         weather = next(r for r in run["detail"]["results"] if r["scenario"] == "parallel-weather")
         self.assertFalse(weather["passed"])
         self.assertIn("is not one of celsius, fahrenheit", weather["reason"])
-        from hyperloom.bench import tools as bench_tools
+        from hydraweave.bench import tools as bench_tools
         offered = {"lookup_order": bench_tools.catalogue()["tools"]["lookup_order"]["parameters"],
                    "send_payment": bench_tools.catalogue()["tools"]["send_payment"]["parameters"]}
         passed, reason = bench_tools.check_calls({"no_call": ["send_payment"]}, [{"name": "lookup_order", "arguments": {}}], offered)
@@ -191,12 +191,12 @@ class KindsTests(unittest.TestCase):
 
     def test_stored_errors_are_redacted(self):
         self.bench.server.config.update(status=500)
-        from hyperloom.bench import client as bench_client
+        from hydraweave.bench import client as bench_client
         original = bench_client._error_text
         with mock.patch.object(bench_client, "_error_text", lambda data: ": upstream said Bearer sk-secret-value-123"):
             _, run = self.bench.run("bench/decode", {"target": {"profile": "qwen"}, "levels": [1], "max_tokens": 16, "trace": True})
         self.assertIs(bench_client._error_text, original)
-        from hyperloom.bench import store as bench_store
+        from hydraweave.bench import store as bench_store
         stored = bench_store.get(self.bench.api.telemetry, run["id"])
         self.assertNotIn("sk-secret-value-123", json.dumps(stored))
 
@@ -328,7 +328,7 @@ class DocumentsTests(unittest.TestCase):
             self.assertNotIn(leaked, text)
         self.assertEqual(share["share"]["target"], "qwen-replicas")
         self.assertEqual(self.bench.api.read("bench/share/" + b["id"])["share"]["target"], "ad-hoc endpoint")
-        self.assertIn("hyperloom bench · decode", share["text"])
+        self.assertIn("hydraweave bench · decode", share["text"])
         listing = self.bench.api.read("bench/runs", {"kind": "decode"})["runs"]
         self.assertEqual(len(listing), 2)
         with self.assertRaises(APIError):
@@ -349,8 +349,8 @@ class DocumentsTests(unittest.TestCase):
 
     def test_preview_and_corpus(self):
         _, document = self.bench.api.feature_post("bench/preview", {"kind": "tools", "arguments": {"target": {"profile": "qwen"}, "preset": "hard", "repeats": 3}})
-        self.assertEqual(document["command"], "hyperloom bench tools --profile qwen --preset hard --repeats 3")
-        from hyperloom.bench import commands
+        self.assertEqual(document["command"], "hydraweave bench tools --profile qwen --preset hard --repeats 3")
+        from hydraweave.bench import commands
         self.assertEqual(commands._quote("it's $HOME", "powershell"), "'it''s $HOME'")
         self.assertEqual(commands._quote("it's $(id)", "posix"), "'it'\"'\"'s $(id)'")
         corpus = self.bench.api.read("bench/corpus")

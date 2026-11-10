@@ -19,7 +19,7 @@ SHELL_DOCUMENTS = ("health/summary", "overview")
 
 
 def patches(directory, now):
-    from hyperloom.web import features, server
+    from hydraweave.web import features, server
     directory = Path(directory)
     real_load, real_manifest = features.load, server.manifest
 
@@ -65,7 +65,7 @@ def patches(directory, now):
             return tuple(name for name in names if name != "sw.js")
         return names
 
-    from hyperloom.web import api as web_api
+    from hydraweave.web import api as web_api
     real_read = web_api.API.read
 
     def read(self, screen, query=None):
