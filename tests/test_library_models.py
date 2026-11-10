@@ -37,10 +37,10 @@ def gguf_header(file_type):
 class ModelRootsConfigTests(unittest.TestCase):
     def test_default_is_lab_models_and_explicit_key_wins(self):
         obj = example()
-        obj["machines"][1]["lab_dir"] = "/home/sergioc/ai-cluster-lab"
+        obj["machines"][1]["lab_dir"] = "/home/op/gpu-lab"
         obj["machines"][2].update(lab_dir="/srv/lab", model_roots=["/data/models", "/srv/more"])
         cluster = parse(obj)
-        self.assertEqual(model_roots_of(cluster.machines["halo-1"]), ["/home/sergioc/ai-cluster-lab/models"])
+        self.assertEqual(model_roots_of(cluster.machines["halo-1"]), ["/home/op/gpu-lab/models"])
         self.assertEqual(model_roots_of(cluster.machines["halo-2"]), ["/data/models", "/srv/more"])
         self.assertEqual(model_roots_of(cluster.machines["workstation"]), [])       # no lab_dir, no key
         obj["machines"][1]["model_roots"] = []                                      # explicitly none
@@ -63,36 +63,36 @@ class ModelRootsLibraryTests(unittest.TestCase):
         self.store = Store(":memory:")
         self.addCleanup(self.store.close)
         obj = example()
-        obj["machines"][1]["lab_dir"] = "/home/sergioc/ai-cluster-lab"
+        obj["machines"][1]["lab_dir"] = "/home/op/gpu-lab"
         obj["machines"][2]["model_roots"] = ["/data/models"]
         self.cluster = parse(obj)
-        known_homes(self, self.cluster, home="/home/sergioc")
+        known_homes(self, self.cluster, home="/home/op")
 
     def test_model_roots_are_scanned_by_default(self):
         roots = downloads.library_roots(self.cluster)
-        self.assertIn({"path": "/home/sergioc/ai-cluster-lab/models", "source": "config"}, roots["halo-1"])
+        self.assertIn({"path": "/home/op/gpu-lab/models", "source": "config"}, roots["halo-1"])
         self.assertIn({"path": "/data/models", "source": "config"}, roots["halo-2"])
 
     def test_library_roots_accepts_the_lab_models_directory_and_below(self):
         saved = downloads.set_roots(self.cluster, self.store, "halo-1",
-                                    ["/home/sergioc/ai-cluster-lab/models", "/home/sergioc/ai-cluster-lab/models/ds41-exl3"])
-        self.assertEqual(saved["roots"], ["/home/sergioc/ai-cluster-lab/models",
-                                          "/home/sergioc/ai-cluster-lab/models/ds41-exl3"])
+                                    ["/home/op/gpu-lab/models", "/home/op/gpu-lab/models/ds41-exl3"])
+        self.assertEqual(saved["roots"], ["/home/op/gpu-lab/models",
+                                          "/home/op/gpu-lab/models/ds41-exl3"])
         paths = [row["path"] for row in downloads.library_roots(self.cluster, self.store)["halo-1"]]
-        self.assertIn("/home/sergioc/ai-cluster-lab/models/ds41-exl3", paths)
+        self.assertIn("/home/op/gpu-lab/models/ds41-exl3", paths)
         downloads.set_roots(self.cluster, self.store, "halo-2", ["/data/models/sub"])
-        for machine, value in (("halo-1", "/home/sergioc/ai-cluster-lab"), ("halo-1", "/home/sergioc/other"),
-                               ("halo-1", "/home/sergioc/ai-cluster-lab/models/.hidden"), ("halo-2", "/data")):
+        for machine, value in (("halo-1", "/home/op/gpu-lab"), ("halo-1", "/home/op/other"),
+                               ("halo-1", "/home/op/gpu-lab/models/.hidden"), ("halo-2", "/data")):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "inside a configured root"):
                 downloads.set_roots(self.cluster, self.store, machine, [value])
 
     def test_a_model_root_that_is_a_home_is_never_a_base(self):
         obj = example()
-        obj["machines"][1]["model_roots"] = ["/home/sergioc"]
+        obj["machines"][1]["model_roots"] = ["/home/op"]
         cluster = parse(obj)
-        known_homes(self, cluster, home="/home/sergioc")
-        self.assertNotIn("/home/sergioc", downloads.configured_bases(cluster, cluster.machines["halo-1"]))
-        self.assertEqual([r for r in downloads.library_roots(cluster)["halo-1"] if r["path"] == "/home/sergioc"], [])
+        known_homes(self, cluster, home="/home/op")
+        self.assertNotIn("/home/op", downloads.configured_bases(cluster, cluster.machines["halo-1"]))
+        self.assertEqual([r for r in downloads.library_roots(cluster)["halo-1"] if r["path"] == "/home/op"], [])
 
 
 class ClassificationTests(unittest.TestCase):
@@ -200,7 +200,7 @@ class FamilyMappingTests(unittest.TestCase):
         }
         for name, (family, presets, why) in cases.items():
             with self.subTest(unit=name):
-                engine = downloads.engine_of(cluster, halo, "/home/sergioc/ai-cluster-lab/models", {"name": name})["engine"]
+                engine = downloads.engine_of(cluster, halo, "/home/op/gpu-lab/models", {"name": name})["engine"]
                 self.assertEqual((engine["family"], sorted(engine["presets"]), engine.get("why")),
                                  (family, presets, why))
                 self.assertEqual((engine["basis"], engine["assets"]), (downloads.INFERRED, []))
