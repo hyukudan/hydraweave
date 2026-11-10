@@ -9,7 +9,8 @@ from hydraweave.web.features import health
 class PausedTests(unittest.TestCase):
     def ctx(self):
         row = {"labels": {"machine": "halo-1"}, "value": 0}
-        return types.SimpleNamespace(api=object(), now=1000.0, states=lambda name, codes: [(row, 0)])
+        return types.SimpleNamespace(api=object(), now=1000.0, states=lambda name, codes: [(row, 0)],
+                                     machines=lambda: {"halo-1": None})
 
     def test_unreachable_clears_while_a_turn_holds_the_machine(self):
         budget = mock.Mock()
@@ -18,6 +19,16 @@ class PausedTests(unittest.TestCase):
             obs = health._unreachable(self.ctx(), {})
         self.assertEqual([(o.subject, o.verdict) for o in obs], [("halo-1", False)])
         self.assertIn("paused", obs[0].detail)
+
+    def test_a_paused_machine_without_a_recent_row_still_clears(self):
+        ctx = self.ctx()
+        ctx.states = lambda name, codes: []
+        ctx.machines = lambda: {"halo-1": None, "halo-2": None}
+        budget = mock.Mock()
+        budget.turn.side_effect = lambda m: ("lab-turn", False) if m == "halo-1" else None
+        with mock.patch("hydraweave.pollbudget.for_api", return_value=budget):
+            obs = health._unreachable(ctx, {})
+        self.assertEqual([(o.subject, o.verdict) for o in obs], [("halo-1", False)])
 
     def test_unreachable_fires_without_a_turn(self):
         budget = mock.Mock()

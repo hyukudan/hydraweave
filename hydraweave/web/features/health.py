@@ -543,6 +543,13 @@ def _unreachable(ctx, p):
             continue
         out.append(Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
                        f"{machine} does not answer the node tool", machine))
+    # A paused machine with no recent node_up row (its host reads wait for the turn) still clears an old finding.
+    seen = {o.subject for o in out}
+    for machine in sorted(ctx.machines() or {}):
+        holder = None if machine in seen else _paused(ctx, machine)
+        if holder is not None:
+            out.append(Obs(machine, False, "critical", f"{machine}: node tool answers its turn check; other reads "
+                           f"paused while GPU turn {holder} runs", machine))
     return out
 
 
