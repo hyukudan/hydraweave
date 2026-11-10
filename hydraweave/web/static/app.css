@@ -1,5 +1,9 @@
 /* Hydraweave portal. Derived from docs/ui/mockups/ds.css. */
 :root{
+  --font-display:"Bricolage Grotesque","Segoe UI Variable Display","Trebuchet MS",system-ui,sans-serif;
+  --font-body:"Instrument Sans","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --font-code:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+  --weave-ground:#E9EEF3; --weave-ink:#0F1B2A; --weave-blue:#2459D6; --weave-turn:#C7770F;
   --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f0f2f5; --border:#e2e5ea; --border-strong:#cdd2d9;
   --text:#141821; --text-2:#4a5262; --text-3:#646c7b;
   --accent:#2f6fde; --accent-soft:#e6eefc; --accent-text:#1d55b8;
@@ -10,6 +14,48 @@
   --f:"Inter","Segoe UI",system-ui,-apple-system,sans-serif; --mono:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
   color-scheme:light;
 }
+
+/* Home is the first redesign increment. Other page surfaces keep their tokens. */
+body[data-page="control-center"]{
+  --f:var(--font-body); --mono:var(--font-code); --r:14px; --shadow:none;
+  --warn:var(--text-2); --warn-soft:var(--surface-2);
+}
+:root:not([data-theme="dark"]) body[data-page="control-center"]{
+  --bg:var(--weave-ground); --surface:#fff; --surface-2:#F3F6F9;
+  --text:var(--weave-ink); --text-2:#45566A; --text-3:#526377;
+  --accent:var(--weave-blue); --accent-text:#1E4DBA; --accent-soft:#E8EFFD;
+  --border:#CCD6E1; --border-strong:#8192A6;
+}
+body[data-page="control-center"] .side{
+  --surface:#0F1B2A; --surface-2:#1C2E43; --text:#F5F8FC; --text-2:#DAE3EE;
+  --text-3:#B4C2D3; --border:#33465C; --border-strong:#70849E;
+  --accent:#88B5FF; --accent-text:#fff; --accent-soft:#2459D6;
+  background:var(--surface);color:var(--text);padding-top:24px;
+}
+body[data-page="control-center"] .brand{font-family:var(--font-display);font-size:19px;letter-spacing:-.03em}
+body[data-page="control-center"] .side .nav a{border-radius:8px}
+body[data-page="control-center"] .side .nav a:hover{background:#1C2E43}
+body[data-page="control-center"] .side .nav a.on:hover{background:#2459D6}
+body[data-page="control-center"] .side .pill{color:#DAE3EE;background:#1C2E43}
+body[data-page="control-center"] .top{background:var(--bg);border-bottom:0;gap:12px;padding-top:22px}
+body[data-page="control-center"] .top h1{font-size:13px;color:var(--text-2);font-weight:600}
+body[data-page="control-center"] .top .sp{display:none}
+body[data-page="control-center"] #global-status{display:none}
+body[data-page="control-center"] .heartbeat{margin-left:auto;background:var(--surface);color:var(--text-2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;font-weight:400}
+body[data-page="control-center"] .heartbeat::before{display:none}
+body[data-page="control-center"] .content{gap:22px;padding-top:8px;max-width:1640px;width:100%;margin-inline:auto}
+body[data-page="control-center"] .btn{min-height:40px}
+body[data-page="control-center"] .btn:hover:not(:disabled){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+body[data-page="control-center"] .card{padding:22px 24px}
+body[data-page="control-center"] .card h2{font-family:var(--font-display);font-size:18px;letter-spacing:-.025em}
+@media(max-width:760px){
+  body[data-page="control-center"] .top{padding-top:12px}
+  body[data-page="control-center"] .content{padding:8px 16px 32px;gap:16px}
+  body[data-page="control-center"] .card{padding:18px 16px}
+  body[data-page="control-center"] .btn{min-height:44px}
+  body[data-page="control-center"] .heartbeat{display:inline-flex;max-width:100%;white-space:normal;font-size:11px}
+}
+@media(max-width:380px){body[data-page="control-center"] #mobile-status{display:none}}
 :root[data-theme="dark"]{
   --bg:#0f1218; --surface:#161a22; --surface-2:#1c212b; --border:#272d39; --border-strong:#353c4a;
   --text:#e8ebf1; --text-2:#aab2c0; --text-3:#8a93a4;

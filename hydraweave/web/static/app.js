@@ -346,7 +346,9 @@
     const pageControls = pageOf(page)?.actions ? (() => { try { return pageOf(page).actions(); } catch (_) { return ""; } })() : controls;
     if ($("page-actions").innerHTML !== pageControls) $("page-actions").innerHTML = pageControls;
     const running = profiles().find(p => ["running", "starting", "stopping", "degraded", "error", "failed"].includes(p.state));
-    const global = running?.state || (profiles().length ? "stopped" : state.docs.profiles ? "not configured" : "loading");
+    const homeStatusUnknown = page === "control-center" && (!state.fresh || !Array.isArray(state.docs.profiles?.profiles));
+    const global = homeStatusUnknown ? "Engine status unavailable" : running?.state
+      || (profiles().length ? "stopped" : page === "control-center" ? "No engine serving" : state.docs.profiles ? "not configured" : "loading");
     // "stopped" is the serving state of the profiles, not of this page: say so in words.
     const label = global === "stopped" ? t("serve.none", null, "No engine serving") : global;
     $("global-status").outerHTML = `<span id="global-status">${statusPill(label)}</span>`;
