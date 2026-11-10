@@ -415,7 +415,7 @@ class LeaseProcessTests(LeaseFixture):
         super().setUp()
         self.boot = self.base / "boot"
         self.boot.mkdir()
-        for name in ("hydraweave-node", "hydraweave_lease.py"):
+        for name in ("hydraweave-node", "hydraweave_compat.py", "hydraweave_lease.py"):
             shutil.copyfile(REPO / "node" / name, self.boot / name)
             (self.boot / name).chmod(0o700)
         for name in ("gpu-turn.sh", "gpu-turn-pair.sh"):
@@ -427,6 +427,7 @@ class LeaseProcessTests(LeaseFixture):
     def node(self, verb, payload):
         result = subprocess.run([sys.executable, str(self.boot / "hydraweave-node"), verb],
                                 input=json.dumps(payload), capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         reply = json.loads(result.stdout)
         self.assertNotIn("error", reply, reply)
         return reply

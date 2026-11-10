@@ -226,7 +226,11 @@ def test_10_empty_table_stays_legacy_as_in_tierstream(table):
 def test_11_portable_g6_reconstructs_original_frozen_bytes():
     from tests.portable_fixtures import read_fixture
     path = Path(__file__).parent / "fixtures/render/legacy-eb9ae96.json"
-    assert hashlib.sha256(read_fixture(path).encode()).hexdigest() == "40489d24e0a9b64d9b6186b2742d2fff734e4d66e310dd1776d8b62c340168e7"
+    # The oracle predates the product rename. Reverse only those directory names;
+    # every other byte must still reproduce the original frozen render.
+    original = read_fixture(path).replace("/hydraweave/", "/hyperloom/").replace(
+        r"\\hydraweave\\", r"\\hyperloom\\")
+    assert hashlib.sha256(original.encode()).hexdigest() == "40489d24e0a9b64d9b6186b2742d2fff734e4d66e310dd1776d8b62c340168e7"
 
 
 @pytest.mark.parametrize("recorded", [False, True])

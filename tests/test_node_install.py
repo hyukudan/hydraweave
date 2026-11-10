@@ -445,7 +445,8 @@ class PosixBuildTests(InstallCase):
         peer_home = self.base / "peer home"
         peer_boot = peer_home / ".hydraweave-boot"
         peer_boot.mkdir(parents=True)
-        shutil.copyfile(NODE / "hydraweave_install.py", peer_boot / "hydraweave_install.py")
+        for name in ("hydraweave_install.py", "hydraweave_compat.py"):
+            shutil.copyfile(NODE / name, peer_boot / name)
         tools = self.base / "tools"
         shutil.copyfile(Path(__file__).with_name("fixtures") / "node_install" / "fake_ssh.py", tools / "ssh")
         (tools / "ssh").chmod(0o755)

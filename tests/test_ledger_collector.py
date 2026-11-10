@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -370,7 +371,7 @@ class CollectorTests(unittest.TestCase):
         self.engine.text[18080] = self.engine.text[18081] = metrics(0, 0)
         self.engine.status[18081] = {"model": "qwen3.8", "started": self.clock.now - 50}
         times = iter([0.0, 0.0, 9.0])
-        with mock.patch.object(ledger.time, "monotonic", lambda: next(times, 9.0)):
+        with mock.patch.object(ledger, "time", SimpleNamespace(monotonic=lambda: next(times, 9.0))):
             self.collect()
         errors = [self.api.telemetry.get(ledger.SOURCES, k)["error"] for k in ("qwen/halo-1", "qwen/halo-2")]
         self.assertEqual(sum("round deadline" in (e or "") for e in errors), 1)
@@ -489,7 +490,9 @@ class CollectorTests(unittest.TestCase):
 
     def test_time_skipped_by_the_round_deadline_is_still_expected(self):
         times = iter([0.0, 9.0])                 # the round starts past its deadline: the engine is not read
-        with mock.patch.object(ledger.time, "monotonic", lambda: next(times, 9.0)):
+        # Keep the scripted clock local: background samplers and job threads use
+        # the real time module and must not consume this test's deadline values.
+        with mock.patch.object(ledger, "time", SimpleNamespace(monotonic=lambda: next(times, 9.0))):
             self.collect()
             for _ in range(6):
                 times = iter([0.0, 9.0])
