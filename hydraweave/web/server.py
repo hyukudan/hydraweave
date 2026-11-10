@@ -436,7 +436,8 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
     except Exception:  # noqa: BLE001 - no runtime directory: a per-process token, as before
         token_file = None
     with create_server(port, api=api, listen=listen, token_file=token_file) as server:
-        if server.lan:
+        lan = getattr(server, "lan", False)
+        if lan:
             print(bind.LAN_WARNING.format(what="the Hydraweave portal",
                                           listen=bind.url_host(server.listen_address, server.server_port)),
                   file=sys.stderr, flush=True)
@@ -457,7 +458,7 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
         if getenv("HYDRAWEAVE_TELEMETRY", "1") != "0":
             start_telemetry(server.api)
         print("Hydraweave portal: " + server.origin + (
-            " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if server.lan else ""),
+            " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if lan else ""),
             flush=True)
         if not no_browser:
             webbrowser.open(server.origin + "/")

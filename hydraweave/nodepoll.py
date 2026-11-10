@@ -21,6 +21,7 @@ person starts (doctor, up, down, a job, a logs search) is not a poll and does no
 from .compat import schema as compat_schema
 import hashlib
 import json
+import sys
 import threading
 import time
 
@@ -50,6 +51,7 @@ class NodePoll:
         self._last = {}         # machine -> when its last poll started
         self._busy = set()      # machines with a poll in flight
         self._page = None       # last page activity
+        self._logged = {}       # machine -> the poll error last written to the log (None: answering)
         self._stop = threading.Event()
         self._thread = None
         self.sessions = []      # (machine, started at, keys) of recent polls (bounded; tests and diagnostics)
@@ -202,6 +204,13 @@ class NodePoll:
                 answers, error = {}, f"{type(exc).__name__}: {exc}"[:300]
         finally:
             release()
+        # The portal's log names a node poll that starts or stops failing (once per change, not every cycle).
+        with self._lock:
+            before = self._logged.get(machine.id)
+            self._logged[machine.id] = error
+        if error != before:
+            print(f"hydraweave node poll {machine.id}: " + (f"failing ({', '.join(p['verb'] for p in parts)}): {error}"
+                  if error else "answering again"), file=sys.stderr, flush=True)
         received = self.clock()
         with self._lock:
             store = self._answers.setdefault(machine.id, {})

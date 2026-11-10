@@ -41,7 +41,7 @@ The exact initial and correction prompts are in [PROMPTS.json](PROMPTS.json). No
 
 ## Home changes
 
-- `hydraweave/web/static/pages/control-center.js`: adds a serving summary, the weave, engine catalog links, and next steps. Three vertical threads represent cluster1, cluster2, and the optional Windows RTX PRO 6000 PC. Two blue horizontal threads describe the configured USB4 connection (2 cables / 4 streams); LAN is a neutral cross-thread. Existing setup data, checklist, controller/router roles, configuration errors, lifecycle guidance, node actions, and router dialog remain below the overview.
+- `hydraweave/web/static/pages/control-center.js`: adds a serving summary, the weave, engine catalog links, and next steps. Three vertical threads represent the first two configured Linux nodes (the controller's own first) and the optional Windows RTX PRO 6000 PC. Two blue horizontal threads describe the configured USB4 connection (2 cables / 4 streams); LAN is a neutral cross-thread. Existing setup data, checklist, controller/router roles, configuration errors, lifecycle guidance, node actions, and router dialog remain below the overview.
 - `hydraweave/web/static/pages/control-center.css`: implements weave geometry, catalog, summary strip, and responsive layouts. The machine list remains semantic and readable independently of decorative threads.
 - `hydraweave/web/static/app.css`: adds reusable tokens and scopes the new light canvas and navy rail to Home. Other section surfaces retain their current styles.
 - `hydraweave/web/static/app.js`: Home's idle status reads “No engine serving”, separately from “Status updated N s ago”. Age comes from the received devices timestamp. Other routes retain their current behavior.

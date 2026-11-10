@@ -43,13 +43,17 @@
   function weave() {
     const observed = H().machines(), configured = doc().nodes || [];
     const pc = observed.find(m => m.os === "windows" && H().rows(m.accelerators).some(g => !g.excluded && /RTX PRO 6000/i.test(g.name || "")));
-    const slots = [
-      {id:"cluster1",label:"cluster1",detail:"Controller · AMD Strix Halo"},
-      {id:"cluster2",label:"cluster2",detail:"AMD Strix Halo"},
-      {id:pc?.id,label:"RTX PC",detail:"Optional · Windows · RTX PRO 6000"},
-    ];
+    // The two Strix Halo threads are the first two configured Linux nodes (any names); the controller's own one first.
+    const linux = configured.filter(n => (n.os || observed.find(m => m.id === n.id)?.declared_os) !== "windows");
+    const controllerId = doc().controller?.machine || doc().controller?.id;
+    linux.sort((a, b) => (b.id === controllerId || b.access === "local") - (a.id === controllerId || a.access === "local"));
+    const nodeSlot = (node, index) => ({id:node?.id, label:node?.id || `Node ${index + 1}`,
+      detail:(node && (node.id === controllerId || node.access === "local") ? "Controller · " : "") + "AMD Strix Halo"});
+    const slots = [nodeSlot(linux[0], 0), nodeSlot(linux[1], 1),
+      {id:pc?.id,label:"RTX PC",detail:"Optional · Windows · RTX PRO 6000"}];
+    const pairIds = slots.slice(0, 2).map(s => s.id).filter(Boolean);
     const links = H().rows(H().state.docs.topology?.links);
-    const usb = links.filter(l => l.kind === "USB4" && ["cluster1","cluster2"].includes(l.from) && ["cluster1","cluster2"].includes(l.to));
+    const usb = links.filter(l => l.kind === "USB4" && pairIds.includes(l.from) && pairIds.includes(l.to));
     const usbNote = !fresh("topology") || !usb.length ? "Link status unavailable" : usb.every(l => ["up","ok"].includes(l.health)) ? "Reported up" : "Link needs review";
     const lan = links.filter(l => l.kind === "Ethernet" && slots.some(s => s.id === l.from));
     return `<section class="card cc-weave" aria-labelledby="cc-weave-title"><div class="cc-section-head"><div><span class="cc-eyebrow">Machines & connections</span><h2 id="cc-weave-title">The weave</h2></div><a class="cc-text-link" href="#/topology">Topology & links <span aria-hidden="true">↗</span></a></div>

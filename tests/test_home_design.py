@@ -17,8 +17,8 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const now = Date.now();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state = {fresh:true, errors:{}, fetched:{setup:now, profiles:now, devices:now, topology:now, turns:now},
- docs:{setup:{configured:true, configuration:{state:'valid'}, nodes:[{id:'cluster1',access:'local'}, {id:'cluster2',access:'ssh'}]},
- devices:{machines:[{id:'cluster1',health:'online'}, {id:'cluster2',health:'online'}]},
+ docs:{setup:{configured:true, configuration:{state:'valid'}, nodes:[{id:'node-a',access:'local'}, {id:'node-b',access:'ssh'}]},
+ devices:{machines:[{id:'node-a',health:'online'}, {id:'node-b',health:'online'}]},
  profiles:{profiles:[{id:'qwen',label:'Qwen3.8',state:'stopped'}]}, turns:{nodes:[]}, topology:{links:[]}}};
 let calls = 0;
 const H = {state, esc, rows:v => Array.isArray(v) ? v : [], prefs:()=>({refresh_s:2}),
@@ -46,7 +46,7 @@ assert(!render().includes('No engine serving'));
 state.docs.profiles.profiles = [{id:'qwen',state:'starting'}];
 assert(render().includes('Check engine state'));
 const holder = {parsed:true,alive:true,verified:true,past_cap:false,label:'Qwen3.8'};
-const queue = {machine:'cluster1',state:'ok',age_s:2,holder};
+const queue = {machine:'node-a',state:'ok',age_s:2,holder};
 state.docs.turns.nodes = [queue];
 assert.equal((render().match(/class="cc-turn cc-turn-held"/g)||[]).length,1);
 queue.holder.label = '<img src=x onerror=alert(1)>';
