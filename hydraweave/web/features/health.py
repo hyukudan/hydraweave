@@ -495,7 +495,7 @@ def _disk(ctx, p):
 
 def _paused(ctx, machine):
     """The GPU turn that pauses this machine's node reads (lab rule: a turn holder is not disturbed), or None.
-    While paused, an old failed reading is not evidence: the machine is unknown, never unreachable or stale."""
+    While paused, an old failed reading is not evidence: the turn check answers, and the other sources wait by design."""
     try:
         from hydraweave import pollbudget
         held = pollbudget.for_api(ctx.api).turn(machine)
@@ -513,8 +513,9 @@ def _unreachable(ctx, p):
     for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items()):
         holder = _paused(ctx, machine)
         if holder is not None:
-            out.append(Obs(machine, None, "critical", f"{machine}: node reads paused while GPU turn {holder} runs",
-                           machine))
+            # The turn check itself reads this node (its node tool answers), so it is reachable; its other reads wait.
+            out.append(Obs(machine, False, "critical", f"{machine}: node tool answers its turn check; other reads "
+                           f"paused while GPU turn {holder} runs", machine))
             continue
         out.append(Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
                        f"{machine} does not answer the node tool", machine))
@@ -554,7 +555,7 @@ def _collector_stale(ctx, p):
 
 def _source_obs(ctx, subject, machine, text, last_ok, attempted, interval):
     if machine is not None and _paused(ctx, machine) is not None:
-        return Obs(subject, None)        # reads wait for the GPU turn: unknown, not stale
+        return Obs(subject, False, "warning", f"{text}: paused while a GPU turn holds {machine}", machine)
     if last_ok is not None and ctx.now - last_ok <= 3 * interval:
         return Obs(subject, False, "warning", f"{text} current", machine)
     if attempted is not None and ctx.now - attempted <= 3 * interval:
