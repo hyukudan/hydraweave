@@ -236,11 +236,18 @@ class NodePoll:
         self._stop.set()
 
     def _run(self):
+        last = None
         while not self._stop.wait(TICK_S):
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - one bad tick (an unreadable configuration) never ends the reads
-                pass
+                last = None
+            except Exception as exc:  # noqa: BLE001 - one bad tick (an unreadable configuration) never ends the reads
+                text = f"{type(exc).__name__}: {exc}"[:300]
+                if text != last:            # named once per distinct failure: a silent poll looks like offline nodes
+                    import traceback
+                    print("hydraweave node poll: a tick failed: " + text + chr(10)
+                          + "".join(traceback.format_exception(exc))[-1500:], file=sys.stderr, flush=True)
+                last = text
 
 
 class NotRead(remote.RemoteError):

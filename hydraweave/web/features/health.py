@@ -493,14 +493,32 @@ def _disk(ctx, p):
     return out
 
 
+def _paused(ctx, machine):
+    """The GPU turn that pauses this machine's node reads (lab rule: a turn holder is not disturbed), or None.
+    While paused, an old failed reading is not evidence: the machine is unknown, never unreachable or stale."""
+    try:
+        from hydraweave import pollbudget
+        held = pollbudget.for_api(ctx.api).turn(machine)
+    except Exception:  # noqa: BLE001 - no budget in this process: nothing is paused
+        return None
+    return held[0] if held else None
+
+
 def _unreachable(ctx, p):
     typed = ctx.states("node_up", {0, 1})
     if typed is None:
         return None
     codes = {id(row): code for row, code in typed}
-    return [Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
-                f"{machine} does not answer the node tool", machine)
-            for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items())]
+    out = []
+    for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items()):
+        holder = _paused(ctx, machine)
+        if holder is not None:
+            out.append(Obs(machine, None, "critical", f"{machine}: node reads paused while GPU turn {holder} runs",
+                           machine))
+            continue
+        out.append(Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
+                       f"{machine} does not answer the node tool", machine))
+    return out
 
 
 _first_seen = {}
@@ -535,6 +553,8 @@ def _collector_stale(ctx, p):
 
 
 def _source_obs(ctx, subject, machine, text, last_ok, attempted, interval):
+    if machine is not None and _paused(ctx, machine) is not None:
+        return Obs(subject, None)        # reads wait for the GPU turn: unknown, not stale
     if last_ok is not None and ctx.now - last_ok <= 3 * interval:
         return Obs(subject, False, "warning", f"{text} current", machine)
     if attempted is not None and ctx.now - attempted <= 3 * interval:
