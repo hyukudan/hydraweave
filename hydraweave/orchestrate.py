@@ -683,6 +683,36 @@ def prelaunch(cluster, profile, settings, kind, clients, mids):
             "node_paths": node_paths, "release_rows": release_rows}
 
 
+def deployment_checks(cluster, processes, clients, kind, settings):
+    """Plan on every node before acquiring a turn; old releases retain their argv."""
+    from .deployment import parse_plan
+    plans = {}
+    for spec in processes:
+        reply = _call(clients[spec.machine_id], "deploy-check", {
+            "root": cluster.machines[spec.machine_id].install_root,
+            "argv": spec.argv, "env": spec.env,
+            "capacity_defaults": [flag for flag in ("--slots", "--capacity", "--context")
+                                  if flag not in settings.get("overrides", {}) and not settings.get("advanced")]}, timeout=160)
+        if not reply.get("supported"):
+            if "--deploy" in spec.argv:
+                raise OrchestrationError(f"{spec.machine_id}: deployment inspection unavailable")
+            continue
+        try:
+            plan = parse_plan(reply.get("deployment"))
+        except ValueError as exc:
+            raise OrchestrationError(f"{spec.machine_id}: {exc}") from exc
+        expected_ranks = 2 if engines.adapter(kind).topology == "pair" else 1
+        if plan["chosen"]["ranks"] != expected_ranks:
+            raise OrchestrationError(f"{spec.machine_id}: deployment topology requires a different lease layout")
+        if "argv" in reply:
+            spec.argv[:] = reply["argv"]
+        plans[spec.machine_id] = plan
+    if engines.adapter(kind).topology == "pair" and plans:
+        if len(plans) != len(processes) or len({p["deployment_id"] for p in plans.values()}) != 1:
+            raise OrchestrationError("pair deployment plans disagree across nodes")
+    return plans
+
+
 def check_launch(cluster, profile, router="local", nodes=None, *, diagnostics=None, recipe=False,
                  devices=None, vram_cap_gib=None):
     """The profile, node and router checks up makes before any I/O (also `hydraweave recipe plan`'s preflight)."""
@@ -885,6 +915,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
         # Diagnostic runs are labelled non-production everywhere they are recorded (state, leases, status).
         processes = render.render_processes(selected, profile, **(
             {"diagnostics": diagnostics, "run": state["token"][:12]} if diagnostics else {}))
+        state["deployments"] = deployment_checks(selected, processes, clients, kind, settings)
         rendered = render.render_router(selected, profile)
         if launch is not None:
             recipe_launch.verify_launch(launch, selected, profile, processes, release_rows)
@@ -927,6 +958,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                     "machine": location, "argv": spec.argv, "env": spec.env,
                     "ready": spec.ready,
                     "health_url": _url({"address": address, "port": port}, engine.health_path),
+                    "deployment_id": state["deployments"].get(spec.machine_id, {}).get("deployment_id"),
                     "key_file": node_paths.get(spec.machine_id), "ready_timeout_s": 600}
 
         for index, mid in enumerate(engines.router_members(kind, mids) if pair else mids):
@@ -1023,6 +1055,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
             # The wrapper sets the pinned import path itself: node spec env forbids
             # PYTHON* variables for engine processes.
             source = str(PurePosixPath(machine.install_root) / "src" / ("tensormeld-" + commit) / "src")
+            bridge = (Path(__file__).with_name("deployment.py")).read_text(encoding="utf-8")
             wrapper = ("import os,runpy,sys,tempfile\n"
                        "if not os.path.isfile(os.path.join(sys.argv[3],'tensormeld','__main__.py')): "
                        "raise SystemExit('pinned TensorMeld source unavailable')\n"
@@ -1030,7 +1063,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                        "os.write(fd,sys.argv[2].encode());os.close(fd)\n"
                        "os.environ['PYTHONPATH']=sys.argv[3];sys.path.insert(0,sys.argv[3])\n"
                        "sys.argv=['tensormeld','serve-replicas',path]\n"
-                       "try: runpy.run_module('tensormeld',run_name='__main__')\n"
+                       "try: exec(" + repr(bridge.replace('if __name__ == "__main__":', 'if False:')) + ");router_main(['serve-replicas',path])\n"
                        "finally: os.unlink(path)\n")
             wrapper = "exec(" + repr(wrapper) + ")"
             payload = {"root": machine.install_root, "lab_dir": None, "kind": "none",
@@ -1161,7 +1194,8 @@ def local_router_run(spec_path):
         env["PYTHONPATH"] = str(source)
     else:
         env.pop("PYTHONPATH", None)
-    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "tensormeld", "serve-replicas", str(config)],
+    env["PYTHONPATH"] = os.pathsep.join([str(repo_root()), env.get("PYTHONPATH", "")])
+    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "hydraweave.deployment", "serve-replicas", str(config)],
                              env, directory, "router", port=(rendered["listen"]["address"], rendered["listen"]["port"]))
     interrupted = False
 

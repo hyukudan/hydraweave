@@ -341,7 +341,8 @@ class DeepSeekTests(unittest.TestCase):
     def test_prefill_replays_the_measured_engine_plan(self):
         # TTFT exact run, full VRAM, 32K, --host-gib 74: layers 0-19 stream every expert, 20-39 keep 334..383, slots
         # 7.64 GB, experts 71.5-71.9 GB (ds41-ttft-report.md; hetero/w2/e2e).
-        p = ds41.predict_prefill("m.gguf", vram_cap_gib=200, positions=32768, host_gib=74, sz=DS41)
+        p = ds41.predict_prefill("m.gguf", vram_cap_gib=200, positions=32768, host_gib=74,
+                                 free_at_start_gib=93.09, sz=DS41)
         resident = p.source["resident_per_layer"]
         self.assertEqual(resident[:20], [0] * 20)
         self.assertEqual((resident[20], resident[39]), (334, 383))

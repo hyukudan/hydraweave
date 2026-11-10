@@ -12,6 +12,9 @@ ENGINES = ("minimax-rtx-prefill", "qwen-rtx-prefill", "ds41-rtx-prefill", "ds41-
 
 
 def plan(engine, model, inputs, **params):
+    if params.get("deployment") is not None:
+        from . import deployment
+        return deployment.plan(params.pop("deployment"), rank=params.pop("rank", 0))
     if engine == "minimax-rtx-prefill":
         from . import minimax
         return vramplan.plan(minimax.model(model, **params), inputs)

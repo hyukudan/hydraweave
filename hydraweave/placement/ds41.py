@@ -29,11 +29,9 @@ LAYERS, EXPERTS, FIRST_DECODER, WINDOW, WINDOW_ROWS = 40, 384, 20, 128, 64
 # Measured (hetero/w2/e2e/alias-*.jsonl, exact profile): device bytes in use before the routed experts (dense
 # weights, row buffers, workspaces, attention state; CUDA context excluded) by --positions, GiB.
 USED_BEFORE_EXPERTS = [(512, 11.10), (2048, 11.46), (8192, 12.89), (32768, 18.36)]
-# free_at_start_gib: cudaMemGetInfo free after the service's own context, measured 93.09 of 95.57 GiB (TTFT exact run);
-# context_gib: the share of that the process itself holds (what the watchdog sees). NOT measured yet: ~2.5 GiB is gone
-# before planning (context + display + driver); the margin (2.7 GiB at 90) covers the difference today. Re-check
-# against the on-device measurement before shrinking any margin.
-DEFAULTS = {"context_gib": 1.0, "reserve_gib": 1.0, "slots": 2, "free_at_start_gib": 93.09}
+# Legacy CUDA fallback policy margins; device free memory is a caller-supplied
+# measurement. Without one the prediction is bounded by the operator's cap.
+DEFAULTS = {"context_gib": 1.0, "reserve_gib": 1.0, "slots": 2}
 # Measured: the decode FRONT at K=22 (positions 2600) uses 96.0 GB of the PRO (hetero/hdec-report.md section 6.3b).
 FRONT_MEASURED = {"k": 22, "device_bytes": 96.0e9, "positions": 2600}
 HOT_RESERVE_GIB = 9.55  # measured W1 plan: dense + state + buffers of the hot decoder (hetero/w1-report.md)
@@ -113,13 +111,17 @@ def plan_streamed(budget, slots, w, E=EXPERTS):
 
 def predict_prefill(model_gguf, *, vram_cap_gib, positions, host_gib, margin_gib=2.0, margin_fraction=0.03,
                     context_gib=DEFAULTS["context_gib"], reserve_gib=DEFAULTS["reserve_gib"], slots=DEFAULTS["slots"],
-                    free_at_start_gib=DEFAULTS["free_at_start_gib"], sz=None):
+                    free_at_start_gib=None, sz=None):
     """The service's own residency plan at the engine cap hydraweave passes (guard cap - margin - context)."""
     sz = sz or sizes(model_gguf)
     eb = sz["expert_bytes"]
     margin = max(margin_gib, margin_fraction * vram_cap_gib)
     engine_cap = math.floor((vram_cap_gib - margin - context_gib) * 100) / 100
     used = _interp(USED_BEFORE_EXPERTS, positions)
+    if free_at_start_gib is None:
+        free_at_start_gib = vram_cap_gib - context_gib
+    if isinstance(free_at_start_gib, bool) or not math.isfinite(free_at_start_gib) or free_at_start_gib < 0:
+        raise PlanError("ds41 prefill: device free memory must be a finite nonnegative measurement")
     free_at_plan = free_at_start_gib - used
     avail = min(free_at_plan - reserve_gib, engine_cap - used - reserve_gib)
     if avail <= 0:

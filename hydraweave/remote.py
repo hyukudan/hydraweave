@@ -26,7 +26,7 @@ from .winproc import no_window, retry_sharing
 
 MAX_JSON = 256 * 1024
 POLL_REPLY = 1024 * 1024 + 64 * 1024        # the node's combined poll answers up to 1 MiB of parts
-VERBS = frozenset({"version", "doctor", "gpu",
+VERBS = frozenset({"version", "doctor", "gpu", "deploy-check",
                    # hydraweave_install (phase 1a)
                    "install", "job", "releases", "activate", "uninstall", "verify-model", "stat-assets", "push-release",
                    "bundle-prepare", "bundle-accept", "bundle-discard",

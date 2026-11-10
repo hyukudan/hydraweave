@@ -32,7 +32,7 @@ class VerbContractTests(unittest.TestCase):
         node = Path(__file__).resolve().parents[1] / "node"
         tool = runpy.run_path(str(node / "hydraweave-node"))
         supported = set(tool["VERBS"])
-        self.assertTrue({"hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service"}
+        self.assertTrue({"hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service", "hydraweave_deploy"}
                         <= set(tool["EXTENSIONS"]))
         for name in tool["EXTENSIONS"]:
             spec = importlib.util.spec_from_file_location(name + "_contract", node / (name + ".py"))

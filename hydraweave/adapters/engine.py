@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 import math
 
-from . import Reader, check_schema, prom
+from . import AdapterError, Reader, check_schema, prom
+from ..deployment import parse_capacity, parse_plan
 
 
 SCHEMA = "strix-serve-status-v1"
@@ -47,6 +48,8 @@ class EngineStatus:
     prefill: dict | None
     group: dict | None
     why: dict[str, str]
+    capacity: dict | None = None
+    deployment_id: str | None = None
     ttft_label: str = TTFT_LABEL
 
 
@@ -75,6 +78,15 @@ def parse_status(obj) -> EngineStatus:
     values = {key: r.get(key, kind) for key, kind in {
         "model": str, "engine": str, "state": str, "context_tokens": int,
         "uptime_seconds": float}.items()}
+    values["deployment_id"] = r.get("deployment_id", str) if "deployment_id" in obj else None
+    values["capacity"] = r.record("capacity", dict.fromkeys(
+        ("slots_total", "slots_busy", "kv_bytes_free", "queue_depth"), int)) if "capacity" in obj else None
+    if values["capacity"] is not None:
+        try:
+            values["capacity"] = parse_capacity(values["capacity"])
+        except ValueError as exc:
+            values["capacity"] = None
+            r.why["capacity"] = str(exc)
     values["queue"] = r.record("queue", dict.fromkeys(
         ("queued", "running", "completed", "failed", "cancelled"), int))
     values["totals"] = r.record("totals", {**dict.fromkeys(
@@ -107,6 +119,13 @@ def parse_metrics(text) -> EngineMetrics:
     samples = prom.parse(text)
     r = Reader({field: samples.get((name, ())) for field, name in METRICS.items()})
     return EngineMetrics(**{field: r.get(field, float) for field in METRICS}, why=r.why)
+
+
+def parse_deployment(obj):
+    try:
+        return parse_plan(obj)
+    except ValueError as exc:
+        raise AdapterError(str(exc)) from exc
 
 
 # Observability fields (C1, C2, C8) the instrumented engines add. Additive: parse_status/parse_metrics above are
