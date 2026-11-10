@@ -398,6 +398,7 @@ def _up_command(args, orchestrate, load_cluster):
     orchestrate = orchestrate or _module("hydraweave.orchestrate")
     approval = _module("hydraweave.recipes.commands")._approval(args)
     cluster = None if args.recipe_inputs is not None else (load_cluster or _cluster)(args.config)
+    _resolve_router(args, cluster)
     from .recipes import preflight
     if getattr(args, "admitted_selection", None) is None:
         preflight.cli(args, load_cluster=lambda _: cluster)
@@ -450,6 +451,7 @@ def build_parser(parser_class=argparse.ArgumentParser):
     ui = commands.add_parser("ui", help="open the local portal")
     ui.add_argument("--port", type=int, default=18700)
     ui.add_argument("--no-browser", action="store_true")
+    ui.add_argument("--config", type=Path, help="workspace configuration to open or initialize")
     config = commands.add_parser("config").add_subparsers(dest="operation", required=True)
     config.add_parser("validate").add_argument("path", type=Path)
     render = commands.add_parser("render")
@@ -503,7 +505,7 @@ def build_parser(parser_class=argparse.ArgumentParser):
     # Keep the no-argument Phase 0 probe for existing launchers.
     up.add_argument("profile", nargs="?")
     up.add_argument("--config", type=Path, default=config_path())
-    up.add_argument("--router", default="local")
+    up.add_argument("--router", help="router host; defaults to router.machine in the configuration (local for recipes)")
     up.add_argument("--node", action="extend", nargs="+", default=None)
     up.add_argument("--device", action="extend", nargs="+", default=None)
     up.add_argument("--deadline", type=int, default=1140)
@@ -750,10 +752,22 @@ def build_parser(parser_class=argparse.ArgumentParser):
     return parser
 
 
+def _resolve_router(args, cluster=None):
+    """Resolve one launch's placement before admission and keep it fixed for that launch."""
+    if getattr(args, "command", None) != "up" or getattr(args, "router", None) is not None:
+        return
+    if getattr(args, "recipe", None) or getattr(args, "recipe_inputs", None) or not getattr(args, "profile", None):
+        args.router = "local"
+    else:
+        cluster = cluster or _cluster(args.config)
+        args.router = cluster.router.get("machine", "local")
+
+
 def _admission_hold(args):
     """Contract C11 for direct CLI use: a deploy/start/install takes a "core" hold (refused while a benchmark
     holds its resources), a stop a "stop" hold (cancels overlapping benchmarks). Returns a release function."""
     from .recipes import preflight
+    _resolve_router(args)
     checked_resources = preflight.cli(args)
     kind = {"up": "core", "install": "core", "down": "stop"}.get(args.command)
     if args.command == "recipe" and getattr(args, "operation", None) in ("deploy", "probe"):
@@ -834,7 +848,8 @@ def main(argv=None):
         if args.command == "ui":
             if not 0 <= args.port <= 65535:
                 raise ValueError("ui port must be in 0..65535")
-            _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser)
+            _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser,
+                                                  **({"config_path": args.config} if args.config else {}))
         elif args.command in ("up", "down") and args.profile is None and not (
                 getattr(args, "recipe", None) or getattr(args, "recipe_inputs", None)):
             print("Phase 1a")

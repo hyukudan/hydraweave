@@ -16,7 +16,7 @@ from hydraweave.config import parse
 from hydraweave.recipes import launch, preflight, service, session
 
 from tests import test_recipes, test_rtx
-from tests.recipe_fixtures import isolated
+from tests.recipe_fixtures import cluster_document, isolated
 from tests.test_web_recipes import Portal, QWEN
 
 
@@ -142,7 +142,7 @@ COMMAND_CASES += [(entry, flags, message) for entry in ("hold-plain", "plain") f
 
 @pytest.mark.parametrize("entry,flags,message", COMMAND_CASES)
 def test_2_option_refusals_precede_holds_publication_pins_and_progress(tmp_path, monkeypatch, entry, flags, message):
-    cluster = parse(test_rtx.rtx_example())
+    cluster = parse(cluster_document())
     path = tmp_path / "recipe.json"
     path.write_text(json.dumps(test_recipes.PlacementSchemaTests.document()), encoding="utf-8")
     options = launch.Options(str(path))

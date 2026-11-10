@@ -1,8 +1,9 @@
 # Portal smoke and keyboard review
 
-Run from the repository root, with Python 3.11 or newer. Everything uses the
+Run from the repository root, with Python 3.11 or newer. The Python smoke uses the
 standard library plus the pytest test extra (`python -m pip install -e '.[test]'`). These commands need no GPU, SSH server, credentials, downloads,
-or network beyond 127.0.0.1.
+or network beyond 127.0.0.1. The separate control-center DOM walkthrough below
+uses a test-only Node/JSDOM installation.
 
 ```powershell
 python -m pytest tests/test_web_security.py -q
@@ -22,8 +23,9 @@ the run. The contrast check always runs, even when Chrome is absent. Browser
 smoke is a separate command so the ordinary test run needs no browser.
 
 The script prints a retained temporary screenshot directory. `--output PATH`
-selects another directory. There are 36 PNGs: nine hash routes, two themes, and
-1440×1000 / 390×1000 viewports. It uses `--headless=new` and DevTools
+selects another directory. It captures the core and feature hash routes in two
+themes and 1440×1000 / 390×1000 viewports, and prints the actual capture count.
+It uses `--headless=new` and DevTools
 `Emulation.setDeviceMetricsOverride`, then asserts the actual
 `document.documentElement.clientWidth`. The narrow screenshots are real
 viewports, with no cropping or forced mockup class. It also rejects document
@@ -67,12 +69,65 @@ accent text, primary-button text, and four status pill pairs, in both themes.
 It does not substitute for inspecting focus indicators, charts or all composited
 styles in the rendered page.
 
+## Control-center DOM walkthrough
+
+`control_center_dom.cjs` loads the actual served HTML and scripts in JSDOM and
+drives their controls against the real loopback API. The fixture starts with no
+configuration and an automatically assigned port. Configuration writes, revision
+checks, validation, CSRF and response parsing are real; node observations are test
+inputs and remote hardware calls are refused. It runs these checks:
+
+- Home creates a workspace from missing configuration.
+- The node form requires the existing lab directory, preserves its draft through
+  polling, saves the node and still marks its SSH identity unverified.
+- Before node tools have answered, a frozen node can add a new peer SSH alias
+  while every identity field stays disabled. Replacing an existing alias is
+  refused and leaves its configuration unchanged.
+- The profile form assigns a Linux SSH worker and reports missing model assets.
+- An engine override survives polling, is reviewed and saved, and Auto removes
+  it again. An immediate second edit uses the newly saved revision.
+- A separate configuration write preserves a pending draft and blocks saving
+  until the changed revision is reviewed.
+- Components shows all four sources and separates controller downloads from
+  node tool preparation and installation.
+- Router placement and port save without reporting a live router activation.
+
+Install JSDOM outside the repository. This is not a portal runtime dependency.
+The tested JSDOM 31 release requires Node 22.22.2+, 24.15.0+, or 26+ within its
+supported release lines. For example, with Node 24.15.0 or newer on Linux:
+
+```sh
+npm install --prefix /tmp/hydraweave-ui-tests --no-audit --no-fund --ignore-scripts jsdom@31.0.0
+NODE_PATH=/tmp/hydraweave-ui-tests/node_modules node tests/ui/control_center_dom.cjs
+```
+
+On PowerShell:
+
+```powershell
+$hydraweaveUiDeps = Join-Path $env:TEMP 'hydraweave-ui-tests'
+npm install --prefix $hydraweaveUiDeps --no-audit --no-fund --ignore-scripts jsdom@31.0.0
+$env:NODE_PATH = Join-Path $hydraweaveUiDeps 'node_modules'
+node tests/ui/control_center_dom.cjs
+```
+
+The harness selects the checkout's `.venv` Python when present. Set
+`HYDRAWEAVE_TEST_PYTHON` to a different Python executable if needed. It stops the
+fixture and removes its temporary configuration on completion. Console errors,
+missing controls, incorrect API results and lost drafts fail the run.
+
+JSDOM supplies a DOM, not browser layout. The harness provides its missing
+`fetch`, media-query and dialog APIs; it does **not** verify appearance, overflow,
+native keyboard behavior, focus trapping, screen readers, GPU execution, host-key
+scanning or component downloading. Use the browser and keyboard smoke for those
+browser checks, and the backend integration/hardware suites for runtime behavior.
+
 ## Runnable keyboard walkthrough
 
 `python tests/ui/smoke.py --keyboard` adds an automated desktop keyboard pass to
-the 28 screenshots. It uses DevTools key events to Tab to each of the five
+the screenshots. It uses DevTools key events to Tab to each of the five
 mutation dialog openers, open with Space, check the dialog name and focus trap
-in both directions, wait through a poll, close with Escape, and check focus return. Rotation also
+in both directions, wait through a poll, close with Escape, and check focus return.
+The node editor also keeps a typed node name through polling. Rotation also
 gets a valid synthetic key name and an Enter attempt that must not submit.
 Confirmations and Stop/Cancel are exercised by the manual walkthrough below;
 the HTTP suite separately tests their backend dispatch and priority.
@@ -96,13 +151,14 @@ ring or becomes unreachable.
    narrow width, reach the named Menu button; Space opens navigation, Escape
    closes it, and focus remains usable. Reach Appearance and switch both themes
    with the native select control.
-2. On Devices, activate **Add by address**. The dialog must announce its name,
-   show labelled machine/fingerprint fields and list the effects of pinning.
+2. On Devices, activate **Add by address**. The dialog must announce its name and
+   show labelled name, address, SSH account, installation and lab-directory fields.
    Tab and Shift+Tab repeatedly: focus must stay in the open dialog. Escape must
-   close it and return focus to its opener. Reopen, enter `halo-1` and a synthetic
-   fingerprint (for example `SHA256:fixture`), then activate the confirm button
-   with Space. The fake scan deliberately returns no keys: a clear failure must
-   appear, remain keyboard reachable, and be announced. No real key is pinned.
+   close it and return focus to its opener. Reopen and type a node name; it must
+   survive the status poll. Attempt an incomplete submission with Space: a clear
+   field error must appear and be announced. Escape must leave the node unsaved.
+   SSH verification is a separate operation after adding a node; saving its
+   address must never imply that its host key was trusted.
 3. On Engines, open **Start**. Reach **Router runs on**, select this machine and
    then `halo-1`, and reach each node/device checkbox. Verify the profile defaults
    and listed start effects. Escape and reopen to check focus return. Activate
@@ -130,9 +186,10 @@ ring or becomes unreachable.
    python tests/ui/smoke.py --serve --blocked
    ```
 
-7. Walk every enabled mutation offered by the build. Pair, discovery and agent
-   revocation must say **later phase** and name their blockers. For any disabled
-   parameter save, rollback, disconnect, model hash/import or link-probe control,
+7. Walk every enabled mutation offered by the build, including Home, Components
+   and Engine configuration. A paired profile must retain both ranks in order,
+   and engine-specific router constraints must be explained. For any disabled
+   launch, parameter save, rollback, disconnect, model hash/import or link-probe control,
    verify that the explanation is visible and no action occurs. If one becomes
    enabled, review its effects, Escape/focus return, field errors, explicit
    confirmation and resulting audit/progress before marking this step passed.
@@ -150,7 +207,7 @@ For the required NVDA smoke pass on Windows, enable NVDA and repeat steps 1–8.
 Check dialog names, control labels, associated field errors, focus return, and
 new-warning/error announcements. Numeric polling must not repeatedly announce
 values. This is a manual reviewer check; the automated script does not claim an
-NVDA or full accessibility pass. Record findings before Phase 1b acceptance.
+NVDA or full accessibility pass. Record findings before release acceptance.
 
 Measured results reuses the running-profile, stats and observability replay fixtures. Its captures check published source badges and separately labelled live values alongside the packaged README measurements.
 

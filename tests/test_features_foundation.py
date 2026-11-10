@@ -155,6 +155,7 @@ class APIDispatchTests(unittest.TestCase):
         self.addCleanup(features.reset)
         self.api = API(Path(self.dir.name) / "cluster.json", orchestrator=mock.Mock(), remote_module=mock.Mock(),
                        audit_path=Path(self.dir.name) / "audit.jsonl")
+        self.api.orchestrate.load_cluster.return_value.router = {}
         self.api.orchestrate.down.return_value = {"stopped": True}
         self.api.admission_db = admission.Admission(":memory:")
         self.addCleanup(self.api.admission_db.close)
@@ -774,9 +775,13 @@ class CLIAdmissionTests(unittest.TestCase):
         self.addCleanup(db.close)
         bench = db.acquire("bench", {"halo-1"}, label="bench decode")
         err = io.StringIO()
+        raw = example()
+        for machine in raw["machines"]:
+            if machine["os"] == "linux" and machine["access"] == "ssh":
+                machine["lab_dir"] = "/opt/test-lab"
         with tempfile.TemporaryDirectory() as temporary, \
                 mock.patch.object(admission, "for_config", lambda *a, **kw: db), \
-                mock.patch.object(cli, "_cluster", return_value=config.parse(example())), \
+                mock.patch.object(cli, "_cluster", return_value=config.parse(raw)), \
                 mock.patch("hydraweave.orchestrate._state_path", return_value=Path(temporary) / "up.json"), \
                 contextlib.redirect_stderr(err):
             self.assertEqual(cli.main(["up", "qwen-replicas"]), 1)

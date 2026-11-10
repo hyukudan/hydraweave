@@ -1,0 +1,191 @@
+/* DOM-to-HTTP control-center walkthrough. Test-only JSDOM; no GPU or SSH calls.
+ * This verifies UI behavior and real configuration writes, not rendering or native browser focus.
+ * Run with a supported Node version and a test-only jsdom installation (see tests/ui/README.md).
+ */
+"use strict";
+const {spawn} = require("node:child_process");
+const assert = require("node:assert/strict");
+const {existsSync} = require("node:fs");
+const path = require("node:path");
+const {JSDOM, VirtualConsole} = require("jsdom");
+
+async function main() {
+const repo = path.resolve(__dirname, "../..");
+const venv = path.join(repo, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+const python = process.env.HYDRAWEAVE_TEST_PYTHON || (existsSync(venv) ? venv : process.platform === "win32" ? "python" : "python3");
+const pythonPath = [repo, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+const processServer = spawn(python, [path.join(__dirname, "control_center_fixture.py")], {
+  cwd: repo, env: {...process.env, PYTHONPATH: pythonPath}, stdio: ["ignore", "pipe", "pipe"]
+});
+let stdout="",stderr="",dom;
+processServer.stdout.on("data",data=>stdout+=String(data));
+processServer.stderr.on("data",data=>stderr+=String(data));
+async function until(test,label,ms=20000){
+  const start=Date.now();
+  while(Date.now()-start<ms){if(await test())return;await new Promise(r=>setTimeout(r,50));}
+  throw Error("Timeout: "+label+"\n"+(dom?.window.document.querySelector("main")?.textContent.slice(0,4000)||"")+"\nDialog: "+(dom?.window.document.querySelector("#ops-dialog-error")?.textContent||"")+"\n"+stderr.slice(-1200));
+}
+const errors=[];
+try{
+  await until(()=>stdout.includes("URL="),"fixture server");
+  const origin=stdout.match(/URL=(.+)/)[1].trim();
+  const vc=new VirtualConsole();
+  vc.on("jsdomError",e=>errors.push(e.stack||String(e)));
+  vc.on("error",(...e)=>errors.push(e.join(" ")));
+  dom=await JSDOM.fromURL(origin+"/",{
+    resources:"usable",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole:vc,
+    beforeParse(w){
+      w.fetch=(input,init={})=>{
+        const headers=new Headers(init.headers||{});
+        if(init.method && init.method!=="GET")headers.set("Origin",origin);
+        return fetch(new URL(input,origin),{...init,headers});
+      };
+      w.Headers=Headers;w.Request=Request;w.Response=Response;
+      w.AbortController=AbortController;w.AbortSignal=AbortSignal;
+      w.matchMedia=q=>({media:q,matches:false,addEventListener(){},removeEventListener(){},addListener(){},removeListener(){}});
+      w.HTMLElement.prototype.scrollIntoView=function(){};
+      w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};
+      w.HTMLDialogElement.prototype.close=function(){this.removeAttribute("open");this.dispatchEvent(new w.Event("close"));};
+    }
+  });
+  const w=dom.window,d=w.document;
+  const el=s=>{const value=d.querySelector(s);assert.ok(value,"Missing "+s);return value;};
+  const click=s=>{const node=el(s);assert.ok(!node.disabled,"Disabled "+s+": "+node.title);node.click();};
+  const fill=(s,value)=>{const node=el(s);node.value=String(value);node.dispatchEvent(new w.Event(node.tagName==="SELECT"?"change":"input",{bubbles:true}));};
+  const submit=()=>el("#ops-dialog form").dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));
+  const closed=async()=>until(()=>!d.querySelector("#ops-dialog[open]"),"dialog close: "+d.querySelector("#ops-dialog-error")?.textContent);
+  const go=async route=>{w.location.hash="#/"+route;await until(()=>d.body.dataset.page===route.split("?")[0] && d.querySelector("main").getAttribute("aria-busy")==="false","route "+route);await w.Hydraweave.refresh();};
+  const api=path=>w.Hydraweave.request(path);
+  await until(()=>w.Hydraweave && d.querySelector('[data-page-action="cc-initialize"]'),"first-run Home");
+  assert.equal((await api("setup")).configuration.state,"missing");
+  assert.equal(d.querySelector("#page-title").textContent,"Home");
+  click('[data-page-action="cc-initialize"]');
+  await until(()=>w.Hydraweave.state.docs.setup?.configured===true && w.Hydraweave.state.fresh,"initialized workspace");
+  console.log("PASS missing config → initialized workspace via Home");
+  click('[data-page-action="cc-add-node"]');
+  await until(()=>d.querySelector("#cc-node-id"),"node form");
+  fill("#cc-node-id","halo-ui");
+  fill("#cc-node-address","192.168.44.31");
+  fill("#cc-node-ssh","halo-ui");
+  fill("#cc-node-root","/home/test/hydraweave");
+  assert.ok(el("#cc-node-lab").checked);
+  submit();
+  await until(()=>/existing lab directory/.test(el("#ops-dialog-error").textContent),"required lab directory error");
+  assert.ok(!(await api("setup")).nodes.some(n=>n.id==="halo-ui"));
+  fill("#cc-node-labdir","/home/test/gpu-lab");
+  fill("#cc-node-gpus","gpu0");
+  await w.Hydraweave.refresh();
+  assert.equal(el("#cc-node-id").value,"halo-ui");
+  submit();
+  await closed();
+  await until(()=>w.Hydraweave.state.docs.setup?.nodes.some(n=>n.id==="halo-ui"),"saved node");
+  let setup=await api("setup");
+  assert.equal(setup.nodes.find(n=>n.id==="halo-ui").trust,"unverified");
+  assert.match(d.querySelector("main").textContent,/Verify host key/);
+  console.log("PASS visual node form → real config write; draft survives polling; SSH remains unverified");
+  // Before node tools have answered, identities stay frozen. A new peer alias
+  // can still connect two newly declared nodes without editing either identity.
+  let nodeConfig = await api("ops/config");
+  await w.HydraweaveOpsUI.post("ops/config/save", {
+    version: nodeConfig.version, op: "add", machine: {
+      id: "halo-peer", os: "linux", access: "ssh", http_address: "192.168.44.32",
+      ssh_target: "halo-peer", install_root: "/home/test/peer-hydraweave",
+      lab_mode: true, lab_dir: "/home/test/gpu-lab", devices: []
+    }
+  });
+  await w.Hydraweave.refresh({afterWrite:true});
+  nodeConfig = await api("ops/config");
+  const originalNode = nodeConfig.machines.find(n=>n.id==="halo-ui").entry;
+  assert.ok(nodeConfig.machines.find(n=>n.id==="halo-ui").add_peer_aliases);
+  click('[data-page-action="cc-edit-node"][data-machine="halo-ui"]');
+  await until(()=>d.querySelector("#ops-dialog[open]") &&
+    d.querySelector("#ops-dialog-confirm")?.textContent==="Save peer aliases","frozen node peer form");
+  assert.equal(el("#ops-dialog-confirm").textContent,"Save peer aliases");
+  assert.ok([...d.querySelectorAll("#ops-dialog input,#ops-dialog select,#ops-dialog textarea")]
+    .every(input=>input.id==="cc-node-peers" ? !input.disabled : input.disabled));
+  fill("#cc-node-peers","halo-peer=peer-second");
+  submit();await closed();
+  const withPeer = (await api("ops/config")).machines.find(n=>n.id==="halo-ui").entry;
+  assert.deepEqual(withPeer,{...originalNode,peer_ssh:{"halo-peer":"peer-second"}});
+  click('[data-page-action="cc-edit-node"][data-machine="halo-ui"]');
+  await until(()=>d.querySelector("#ops-dialog[open]"),"frozen peer replacement form");
+  fill("#cc-node-peers","halo-peer=changed-alias");submit();
+  await until(()=>/cannot be changed or removed/.test(el("#ops-dialog-error").textContent),"existing peer alias refusal");
+  assert.deepEqual((await api("ops/config")).machines.find(n=>n.id==="halo-ui").entry,withPeer);
+  click("#ops-dialog [data-ops-close]");
+  console.log("PASS frozen node allows only new peer aliases; replacement is refused and identity is preserved");
+  await go("engine-settings");
+  click('[data-page-action="es-create"]');
+  await until(()=>d.querySelector("#es-new-id"),"profile form");
+  fill("#es-new-id","ui-qwen");
+  fill("#es-new-preset","qwen-replicas");
+  assert.ok(el('input[name="es-create-node"][value="halo-ui"]').checked);
+  submit();await closed();
+  await until(()=>w.Hydraweave.state.docs["engine-settings"]?.profiles.some(p=>p.id==="ui-qwen"),"saved profile");
+  let settings=await api("engine-settings");
+  let profile=settings.profiles.find(p=>p.id==="ui-qwen");
+  assert.deepEqual(profile.nodes,["halo-ui"]);
+  assert.ok(profile.assets.some(a=>a.verification==="missing"));
+  console.log("PASS profile creation → assigned Linux SSH node and explicitly missing assets");
+  const control=profile.controls.find(c=>c.editable && c.section==="overrides" && c.type==="integer");
+  assert.ok(control,"An editable integer control");
+  const value=control.min ?? 256;
+  const selector='[data-es-profile="ui-qwen"][data-es-key="'+control.section+':'+control.key+'"]';
+  fill(selector,value);
+  await w.Hydraweave.refresh();
+  assert.equal(el(selector).value,String(value));
+  assert.match(d.querySelector("main").textContent,/Unsaved changes are kept/);
+  click('[data-page-action="es-save"]');
+  await until(()=>d.querySelector("#ops-dialog[open]") && /Review ui-qwen/.test(el("#ops-dialog").textContent),"settings review");
+  submit();await closed();
+  settings=await api("engine-settings");profile=settings.profiles.find(p=>p.id==="ui-qwen");
+  assert.equal(profile.configuration.overrides[control.key],value);
+  console.log("PASS knob draft survives polling → review → real versioned save");
+  fill(selector,"");
+  click('[data-page-action="es-save"]');
+  await until(()=>d.querySelector("#ops-dialog[open]"),"Auto review");
+  submit();await closed();
+  profile=(await api("engine-settings")).profiles.find(p=>p.id==="ui-qwen");
+  assert.ok(!Object.hasOwn(profile.configuration.overrides||{},control.key));
+  console.log("PASS Auto clears the requested override");
+  // A separate-tab write invalidates the draft's revision without erasing it.
+  fill(selector,value);
+  const beforeExternalWrite = await api("setup");
+  await w.HydraweaveOpsUI.post("setup/router/save", {
+    version: beforeExternalWrite.configuration.version, machine: "local", port: 18990
+  });
+  await w.Hydraweave.refresh({afterWrite:true});
+  assert.equal(el(selector).value,String(value));
+  assert.ok(el('[data-page-action="es-save"]').disabled);
+  assert.match(d.querySelector("main").textContent,/configuration changed in another tab/);
+  click('[data-page-action="es-discard"]');
+  await until(()=>/No unsaved changes/.test(d.querySelector("main").textContent),"discard stale draft");
+  console.log("PASS external config change preserves draft and requires review before save");
+  await go("components");
+  await until(()=>d.querySelectorAll(".cmp-card").length===4,"component inventory");
+  assert.match(d.querySelector("main").textContent,/Source download location/);
+  assert.match(d.querySelector("main").textContent,/Prepare node tools/);
+  assert.match(d.querySelector("main").textContent,/No sources downloaded/);
+  const components=await api("components");
+  assert.equal(components.storage.scope,"controller");
+  console.log("PASS four-component catalog → separate staged-source and node-install controls");
+  await go("control-center");
+  click('[data-page-action="cc-router"]');
+  await until(()=>d.querySelector("#cc-router-machine"),"router form");
+  fill("#cc-router-machine","halo-ui");fill("#cc-router-port","18991");
+  submit();await closed();
+  setup=await api("setup");
+  assert.equal(setup.router.machine,"halo-ui");
+  assert.match(setup.router.listen,/:18991$/);
+  assert.equal(setup.router.active,null);
+  console.log("PASS saved router placement/port without claiming live activation");
+  assert.deepEqual(errors,[],"JavaScript/runtime errors");
+  console.log("PASS DOM-to-real-API walkthrough; no hardware access, layout, native focus, or screenshot claims");
+} finally {
+  if(dom)dom.window.close();
+  processServer.kill("SIGTERM");
+}
+
+
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

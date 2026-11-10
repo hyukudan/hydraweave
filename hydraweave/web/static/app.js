@@ -22,8 +22,8 @@
   const pages = window.HydraweavePages || {};
   const coreOrder = Object.keys(routes);
   // Sidebar groups (F7): core screens sit in the same groups as feature pages, ordered by `order` within a group.
-  const groupOrder = ["Workspace", "Inference", "Benchmarks", "Operations"];
-  const coreNav = {devices: ["Workspace", 20], topology: ["Workspace", 25], models: ["Inference", 20], recipes: ["Inference", 25],
+  const groupOrder = ["Control center", "Workspace", "Inference", "Benchmarks", "Operations"];
+  const coreNav = {devices: ["Control center", 20], topology: ["Workspace", 25], models: ["Inference", 20], recipes: ["Inference", 25],
     engines: ["Inference", 30], stats: ["Inference", 40], logs: ["Operations", 60], settings: ["Operations", 90]};
   for (const [id, page] of Object.entries(pages).sort((a, b) => (a[1].order ?? 100) - (b[1].order ?? 100))) {
     if (Object.hasOwn(routes, id) || !/^[a-z][a-z0-9-]*$/.test(id) || typeof page?.render !== "function") continue;
@@ -34,7 +34,7 @@
   const i18n = window.HydraweaveI18n || {lang: "en", t: (key, vars, fallback) => fallback ?? key, add() {}, languages: ["en"]};
   const t = (key, vars, fallback) => i18n.t(key, vars, fallback);
   const titleOf = id => coreOrder.includes(id) ? t("route." + id, null, routes[id]) : routes[id];
-  const homeRoute = Object.keys(pages).find(id => pages[id]?.home && Object.hasOwn(routes, id)) || "devices";
+  const homeRoute = pages["control-center"] ? "control-center" : Object.keys(pages).find(id => pages[id]?.home && Object.hasOwn(routes, id)) || "devices";
   const pageOf = name => coreOrder.includes(name) ? null : pages[name] || null;
   const pageEndpoints = name => { try { return (pageOf(name)?.endpoints?.() || []).filter(e => typeof e === "string" && e); } catch (_) { return []; } };
   const api = "/hydraweave/api/";
@@ -78,6 +78,7 @@
     return all.find(p => (p.id || p.name || p.profile) === state.selected) || all.find(p => p.family === "qwen-replicas") || all[0];
   }
   const profileId = p => p?.id || p?.name || p?.profile || "";
+  const profileNodes = p => Array.isArray(p?.configuration?.nodes) ? p.configuration.nodes : [p?.configuration?.rank0, p?.configuration?.rank1].filter(Boolean);
   function statusPill(status, why) {
     status = unwrap(status);
     if (status == null) return unavailable(why);
@@ -188,27 +189,26 @@
   function renderModels() {
     const d = doc("models"), models = rows(d.models ?? d.assets);
     const library = models.length ? table(["Model / asset", "Declared size", "Machine", "Verification", ["Declared identity", "hide-n"]], models.map(m => cells([display(m.name ?? m.id), field(m.manifest, "bytes", "bytes"), field(m, "machine"), statusPill(m.presence, reason(m, "presence")), `<span class="mono hide-n">${field(m.manifest, "sha256")} · ${field(m.manifest, "path")}</span>`])).join("")) + `<p class="hint">Manifest sizes and hashes declare identity; they do not prove file presence. Size only means SHA-256 has not been verified. Hashing runs outside measurement turns.</p>${later("Schedule hash", "unavailable · no hash scheduling endpoint in Phase 1b")}` : empty("No model files registered", d.models == null ? reason(d, "models") : "Register asset paths in the cluster configuration; then install a qualified profile.");
-    const choices = profiles().map(p => `<div class="accel"><div class="row between"><b>${esc(p.label || profileId(p))}</b>${statusPill(p.state, reason(p, "state"))}</div>${kv({...p.configuration, preset: p.configuration?.preset || profileId(p), receipt: p.receipt, nodes: p.nodes}, [["Preset", "preset"], ["Receipt", "receipt"], ["Machines", "nodes"]])}${button("Start / switch…", "start-dialog", {disabled: profileBlocker(p) || mutationReason() || capability("up"), extra: `data-profile="${esc(profileId(p))}"`})}</div>`).join("");
+    const choices = profiles().map(p => `<div class="accel"><div class="row between"><b>${esc(p.label || profileId(p))}</b>${statusPill(p.state, reason(p, "state"))}</div>${kv({...p.configuration, preset: p.configuration?.preset || profileId(p), receipt: p.receipt, nodes: p.nodes}, [["Preset", "preset"], ["Receipt", "receipt"], ["Machines", "nodes"]])}${button("Start / switch…", "start-dialog", {disabled: profileStartBlocker(p) || mutationReason() || capability("up"), extra: `data-profile="${esc(profileId(p))}"`})}</div>`).join("");
     return card("Model library", library, "Files are never downloaded or converted automatically") + card("What can run on the connected machines", `<div class="grid g2">${choices}</div><p>${unavailable(reason(d, "proposals", "later phase · Phase 2.5 · R17 / TM-R15"))}</p>`, "Qualified profiles · placement proposals arrive in Phase 2.5");
   }
   function profileBlocker(p) {
     if (!p) return "No configured profile";
     if (p.state == null) return reason(p, "state", "Profile state unavailable");
-    // The engine family (from the API), not the preset name: qwen-replicas-w5 starts like qwen-replicas.
-    if (p.family !== "qwen-replicas") return p.blocker || "later phase · Phase 2 / 3a / R14";
-    return p.available === false ? p.blocker || "Profile not available" : "";
+    return p.blocker || (p.available === false ? "Profile not available" : "");
   }
+  const profileStartBlocker = p => p?.launch_blocker || profileBlocker(p);
   function capability(action) {
     const entry = doc("settings").capabilities?.[action];
     return entry?.enabled === false ? entry.why || "Capability not available" : "";
   }
   function renderEngines() {
     const d = doc("profiles"), p = selected();
-    if (!p) return empty("No profiles configured", d.profiles == null ? reason(d, "profiles") : "Add a qualified qwen-replicas profile to the cluster configuration.", `<a class="btn" href="#/settings">Open settings</a>`);
+    if (!p) return empty("No profiles configured", d.profiles == null ? reason(d, "profiles") : "Choose a supported preset and assign its compute nodes in Engine configuration.", `<a class="btn pri" href="#/engine-settings">Create a profile</a>`);
     const processRows = rows(p.processes ?? d.processes);
     const choice = `<div class="field"><label for="profile-select">Profile</label><select class="inp" id="profile-select">${profiles().map(item => `<option value="${esc(profileId(item))}"${profileId(item) === profileId(p) ? " selected" : ""}>${esc(item.label || profileId(item))}</option>`).join("")}</select></div>`;
     const identity = `<dl class="kv"><dt>Started</dt><dd>${p.started_at == null ? unavailable(reason(p, "started_at", "profile has not started")) : esc(formatTime(timestamp(p.started_at), true))}</dd></dl>` + kv(p, [["Release", "release"], ["Qualified receipt", "receipt"], ["Identity", "identity"], ["Router runs on", "router"], ["Linked machines", "nodes"], ["Linked devices", "devices"]]);
-    return card(p.label || profileId(p), choice + (state.launchErrors?.launch ? '<p class="hint">Launch timeline unavailable</p>' : "") + (window.HydraweaveLaunch?.render(rows(state.docs.launch?.launches).find(l => l.profile === profileId(p) && l.job_state === "running")) || "") + `<div class="row">${statusPill(p.state, reason(p, "state"))} ${profileBlocker(p) ? `<span class="hint">${esc(profileBlocker(p))}</span>` : ""}</div>${identity}${rows(p.leases).map(l => leaseView(l, d.server_time)).join("")}${p.error ? `<p class="field-error">${display(p.error)}</p><a class="btn" href="#/logs">View failure and logs</a>` : ""}`)
+    return card(p.label || profileId(p), choice + (state.launchErrors?.launch ? '<p class="hint">Launch timeline unavailable</p>' : "") + (window.HydraweaveLaunch?.render(rows(state.docs.launch?.launches).find(l => l.profile === profileId(p) && l.job_state === "running")) || "") + `<div class="row">${statusPill(p.state, reason(p, "state"))} ${profileStartBlocker(p) ? `<span class="hint">${esc(profileStartBlocker(p))}</span>` : ""}</div>${identity}${rows(p.leases).map(l => leaseView(l, d.server_time)).join("")}${p.error ? `<p class="field-error">${display(p.error)}</p><a class="btn" href="#/logs">View failure and logs</a>` : ""}`)
       + card("Processes", processRows.length ? table(["Process", "Machine", "State", ["Ready after", "hide-n"], ["Endpoint", "hide-n"], ["Binary SHA", "hide-n"], "Logs"], processRows.map(proc => {
         const lease = rows(p.leases).find(l => l.lease === proc.lease);
         const health = proc.state || (lease && lease.state !== "ready" ? lease.state : proc.ready === true ? "ready" : proc.ready === false ? "starting" : null);
@@ -218,7 +218,8 @@
   }
   function renderParameters(p) {
     const parameters = rows(p.parameters);
-    return (parameters.length ? `<div class="grid g2">${parameters.map((v, i) => `<div class="field"><label for="parameter-${i}">${esc(v.label || v.id || v.name)}</label><input class="inp ${v.value !== v.production ? "chg" : ""}" id="parameter-${i}" value="${esc(unwrap(v.value) ?? "")}" readonly><span class="hint">Production ${field(v, "production")} · qualified ${field(v, "qualified")}</span></div>`).join("")}</div>` : `<p>${unavailable(reason(p, "parameters", "capacity schema not reported"))}</p>`) + `<div class="banner"><b>Advanced locked</b><span class="hint">Needs per-pin qualification. Numerics, model identity, transport and layout are never editable here.</span></div><p class="hint">${esc(reason(p, "parameter_save", "configuration save endpoint unavailable"))}</p>${later("Save · restart required", reason(p, "parameter_save", "configuration save endpoint unavailable"))}`;
+    return `<p class="hint">Edit the supported capacity, serving and optimization settings for this profile. Each option follows the pinned engine's allowed values.</p><a class="btn pri" href="#/engine-settings?profile=${encodeURIComponent(profileId(p))}">Configure engine</a>`
+      + (parameters.length ? `<details><summary>Saved parameter summary</summary>${table(["Parameter", "Saved value", "Qualified range"], parameters.map(v => cells([esc(v.label || v.id || v.name), display(v.value), display(v.qualified)])).join(""), "Saved parameters")}</details>` : "");
   }
   function renderEffective(config) {
     if (unwrap(config) == null) return unavailable(config?.why || "effective config not reported");
@@ -341,7 +342,7 @@
       if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
     });
     const current = selected(), disabled = mutationReason();
-    const controls = page === "devices" ? button("Add by address", "add", {id: "add-machine", style: "pri", disabled}) + button("Doctor…", "doctor-dialog", {id: "doctor-devices", disabled}) : page === "engines" ? button("Start profile…", "start-dialog", {id: "start-profile", style: "pri", disabled: disabled || profileBlocker(current)}) + button("Install…", "install-dialog", {id: "install-profile", disabled: disabled || profileBlocker(current)}) + button("Doctor…", "doctor-dialog", {id: "doctor-profile", disabled}) + button("Stop profile", "stop", {id: "stop-profile", style: "dan", disabled: current ? "" : "No profile configured"}) : page === "topology" ? button("Measure Ethernet links", "", {disabled: "later phase · Phase 2"}) : page === "logs" ? button("Download redacted log", "export-log", {disabled: logEntries().length ? "" : "No log entries"}) : "";
+    const controls = page === "devices" ? button("Add by address", "add", {id: "add-machine", style: "pri", disabled}) + button("Doctor…", "doctor-dialog", {id: "doctor-devices", disabled}) : page === "engines" ? button("Start profile…", "start-dialog", {id: "start-profile", style: "pri", disabled: disabled || profileStartBlocker(current)}) + button("Install…", "install-dialog", {id: "install-profile", disabled: disabled || profileBlocker(current)}) + button("Doctor…", "doctor-dialog", {id: "doctor-profile", disabled}) + button("Stop profile", "stop", {id: "stop-profile", style: "dan", disabled: current ? "" : "No profile configured"}) : page === "topology" ? button("Measure Ethernet links", "", {disabled: "later phase · Phase 2"}) : page === "logs" ? button("Download redacted log", "export-log", {disabled: logEntries().length ? "" : "No log entries"}) : "";
     const pageControls = pageOf(page)?.actions ? (() => { try { return pageOf(page).actions(); } catch (_) { return ""; } })() : controls;
     if ($("page-actions").innerHTML !== pageControls) $("page-actions").innerHTML = pageControls;
     const running = profiles().find(p => ["running", "starting", "stopping", "degraded", "error", "failed"].includes(p.state));
@@ -410,7 +411,7 @@
     const panel = $("job-panel"), job = state.launchRefusal || state.job, active = !state.launchRefusal && activeJob();
     panel.hidden = !job;
     if (!job) return;
-    panel.innerHTML = `<div class="row"><b>${esc(job.action || "Action")} · ${statusPill(job.state || job.status)}</b><span class="mono">${esc(job.id || job.job || "")}</span>${active && ["up", "recipes/deploy"].includes(job.action) ? button("Cancel start now", "cancel") : ""}${active ? button("Stop profile now", "stop", {style: "dan"}) : ""}</div><p>${display(job.progress, "waiting for progress")}</p>${["up", "recipes/deploy"].includes(job.action) && (job.id || job.job) ? window.HydraweaveLaunch?.render(state.docs["launch/" + (job.id || job.job)]) || (state.launchErrors?.["launch/" + (job.id || job.job)] ? '<p class="hint">Launch timeline unavailable</p>' : "") : ""}${job.error ? `<p class="field-error" role="alert">${display(job.error)}</p><a class="btn" href="#/logs">View logs</a>` : ""}${job.result != null ? `<details><summary>Result (redacted)</summary><pre class="raw">${esc(JSON.stringify(job.result, null, 2))}</pre></details>` : ""}`;
+    panel.innerHTML = `<div class="row"><b>${esc(job.action || "Action")} · ${statusPill(job.state || job.status)}</b><span class="mono">${esc(job.id || job.job || "")}</span>${active && (job.action === "up" || job.action?.includes("/")) ? button(["up", "recipes/deploy"].includes(job.action) ? "Cancel start" : "Cancel job", "cancel-job") : ""}${active && job.arguments?.profile ? button("Stop profile", "stop", {style: "dan"}) : ""}</div><p>${display(job.progress, "waiting for progress")}</p>${["up", "recipes/deploy"].includes(job.action) && (job.id || job.job) ? window.HydraweaveLaunch?.render(state.docs["launch/" + (job.id || job.job)]) || (state.launchErrors?.["launch/" + (job.id || job.job)] ? '<p class="hint">Launch timeline unavailable</p>' : "") : ""}${job.error ? `<p class="field-error" role="alert">${display(job.error)}</p><a class="btn" href="#/logs">View logs</a>` : ""}${job.result != null ? `<details><summary>Result (redacted)</summary><pre class="raw">${esc(JSON.stringify(job.result, null, 2))}</pre></details>` : ""}`;
   }
   async function request(endpoint, options = {}) {
     const response = await fetch(api + endpoint, {cache: "no-store", credentials: "same-origin", ...options});
@@ -418,9 +419,13 @@
     if (!response.ok) throw Object.assign(new Error(body.error || `HTTP ${response.status}`), {status: response.status});
     return body;
   }
-  async function refresh() {
+  async function refresh({afterWrite = false} = {}) {
     if (document.hidden || !navigator.onLine) { state.fresh = false; renderConnection(); return; }
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      if (!afterWrite) return inFlight;
+      await inFlight;
+      return refresh();
+    }
     const generation = state.generation, accepted = state.accepted;
     inFlight = (async () => {
       const own = [...endpoints, ...pageEndpoints(route()).filter(e => !endpoints.includes(e))];
@@ -536,16 +541,20 @@
       state.dialog.stopProfiles = active.map(profileId);
       state.dialog.destructive = active.length > 0;
       title = `${active.length ? "Switch to" : "Start"} ${profileId(p)}`; action = "up"; confirm = active.length ? "Stop and start profile" : "Start profile";
-      const config = p?.configuration || {}, declared = Array.isArray(config.nodes) ? config.nodes : [];
+      const config = p?.configuration || {}, declared = profileNodes(p), pair = !!(config.rank0 || config.rank1);
+      const configuredRouter = doc("settings").configuration?.router?.machine || doc("setup").router?.machine || "local";
+      const savedRouter = p.required_router || configuredRouter;
+      const routerNodes = all.filter(m => m.access === "ssh" && m.declared_os === "linux" && (paired(m) || m.id === savedRouter));
+      const launchNodes = declared.map(id => all.find(m => m.id === id)).filter(Boolean);
       const declaredDevices = Array.isArray(config.devices) ? config.devices : [];
-      fields = `<div class="field"><label for="router-location">Router runs on</label><select class="inp" id="router-location" aria-describedby="launch-error dialog-error"><option value="local">This machine (default)</option>${all.filter(m => m.access !== "local" && paired(m)).map(m => `<option value="${esc(m.id)}"${!reachable(m) ? " disabled" : ""}>${esc(machineLabel(m))}</option>`).join("")}</select></div><fieldset><legend>Machines to link</legend>${all.filter(m => m.access !== "local").map(m => `<label class="check"><input type="checkbox" name="node" value="${esc(m.id)}"${declared.includes(m.id) ? " checked" : ""}${!paired(m) ? " disabled" : ""} aria-describedby="launch-error dialog-error"><span>${esc(machineLabel(m))}</span></label>`).join("") || "No worker machines declared."}${declared.filter(id => !all.some(m => m.id === id)).map(id => `<p class="start-blocker">${esc(id)} · declared machine unavailable</p>`).join("")}</fieldset><fieldset><legend>Devices to link</legend>${all.flatMap(m => rows(m.declared_devices).map(g => {
+      fields = `<div class="field"><label for="router-location">Router runs on</label><select class="inp" id="router-location" aria-describedby="launch-error dialog-error"><option value="local"${savedRouter === "local" ? " selected" : ""}${p.required_router && p.required_router !== "local" ? " disabled" : ""}>This controller${savedRouter === "local" ? p.required_router ? " (required by profile)" : " (configured)" : ""}</option>${routerNodes.map(m => `<option value="${esc(m.id)}"${m.id === savedRouter ? " selected" : ""}${!paired(m) || !reachable(m) || p.required_router && m.id !== p.required_router ? " disabled" : ""}>${esc(machineLabel(m))}${m.id === savedRouter ? p.required_router ? " (required by profile)" : " (configured)" : ""}</option>`).join("")}${savedRouter !== "local" && !routerNodes.some(m => m.id === savedRouter) ? `<option value="${esc(savedRouter)}" selected disabled>${esc(savedRouter)} · unavailable</option>` : ""}</select>${p.router_constraint ? `<span class="hint">${esc(p.router_constraint)}</span>` : ""}</div><fieldset><legend>Machines to link</legend>${pair ? '<p class="hint">Both ranks start together in their configured order. Change placement in the profile configuration.</p>' : ""}${launchNodes.map(m => `<label class="check"><input type="checkbox" name="node" value="${esc(m.id)}"${declared.includes(m.id) ? " checked" : ""}${pair || !paired(m) ? " disabled" : ""} aria-describedby="launch-error dialog-error"><span>${esc(machineLabel(m))}${pair ? ` · rank ${declared.indexOf(m.id)}` : ""}</span></label>`).join("") || "No worker machines declared."}${declared.filter(id => !all.some(m => m.id === id)).map(id => `<p class="start-blocker">${esc(id)} · declared machine unavailable</p>`).join("")}</fieldset><fieldset><legend>Devices to link</legend>${all.filter(m => declared.includes(m.id) || m.id === config.prefill_service?.machine).flatMap(m => rows(m.declared_devices).map(g => {
         const id = `${m.id}:${g.id || g.name || g.value}`;
         return `<label class="check"><input type="checkbox" name="device" value="${esc(id)}"${!g.excluded && (declaredDevices.includes(id) || declared.includes(m.id)) ? " checked" : ""}${!paired(m) || g.excluded ? " disabled" : ""}><span>${esc(id)}${g.excluded ? " · excluded by policy" : ""}</span></label>`;
       })).join("") || "No devices declared."}</fieldset><p id="launch-error" class="field-error"></p>`;
-      effects = [...(active.length ? [`Will stop: ${active.map(item => `${profileId(item)} (${rows(item.processes).length} reported processes)`).join(", ")}. Stop the router before the engines and release their turns.`] : []), "Start the selected qualified profile; validate assets and reachability before taking a lease.", `Request GPU turns for the checked workers · cap ${doc("settings").lab_rules?.turn_cap_s ?? "unavailable"} s · drain margin ${doc("settings").lab_rules?.drain_margin_s ?? "unavailable"} s.`, "Run the router on the selected machine and link only the selected declared devices.", "Record each action in the audit log. If starting fails, inspect the reported failure before retrying."];
+      effects = [...(active.length ? [`Will stop: ${active.map(item => `${profileId(item)} (${rows(item.processes).length} reported processes)`).join(", ")}. Stop the router before the engines and release their turns.`] : []), "Start the configured profile; validate assets and reachability before taking a lease.", `Request GPU turns for the checked workers · cap ${doc("settings").lab_rules?.turn_cap_s ?? "unavailable"} s · drain margin ${doc("settings").lab_rules?.drain_margin_s ?? "unavailable"} s.`, "Run the router on the selected machine and link only the selected declared devices.", "Record each action in the audit log. If starting fails, inspect the reported failure before retrying."];
     } else if (kind === "install") {
       title = `Install ${profileId(p)}`; action = "install"; confirm = "Install profile";
-      fields = selector("build-on", "Build on", all.filter(m => m.access !== "local"), p?.configuration?.nodes?.[0]);
+      fields = selector("build-on", "Build on", all.filter(m => profileNodes(p).includes(m.id)), profileNodes(p)[0]);
       effects = ["Run the pinned install recipe and host checks on the selected configured worker.", "Write a release into the marked install root; retain model assets.", "Build only outside measurement turns. Record the action and result."];
     } else if (kind === "pin") {
       title = "Add by address · pin SSH host key"; action = "hosts/pin"; confirm = "Pin confirmed host key";
@@ -580,7 +589,7 @@
   }
   function launchBlocker() {
     const p = profiles().find(item => profileId(item) === state.dialog?.profile);
-    const declared = p?.configuration?.nodes || [];
+    const declared = profileNodes(p), pair = !!(p?.configuration?.rank0 || p?.configuration?.rank1);
     const inputs = [...$("action-form").querySelectorAll('input[name="node"]:checked')];
     const missing = declared.filter(id => !machines().some(m => m.id === id));
     const unreachable = inputs.filter(input => {
@@ -595,9 +604,10 @@
     const router = $("router-location")?.value;
     if (router && router !== "local") {
       const m = machines().find(machine => machine.id === router);
-      if (!m || !paired(m) || !reachable(m)) unreachable.push(router);
+      if (!m || m.access !== "ssh" || m.declared_os !== "linux" || !paired(m) || !reachable(m)) unreachable.push(router);
     }
-    return profileBlocker(p) || (missing.length || unreachable.length ? `Cannot start · unreachable declared selection: ${[...new Set([...missing, ...unreachable])].join(", ")}` : !inputs.length ? "Select at least one paired worker machine." : "");
+    const selected = inputs.map(input => input.value);
+    return profileStartBlocker(p) || (p.required_router && router !== p.required_router ? p.router_constraint || `The router must run on ${p.required_router}.` : "") || (missing.length || unreachable.length ? `Cannot start · unreachable declared selection: ${[...new Set([...missing, ...unreachable])].join(", ")}` : pair && (declared.length !== 2 || declared.some((mid, index) => selected[index] !== mid)) ? "A paired profile needs both declared rank machines in rank order." : !inputs.length ? "Select at least one verified worker machine." : "");
   }
   function updateDialogGate() {
     if (!state.dialog) return;
@@ -681,6 +691,8 @@
     if (!control || control.disabled) return;
     const action = control.dataset.action;
     if (action === "stop" || action === "cancel") { stop(action === "cancel"); return; }
+    if (action === "add" && window.HydraweaveNodesUI) { window.HydraweaveNodesUI.open().catch(error => announce(error.message)); return; }
+    if (action === "cancel-job") { const id = state.job?.id || state.job?.job; if (id) mutate("cancel", {job:id}, true).catch(error => announce(error.message)); return; }
     if (action === "refresh") { refresh(); window.HydraweaveRecipes?.refresh(); pageOf(route())?.refresh?.(); return; }
     if (control.dataset.recipeAction || control.dataset.pageAction) return;      // recipes.js and feature pages handle their own controls
     if (action === "export-csv") { exportCSV(); return; }
@@ -998,7 +1010,7 @@
   }
 
   // F7: grouped sidebar with remembered groups, hidden panels, machines and the heartbeat.
-  const collapsedGroups = new Set(store.get("hydraweave-nav-groups", []));
+  const collapsedGroups = new Set(store.get("hydraweave-nav-groups", ["Workspace", "Inference", "Benchmarks", "Operations"]));
   const groupOf = key => coreNav[key]?.[0] || pageOf(key)?.group || "";
   const orderOf = key => coreNav[key]?.[1] ?? pageOf(key)?.order ?? 100;
   const visible = key => key === "settings" || !prefs().hidden_panels.includes(key);
@@ -1161,12 +1173,11 @@
 
   // F49: bottom tab bar on narrow screens.
   function renderTabbar(page) {
-    // Overview, Machines, Stats, Settings; without an overview page the fourth tab is Logs.
-    const overview = Object.hasOwn(routes, "overview") && visible("overview");
-    const tabs = [...(overview ? [["overview", t("tab.overview", null, "Overview")]] : []), ["devices", t("tab.machines", null, "Machines")],
-      ["stats", t("tab.stats", null, "Stats")], ...(overview ? [] : [["logs", t("tab.logs", null, "Logs")]]), ["settings", t("tab.settings", null, "Settings")]];
-    const html = tabs.map(([id, label]) => `<a href="#/${id}"${id === page ? ' aria-current="page" class="on"' : ""}><svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${navIcons[id]}</svg><span>${esc(label)}</span></a>`).join("");
-    if ($("tabbar").innerHTML !== html) $("tabbar").innerHTML = html;
+    const guided = Object.hasOwn(routes, "control-center");
+    const tabs = guided ? [["control-center", "Home"], ["devices", "Nodes"], ["components", "Updates"], ["engine-settings", "Engine"]]
+      : [["overview", t("tab.overview", null, "Overview")], ["devices", t("tab.machines", null, "Machines")], ["stats", t("tab.stats", null, "Stats")], ["settings", t("tab.settings", null, "Settings")]].filter(([id])=>Object.hasOwn(routes,id));
+    const html = tabs.map(([id,label])=>`<a href="#/${id}"${id === page ? ' aria-current="page" class="on"' : ""}><svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${navIcons[id]}</svg><span>${esc(label)}</span></a>`).join("");
+    if ($("tabbar").innerHTML !== html) $("tabbar").innerHTML=html;
   }
   function renderShell(page) {
     renderMachinesNav();
@@ -1227,14 +1238,14 @@
     for (const m of machines()) out.push({kind: t("palette.kind.machine", null, "Machine"), label: m.name || m.id, keywords: `${m.id} ${unwrap(m.os) ?? ""} ${unwrap(m.health) ?? ""}`, hint: String(unwrap(m.health) ?? ""), run: go(pages.machine && Object.hasOwn(routes, "machine") ? `#/machine?id=${encodeURIComponent(m.id)}` : "#/devices")});
     for (const p of profiles()) out.push({kind: t("palette.kind.profile", null, "Profile"), label: p.label || profileId(p), keywords: `${profileId(p)} engine ${p.state ?? ""}`, hint: String(p.state ?? ""), run: () => { location.hash = `#/engines?profile=${encodeURIComponent(profileId(p))}`; }});
     for (const r of rows(palette.recipes)) out.push({kind: t("palette.kind.recipe", null, "Recipe"), label: r.name || r.id, keywords: `${r.id} ${r.model ?? ""}`, hint: r.model || "", run: () => { location.hash = `#/recipes?recipe=${encodeURIComponent(r.id)}`; }});
-    const blockedStart = mutationReason() || profileBlocker(selected()) || capability("up");
+    const blockedStart = mutationReason() || profileStartBlocker(selected()) || capability("up");
     const actions = [
       [t("act.refresh", null, "Refresh now"), "", () => { refresh(); window.HydraweaveRecipes?.refresh(); pageOf(route())?.refresh?.(); }],
       [t("act.sidebar", null, "Toggle sidebar"), "", toggleSidebar, "Ctrl B"],
       [t("act.theme", null, "Theme: light / dark / true black / system"), "", () => setPref({theme: PREF_CHOICES.theme[(PREF_CHOICES.theme.indexOf(prefs().theme) + 1) % PREF_CHOICES.theme.length]})],
       [t("act.density", null, "Density: compact / comfortable"), "", () => setPref({density: prefs().density === "compact" ? "comfortable" : "compact"})],
       [t("act.language", null, "Language: English / Español"), "", () => setPref({language: prefs().language === "es" ? "en" : "es"})],
-      [t("act.add", null, "Add machine by address…"), mutationReason(), () => { location.hash = "#/devices"; openDialog("pin"); }],
+      [t("act.add", null, "Add machine by address…"), mutationReason(), () => { location.hash = "#/devices"; if (window.HydraweaveNodesUI) window.HydraweaveNodesUI.open().catch(error => announce(error.message)); else openDialog("pin"); }],
       [t("act.doctor", null, "Run Doctor…"), mutationReason(), () => openDialog("doctor")],
       [t("act.start", null, "Start profile…"), blockedStart, () => { location.hash = "#/engines"; openDialog("start"); }],
       [t("act.rotate", null, "Rotate engine key…"), mutationReason(), () => { location.hash = "#/settings"; openDialog("rotate"); }],

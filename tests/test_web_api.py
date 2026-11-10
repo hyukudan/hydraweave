@@ -352,6 +352,47 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.orch.status.call_args.kwargs["config_path"], self.api.config_path)
         self.assertEqual(set(self.orch.status.call_args.kwargs), {"config_path", "skip"})
 
+    def test_supported_pair_profiles_reach_the_same_launcher_and_installer(self):
+        """Pair adapters already implement the node lifecycle; the portal must not veto them by phase."""
+        from hydraweave import engines
+        for family in ("ds41-pair", "minimax-pair"):
+            with self.subTest(family=family):
+                self.orch._profile.return_value = ({}, family, ["halo-1", "halo-2"])
+                args = {"profile": family, "router": "halo-1"}
+                result = self.api._execute_action("up", args)
+                self.assertEqual(result, {"state": "running"})
+                self.assertEqual(self.orch.up.call_args.args, (self.cluster, family))
+                self.assertEqual(self.orch.up.call_args.kwargs["router"], "halo-1")
+                result = self.api._execute_action("install", {"profile": family, "build_on": "halo-2"})
+                self.assertEqual(result, {"release_id": "a" * 12})
+                self.orch.install.assert_called_with(self.cluster, "halo-2",
+                                                     list(engines.adapter(family).targets), profile=family)
+                self.api.detached = True
+                try:
+                    with patch.object(self.api, "_run_detached", return_value={"delegated": True}) as run:
+                        for action in ("up", "install"):
+                            self.assertEqual(self.api._execute_action(action, args), {"delegated": True})
+                            run.assert_called_with(action, args)
+                finally:
+                    self.api.detached = False
+
+    def test_profile_rows_describe_router_constraints_from_the_selected_release(self):
+        from dataclasses import replace
+        cluster = deepcopy(self.cluster)
+        cluster.machines["halo-2"] = replace(cluster.machines["halo-1"], id="halo-2")
+        cluster.profiles.update({
+            "deepseek": {"preset": "ds41-pair", "rank0": "halo-1", "rank1": "halo-2"},
+            "minimax": {"preset": "minimax-pair", "rank0": "halo-1", "rank1": "halo-2"},
+            "rtx": {"preset": "qwen-replicas", "nodes": ["halo-1"], "prefill_service": {"port": 18080}},
+        })
+        rows = {row["id"]: row for row in self.api._profiles(cluster, {})}
+        self.assertEqual(rows["deepseek"]["topology"], "pair")
+        self.assertIsNone(rows["deepseek"]["required_router"])
+        self.assertEqual(rows["minimax"]["required_router"], "halo-1")
+        self.assertIn("rank 0", rows["minimax"]["router_constraint"])
+        self.assertEqual(rows["rtx"]["required_router"], "local")
+        self.assertEqual(rows["minimax"]["parameter_editor"], "#/engine-settings?profile=minimax")
+
     def test_profiles_show_only_this_configurations_launch_of_a_shared_name(self):
         from hydraweave import orchestrate
         owned = {"profile": "qwen-replicas", "router": {"machine": "halo-1"}, "release_id": "r" * 12,
@@ -642,8 +683,10 @@ class APITests(unittest.TestCase):
                          {"qwen-replicas": ("qwen-replicas", "qwen-replicas"),
                           "w5": ("qwen-replicas-w5", "qwen-replicas"), "mm": ("minimax-pair", "minimax-pair")})
         script = (Path(__file__).resolve().parents[1] / "hydraweave" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-        # The UI gates on the family the API reports, never on a preset or profile name.
-        self.assertIn('p.family !== "qwen-replicas"', script)
+        # The API reports the family for presentation; the UI must not reinstate
+        # the old Phase 1b-only gate now that launch supports registered adapters.
+        self.assertNotIn('p.family !== "qwen-replicas"', script)
+        self.assertIn('p.available === false', script)
         self.assertIn('p.family === "qwen-replicas"', script)
         self.assertNotIn('profileId(p)) !== "qwen-replicas"', script)
         self.assertNotIn('p.profile) === "qwen-replicas"', script)

@@ -40,6 +40,35 @@ Placement retains these changes to the legacy interface:
 Legacy recipe reports omit placement-only CUDA driver/H2D identities; their passive GPU probe uses the original
 single query and preserves GPU-name whitespace. Deploy keeps its original queue-timeout exception and message.
 
+## Control center, setup and component management
+
+The home screen separates controller placement, router placement and inference ranks. These routes use the
+same loopback/CSRF rules as the rest of the portal. Configuration writes require the content version that the
+form read; they do not restart a model. GET documents do not run Git, contact a node or probe a GPU.
+
+| Route | Arguments | Result and effect |
+|---|---|---|
+| `GET setup` | None | First-run state, controller, configured router, node roles, cached observations and next steps. |
+| `POST setup/initialize` | `{}` | Create a controller-only workspace only when its configuration does not exist. Audited. |
+| `POST setup/router/validate` | `machine`, optional `port`, `version` | Preview router placement and preset constraints; no write. |
+| `POST setup/router/save` | `version`, `machine`, optional `port` | Save placement for the next launch; refuse stale forms or saved/running launches. Audited. |
+| `GET components` | None | Component pins, checked upstream revisions, staged sources, declared install evidence and cache location. |
+| `GET components/plan` | Optional `profile` | Node installation steps, exact revisions, build host and blockers. |
+| `POST components/check` | Optional `component` | Background job: check allowlisted Git remotes and cache the result. Does not install. |
+| `POST components/download` | `component`, `commit` | Background job: download a full configured or recently checked SHA to an immutable controller cache. Does not activate. |
+| `GET engine-settings` | None | Supported presets, configured profiles, typed controls, model assets and launch previews. |
+| `POST engine-settings/validate` | `profile`, `changes`, optional `version` | Validate a configuration patch and render the proposed launch, without saving. |
+| `POST engine-settings/save` | `version`, `profile`, `changes` | Persist supported settings/assets for a stopped profile with version and launch guards. Audited. |
+| `POST engine-settings/create` | `version`, `id`, `preset`, `nodes` or `rank0`/`rank1`; optional `port`, `assets` | Create an unstarted deployment profile. Does not fabricate a release or asset hashes. Audited. |
+
+`null` in a control patch removes that override. Previewed argv/env are the pinned recipe's output, not a
+running engine's self-reported effective configuration. An upstream commit is an available source revision,
+not a qualified engine/Trellis/driver deployment. The existing `install` job builds and distributes the complete
+profile on SSH nodes; USB4 kernel installation remains explicit node maintenance.
+
+Command-line equivalents: `hydraweave setup status|init|router`, `hydraweave components status|check|download|plan`.
+All take `--config`. The portal also accepts `hydraweave ui --config <path>` for a new or existing workspace.
+
 ## Access and authentication
 
 | | rule |
@@ -945,7 +974,7 @@ The four GET handlers ignore query keys.
 |---|---|---|---|---|
 | `GET ops/nodes` | Expected/deployed node tool digests, profiles and update blockers | Query ignored | Sync; no audit | Unavailable state is explained |
 | `GET ops/power` | Wake/shutdown eligibility and profile state | Query ignored | Sync; no audit | Unavailable state is explained |
-| `GET ops/config` | Raw machine entries, version, pinned keys and frozen identities | Query ignored | Sync; no audit | Unreadable config yields null + why |
+| `GET ops/config` | Raw machine entries, version, pinned keys, frozen identities and `add_peer_aliases` | Query ignored | Sync; no audit | Unreadable config yields null + why |
 | `GET ops/collectors` | Collector states, effective/default/bounded intervals | Query ignored | Sync; no audit | Unavailable samplers are explained |
 | `POST ops/wake` | Send UDP magic packets | Exactly `machine`: known id | Sync; audited | 400 body; 404 machine; 409 no MAC/wake blocker |
 | `POST ops/hostkey/scan` | SSH keyscan candidates for manual comparison | Exactly `machine`: known SSH id | Sync; no audit | 400 non-SSH/body; 404 machine |
@@ -957,6 +986,12 @@ The four GET handlers ignore query keys.
 | `POST ops/nodes-update` | Update node tools serially without force; report updated/refused/skipped | `profile`: configured string id; `machine?`: member id | Audited exclusive job; core hold on selected/all profile members; deadline 900 s | 400 fields/nonmember; 404 profile; 409 slot/resources; live leases/unknown state fail job |
 | `POST ops/shutdown` | Run configured shutdown helper after occupancy check | Exactly `machine`: SSH id and `confirm`: same id | Audited exclusive job; core hold on machine; deadline 90 s (helper 30 s) | 400 confirmation; 404 machine; 409 local/non-SSH/helper/slot/resources; occupancy rechecked in job |
 | `POST ops/machine-test` | SSH/node tool/GPU/engine/USB4 pass/fail/skipped report | Exactly `machine`: known id | Audited job; no admission/hold; deadline 180 s | 400 fields; 404 machine; unpinned SSH yields skipped checks |
+
+When `add_peer_aliases` is true, a node whose lease records are not yet readable may receive only new
+`peer_ssh` destinations. All existing aliases and every other machine field must be identical. Validation
+and save retain schema, version, job and saved-launch checks; save also holds the relevant profile locks
+and rechecks the job slot and version after reading node state. This does not install keys or verify SSH.
+Replacing/removing an alias, editing identity, a live lease or unknown controller state still refuses.
 
 A node update already in flight cannot be interrupted. A new machine is only started with ≥180 s
 remaining; this is a start threshold, not a completion guarantee. Its hold stays until cleanup finishes.

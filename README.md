@@ -51,6 +51,24 @@ The CLI uses a versioned cluster configuration and pinned releases. Machines are
 
 ## Getting started
 
+### Open the control center
+
+After installing the Python package, run `hydraweave ui`. **Home** can create a new workspace, then guide you
+through adding nodes, verifying SSH identities, choosing an engine profile and installing its pinned components.
+**Engine settings** provides editable controls and launch previews; **Components** checks upstream revisions and
+downloads sources without changing a running release. Existing tools remain available under advanced navigation.
+
+```sh
+hydraweave ui --config ~/.config/hydraweave/cluster.json
+```
+
+The controller can run on Windows or Linux. It is independent of the engine's rank 0, and the router can run on
+the controller or a supported Linux node. See [the control-center guide](docs/control-center.md) for first-run
+setup, controller placement, updates and the distinction between lab leases and persistent service mode.
+
+These host-side improvements do not requalify newer engine/driver revisions on GPU hardware. Upstream source,
+staged source and an installed/active profile are shown separately.
+
 **Prerequisites (control machine):** Python 3.11+, Git and OpenSSH. The Windows installation workflow is documented in [Installation](docs/install.md), including node prerequisites and rollback.
 
 Set `REPOSITORY_URL` to this repository’s current clone URL; the hosting repository has not been renamed.

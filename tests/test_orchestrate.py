@@ -436,6 +436,21 @@ class OrchestrationTests(unittest.TestCase):
             self.assertEqual(cli.main(["down", "--force", "qwen-replicas"]), 0)
         down.assert_called_once_with("qwen-replicas", force=True)
 
+    def test_saved_router_port_reaches_actual_local_and_remote_launch_payloads(self):
+        self.cluster.router.update(machine="halo-1", listen="192.0.2.10:18619")
+        for router in ("local", "halo-1"):
+            with self.subTest(router=router):
+                self.calls.clear()
+                orch.up(self.cluster, "qwen-replicas", router=router)
+                if router == "local":
+                    rendered = next(payload["rendered"] for _, verb, payload in self.calls if verb == "router-start")
+                    self.assertEqual(rendered["listen"], {"address": "127.0.0.1", "port": 18619})
+                else:
+                    payload = [payload for _, verb, payload in self.calls if verb == "lease"][-1]
+                    rendered = json.loads(payload["processes"][0]["argv"][4])
+                    self.assertEqual(rendered["listen"], {"address": "192.0.2.10", "port": 18619})
+                orch.down("qwen-replicas")
+
     def test_remote_router_has_node_local_keys_and_no_gpu_turn(self):
         orch.up(self.cluster, "qwen-replicas", router="halo-1")
         payload = [payload for _, verb, payload in self.calls if verb == "lease"][-1]

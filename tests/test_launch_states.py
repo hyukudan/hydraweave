@@ -213,7 +213,7 @@ class LaunchStatesTests(unittest.TestCase):
         args = cli.build_parser().parse_args(["up", "prof-b", "--config", str(self.config_b)])
         # This test injects only the launcher; passive profile validation is covered by preflight tests.
         with mock.patch("hydraweave.recipes.preflight.cli"):
-            cli.up_command(args, orchestrate=fake, load_cluster=lambda path: None)
+            cli.up_command(args, orchestrate=fake, load_cluster=lambda path: SimpleNamespace(router={}))
             with service.configured(self.config_a):             # an ambient configuration never wins over --config
                 cli.up_command(args, orchestrate=fake, load_cluster=lambda path: None)
         self.assertEqual(seen, [self.config_b.absolute()] * 2)

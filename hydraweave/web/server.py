@@ -81,6 +81,14 @@ class PortalServer(ThreadingHTTPServer):
 
 
     def server_close(self):
+        # Feature jobs own cancellable local work (including Git downloads). Stop
+        # admission first, then let their finally blocks reap children and stages.
+        # Detached core up/install workers are not feature contexts and keep running.
+        close_features = getattr(self.api, "close_features", None)
+        if close_features is not None:
+            pending = close_features()
+            if isinstance(pending, int) and pending > 0:
+                print(f"Hydraweave: {pending} feature job(s) exceeded the shutdown cleanup deadline", file=sys.stderr)
         # Recipe children (and their whole process trees) never outlive the portal.
         runner = getattr(self.api, "recipes", None)
         if runner is not None:
@@ -370,8 +378,8 @@ def start_telemetry(api):
         return reason
 
 
-def serve(port=18700, no_browser=False):
-    with create_server(port) as server:
+def serve(port=18700, no_browser=False, config_path=None):
+    with create_server(port, **({"api": API(config_path)} if config_path is not None else {})) as server:
         # Mutations survive the portal process; test fixtures with patched backends stay in-process.
         server.api.detached = getenv("HYDRAWEAVE_UI_INPROCESS") != "1"
         # Node-gate lock files are made now: answering a request never creates them.
