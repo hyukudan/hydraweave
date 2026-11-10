@@ -159,6 +159,7 @@ def test_01_evaluate_prepare_up_and_real_watchdog_with_fake_child(tmp_path, file
     monkeypatch.setattr(service, "config_dir", lambda: tmp_path)
     # Simulate the Windows service filesystem using the test host's native paths.
     monkeypatch.setattr(rtx, "PureWindowsPath", Path)
+    monkeypatch.setattr(runtime, "PureWindowsPath", Path)
     artifacts, document = files
     data = dict(runtime.preset(), engine_sha=runtime.replica_args.AUDITED_REVISION, capabilities=["placement-v1"])
     recipe_doc = test_recipes.PlacementSchemaTests.document()
