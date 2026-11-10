@@ -530,8 +530,9 @@ def _paused(ctx, machine):
 
 def _unreachable(ctx, p):
     typed = ctx.states("node_up", {0, 1})
-    if typed is None:
+    if typed is None and not any(_paused(ctx, m) for m in (ctx.machines() or {})):
         return None
+    typed = typed or []
     codes = {id(row): code for row, code in typed}
     out = []
     for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items()):

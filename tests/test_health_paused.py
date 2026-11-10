@@ -22,7 +22,7 @@ class PausedTests(unittest.TestCase):
 
     def test_a_paused_machine_without_a_recent_row_still_clears(self):
         ctx = self.ctx()
-        ctx.states = lambda name, codes: []
+        ctx.states = lambda name, codes: None          # no node_up samples at all in the window
         ctx.machines = lambda: {"halo-1": None, "halo-2": None}
         budget = mock.Mock()
         budget.turn.side_effect = lambda m: ("lab-turn", False) if m == "halo-1" else None
