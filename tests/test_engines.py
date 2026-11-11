@@ -502,14 +502,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("--dspark-vocab", recipe["required_flags"]["strix-deepseek41-serve"])
         node_install.validate_install(payload)
 
-    def test_original_presets_keep_mains_recipe_except_detected_compiler(self):
+    def test_original_presets_build_exactly_mains_recipe(self):
         """qwen-replicas, ds41-pair and ds41-pair-long declare no components: their install payload (recipe with
-        required_flags and options, and components) stays pinned apart from ROCm compiler discovery.
-        The expected values were computed by main's install path (tests/fixtures/main_recipes.json)."""
+        required_flags and options, and components) is pinned to what main computes, so their
+        release ids stay main's; the build swaps in the detected ROCm compiler. The expected values were computed by main's install path (tests/fixtures/main_recipes.json)."""
         expected = json.loads(read_fixture(ROOT / "tests" / "fixtures" / "main_recipes.json"))["presets"]
-        for row in expected.values():
-            row["recipe"]["configure"] = [flag for flag in row["recipe"]["configure"]
-                                              if not flag.startswith("-DCMAKE_HIP_COMPILER=")]
         self.assertEqual(sorted(expected), ["ds41-pair", "ds41-pair-long", "qwen-replicas"])
         obj = cluster_obj()
         for row in obj["machines"][1:]:
