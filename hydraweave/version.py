@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from .winproc import no_window
 
 ROOT = Path(__file__).resolve().parents[1]
 UNKNOWN = "0.0.0+unknown"
@@ -47,7 +48,8 @@ def source_commit(root=ROOT):
     """Short commit of this tree (git checkout or RELEASE.json), or None."""
     try:
         commit = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=root,
-                                capture_output=True, text=True, timeout=2, check=True).stdout.strip()
+                                capture_output=True, text=True, timeout=2, check=True,
+                                **no_window()).stdout.strip()
         if commit:
             return commit
     except (OSError, subprocess.SubprocessError):
