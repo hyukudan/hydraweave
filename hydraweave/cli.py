@@ -572,8 +572,8 @@ def build_parser(parser_class=argparse.ArgumentParser):
                                 "those that record none")
         scope.add_argument("--all-configs", action="store_true", help="show every configuration's launches")
     service = commands.add_parser("service", help="non-lab systemd --user units (lab_mode: false only)")
-    service.add_argument("operation", choices=("install", "start", "stop", "status", "remove"))
-    service.add_argument("profile")
+    service.add_argument("operation", choices=("install", "start", "stop", "status", "remove", "uninstall"))
+    service.add_argument("profile", nargs="?")
     service.add_argument("--enable", action="store_true", help="install: also enable the unit at login")
     service.add_argument("--config", type=Path, default=config_path())
     keys = commands.add_parser("keys").add_subparsers(dest="key_operation", required=True)
@@ -918,11 +918,14 @@ def main(argv=None):
         elif args.command == "hosts":
             _json(_hosts(args))
         elif args.command == "service":
-            result = _module("hydraweave.service").run(_cluster(args.config), args.operation, args.profile,
-                                                      enable=args.enable)
-            _json(result)
-            if not result["ok"]:
-                return 1
+            if args.operation == "uninstall" or args.profile is None:
+                return _module("hydraweave.node_agent").service_command(args.operation) or 0
+            else:
+                result = _module("hydraweave.service").run(_cluster(args.config), args.operation, args.profile,
+                                                          enable=args.enable)
+                _json(result)
+                if not result["ok"]:
+                    return 1
         elif args.command == "keys":
             if args.key_operation == "export":
                 _json(_module("hydraweave.orchestrate").export_key(args.profile, args.out))
