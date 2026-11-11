@@ -1,6 +1,7 @@
-"""HTTP transport for the portal: loopback by default, any interface with --listen (no login either way)."""
+"""HTTP portal: loopback by default, token-protected writes on LAN binds unless --no-auth is set."""
 
 import hmac
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -72,16 +73,22 @@ class PortalServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64     # feature pages poll several documents at once; the default backlog of 5 refuses bursts
 
-    def __init__(self, port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
+    def __init__(self, port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None,
+                 no_auth=False):
         self.listen_address = bind.address(listen)
         self.address_family = bind.family(self.listen_address)
         self.api = api if api is not None else API()
         self.static_dir = Path(static_dir) if static_dir else STATIC_DIR
         self.csrf_token = _token(token_file)
+        self.lan = not bind.is_loopback(self.listen_address)
+        self.no_auth = no_auth or getenv("HYDRAWEAVE_NO_AUTH") == "1"
+        self.access_token = None
+        if self.lan and not self.no_auth:
+            from hydraweave import secrets as store
+            self.access_token = store.ensure("portal-access")
         super().__init__((self.listen_address, port), Handler)
         self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
-        self.lan = not bind.is_loopback(self.listen_address)
 
     def host_allowed(self, header):
         if header in self.allowed_hosts:
@@ -135,6 +142,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
         self.send_header("Connection", "close")
+        if getattr(self, "_login_cookie", None):
+            self.send_header("Set-Cookie", self._login_cookie)
+        if getattr(self, "_login_location", None):
+            self.send_header("Location", self._login_location)
         self.end_headers()
         self.close_connection = True
         if not head:
@@ -163,15 +174,50 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._get()
 
+    def _matches_access(self, value):
+        return bool(self.server.access_token) and hmac.compare_digest(
+            value.encode("utf-8"), self.server.access_token.encode("ascii"))
+
+    def _bearer(self):
+        values = self.headers.get_all("Authorization", [])
+        return len(values) == 1 and values[0].startswith("Bearer ") and self._matches_access(values[0][7:])
+
+    def _authorized(self):
+        if self.server.access_token is None or self._bearer():
+            return True
+        try:
+            cookie = SimpleCookie()
+            cookie.load("; ".join(self.headers.get_all("Cookie", [])))
+            value = cookie.get("hydraweave-access")
+            return value is not None and self._matches_access(value.value)
+        except CookieError:
+            return False
+
+    def _login(self, parsed):
+        """Exchange the URL credential for a browser-session cookie, then remove it from the URL."""
+        if self.server.access_token is None or parsed.path not in {"/", "/index.html", "/hydraweave/", "/hydraweave/index.html"}:
+            return False
+        values = parse_qs(parsed.query, keep_blank_values=True).get("token")
+        if values is None:
+            return False
+        if len(values) != 1 or not self._matches_access(values[0]):
+            raise APIError("invalid portal access token", 401)
+        self._login_cookie = "hydraweave-access=" + self.server.access_token + "; Path=/; HttpOnly; SameSite=Strict"
+        self._login_location = parsed.path
+        self._send(303, b"")
+        return True
+
     def _get(self, head=False):
         if not self._host():
             return
         try:
             parsed = urlsplit(self.path)
+            if self._login(parsed):
+                return
             if parsed.path in {"/node/bootstrap.sh", "/node/package.tar.gz"}:
                 from hydraweave import bootstrap
-                body = (bootstrap.script("http://" + self.headers["Host"]) if parsed.path.endswith(".sh")
-                        else bootstrap.source_package())
+                data, digest = bootstrap.package()
+                body = bootstrap.script("http://" + self.headers["Host"], digest) if parsed.path.endswith(".sh") else data
                 self._send(200, body, "text/x-shellscript" if parsed.path.endswith(".sh") else "application/gzip", head=head)
                 return
             if parsed.path == "/favicon.ico":
@@ -210,6 +256,7 @@ class Handler(BaseHTTPRequestHandler):
             files = {"/": "index.html", "/index.html": "index.html",
                      "/hydraweave/": "index.html", "/hydraweave/index.html": "index.html",
                      "/app.css": "app.css", "/app.js": "app.js", "/recipes.js": "recipes.js",
+                     "/security.js": "security.js",
                      "/hydraweave/app.css": "app.css", "/hydraweave/app.js": "app.js",
                      "/hydraweave/recipes.js": "recipes.js"}
             name = files.get(path)
@@ -245,6 +292,16 @@ class Handler(BaseHTTPRequestHandler):
                 # The meta works even if a static page has no placeholder.
                 meta = '<meta name="hydraweave-csrf" content="' + token + '">'
                 html = html.replace("</head>", meta + "</head>") if "</head>" in html else meta + html
+                from hydraweave import bootstrap
+                security = '<meta name="hydraweave-package-sha256" content="' + bootstrap.package_sha256() + '">'
+                if self.server.access_token and not self._authorized():
+                    security += '<meta name="hydraweave-login" content="required">'
+                security += '<script src="/security.js" defer></script>'
+                html = html.replace("</head>", security + "</head>") if "</head>" in html else security + html
+                if self.server.lan and self.server.no_auth:
+                    banner = ('<div class="banner warn" role="alert">WARNING: LAN access without authentication. '
+                              'Anyone who can reach this portal can control the cluster (--no-auth).</div>')
+                    html = html.replace("<body>", "<body>" + banner)
                 # Feature pages register themselves before app.js renders (deferred scripts run in order).
                 tags = page_tags(self.server.static_dir)
                 anchor = '<script src="/app.js" defer></script>'
@@ -287,12 +344,14 @@ class Handler(BaseHTTPRequestHandler):
             self._drain()
             return
         try:
+            if not self._authorized():
+                raise APIError("Portal login required; open the console login URL or enter your access token.", 401)
             host = self.headers["Host"]
             origins = self.headers.get_all("Origin", [])
-            if origins != ["http://" + host]:
+            if not self._bearer() and origins != ["http://" + host]:
                 raise APIError("Origin must equal the UI origin", 403)
             tokens = self.headers.get_all("X-Hydraweave-CSRF", [])
-            if len(tokens) != 1 or not hmac.compare_digest(tokens[0].encode("utf-8"), self.server.csrf_token.encode("ascii")):
+            if not self._bearer() and (len(tokens) != 1 or not hmac.compare_digest(tokens[0].encode("utf-8"), self.server.csrf_token.encode("ascii"))):
                 raise APIError("invalid CSRF token", 403)
             types = self.headers.get_all("Content-Type", [])
             if len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json":
@@ -362,14 +421,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _method(self):
         if self._host():
-            self._error(405, "method not allowed")
+            if self.command in {"PUT", "DELETE", "PATCH"} and not self._authorized():
+                self._error(401, "Portal login required")
+            else:
+                self._error(405, "method not allowed")
 
     do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = _method
 
 
-def create_server(port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
+def create_server(port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None, no_auth=False):
     """Create the portal server (loopback unless `listen` says otherwise); port=0 is useful for isolated tests."""
-    return PortalServer(port, api=api, static_dir=static_dir, listen=listen, token_file=token_file)
+    return PortalServer(port, api=api, static_dir=static_dir, listen=listen, token_file=token_file, no_auth=no_auth)
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -432,7 +494,7 @@ def start_telemetry(api):
         return reason
 
 
-def serve(port=None, no_browser=False, config_path=None, listen=None):
+def serve(port=None, no_browser=False, config_path=None, listen=None, no_auth=False):
     """Run the portal. `listen`/`port` default to pc.ui_listen of the workspace, then 127.0.0.1:18700."""
     api = API(config_path) if config_path is not None else API()
     configured = _configured_listen(api) if listen is None or port is None else None
@@ -443,9 +505,9 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
         token_file = runtime.runtime_dir() / "portal-csrf"
     except Exception:  # noqa: BLE001 - no runtime directory: a per-process token, as before
         token_file = None
-    with create_server(port, api=api, listen=listen, token_file=token_file) as server:
+    with create_server(port, api=api, listen=listen, token_file=token_file, no_auth=no_auth) as server:
         lan = getattr(server, "lan", False)
-        if lan:
+        if lan and server.no_auth:
             print(bind.LAN_WARNING.format(what="the Hydraweave portal",
                                           listen=bind.url_host(server.listen_address, server.server_port)),
                   file=sys.stderr, flush=True)
@@ -470,8 +532,11 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
         print("Hydraweave portal: " + server.origin + (
             " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if lan else ""),
             flush=True)
+        login_url = server.origin + "/" + ("?token=" + server.access_token if server.access_token else "")
+        if server.access_token:
+            print("Hydraweave portal login: " + login_url, flush=True)
         if not no_browser:
-            webbrowser.open(server.origin + "/")
+            webbrowser.open(login_url)
         try:
             server.serve_forever(poll_interval=.2)
         except KeyboardInterrupt:

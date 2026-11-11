@@ -306,13 +306,13 @@ def test_prepare_preserves_real_layout_and_user_unit(tmp_path):
 
 def test_bootstrap_render_never_executes_sudo_and_shell_syntax(tmp_path):
     script = bootstrap.script("http://127.0.0.1:18700").decode()
-    before, after = script.split('missing=\'\'\n', 1)
-    printed = after
-    assert "sudo apt-get" in printed
-    assert "amdgpu-dkms" not in printed
+    before, after = script.split("missing=''\n", 1)
+    assert "sudo apt-get" in after
+    assert "amdgpu-dkms" not in after
     assert "hydraweave-node pair" in after
     assert "sudo" not in before
-    assert "rm " not in script and "systemctl --system" not in script
+    assert "trap 'rm -rf \"$package_dir\"' EXIT" in script
+    assert 'rm -rf "$root"' not in script and "systemctl --system" not in script
     assert "agent-venv" in script and "--upgrade" in script
     assert "--force-reinstall" in script  # Checkout builds can retain the same project version.
     path = tmp_path / "bootstrap.sh"

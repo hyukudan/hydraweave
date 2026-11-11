@@ -62,7 +62,7 @@ class HostTests(unittest.TestCase):
 
 class PortalTests(unittest.TestCase):
     def test_portal_on_every_interface_answers_a_lan_host_and_refuses_foreign_names(self):
-        with portal.create_server(0, listen="0.0.0.0") as server:
+        with portal.create_server(0, listen="0.0.0.0", no_auth=True) as server:
             self.assertTrue(server.lan)
             self.assertTrue(server.origin.startswith("http://127.0.0.1:"))
             import threading
@@ -105,7 +105,7 @@ class PortalTests(unittest.TestCase):
         return response.status, text
 
     def test_a_write_through_the_lan_address_passes_csrf_and_foreign_origins_do_not(self):
-        with portal.create_server(0, listen="0.0.0.0") as server:
+        with portal.create_server(0, listen="0.0.0.0", no_auth=True) as server:
             thread = self._serve(server)
             try:
                 port, token = server.server_port, server.csrf_token
@@ -160,13 +160,14 @@ class PortalTests(unittest.TestCase):
         fake = mock.MagicMock()
         fake.__enter__.return_value = fake
         fake.lan, fake.listen_address, fake.server_port, fake.origin = True, "0.0.0.0", 18700, "http://127.0.0.1:18700"
+        fake.no_auth, fake.access_token = True, None
         fake.serve_forever.side_effect = KeyboardInterrupt
         err, out = io.StringIO(), io.StringIO()
         with mock.patch.object(portal, "create_server", return_value=fake) as create, \
                 mock.patch.object(portal, "start_telemetry"), mock.patch("hydraweave.nodepoll.start"), \
                 mock.patch("hydraweave.nodegate.portal"), \
                 contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-            portal.serve(18700, no_browser=True, listen="0.0.0.0")
+            portal.serve(18700, no_browser=True, listen="0.0.0.0", no_auth=True)
         self.assertEqual(create.call_args.kwargs["listen"], "0.0.0.0")
         self.assertIn("without authentication", err.getvalue())
         self.assertIn("0.0.0.0:18700", err.getvalue())

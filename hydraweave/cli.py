@@ -471,9 +471,11 @@ def build_parser(parser_class=argparse.ArgumentParser):
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",
                     help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "
-                         "interface WITHOUT authentication, e.g. on a headless node")
+                         "interface with token-protected writes, e.g. on a headless node")
     ui.add_argument("--port", type=int, help="port (default: pc.ui_listen, else 18700; 0 picks a free one)")
     ui.add_argument("--no-browser", action="store_true")
+    ui.add_argument("--no-auth", action="store_true",
+                    help="disable LAN access-token authentication (also HYDRAWEAVE_NO_AUTH=1)")
     ui.add_argument("--config", type=Path, help="workspace configuration to open or initialize")
     config = commands.add_parser("config").add_subparsers(dest="operation", required=True)
     config.add_parser("validate").add_argument("path", type=Path)
@@ -875,6 +877,7 @@ def main(argv=None):
                 raise ValueError("ui port must be in 0..65535")
             listen = None if args.listen is None else _module("hydraweave.bind").address(args.listen, "--listen")
             _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser, listen=listen,
+                                                  **({"no_auth": True} if args.no_auth else {}),
                                                   **({"config_path": args.config} if args.config else {}))
         elif args.command in ("up", "down") and args.profile is None and not (
                 getattr(args, "recipe", None) or getattr(args, "recipe_inputs", None)):

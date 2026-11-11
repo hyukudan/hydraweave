@@ -1,8 +1,8 @@
 """Listen addresses for the portal and the metrics exporter.
 
 Both bind 127.0.0.1 by default. An operator may choose any interface address, or 0.0.0.0 / :: for every interface,
-like ComfyUI's --listen, so that a headless machine can serve its portal on the LAN. There is still no login: a
-non-loopback bind prints LAN_WARNING. The Host check keeps refusing DNS names that are not this machine's own, so a
+like ComfyUI's --listen, so that a headless machine can serve its portal on the LAN. The portal protects LAN writes
+with an access token; --no-auth and the metrics exporter print LAN_WARNING. The Host check refuses foreign names, so a
 web page on another site cannot rebind its name to the portal.
 """
 import ipaddress

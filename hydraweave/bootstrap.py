@@ -1,17 +1,23 @@
 """Controller-served source package and POSIX bootstrap; never executes privileged commands."""
 import io
+import hashlib
 from pathlib import Path
+import re
 import tarfile
+import threading
 from urllib.parse import urlsplit
 
 from .paths import repo_root
 
 
-def script(origin):
+def script(origin: str, sha256: str | None = None) -> bytes:
     parsed = urlsplit(origin)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
             or parsed.path not in {"", "/"} or any(c in origin for c in "'\n\r`$\\\"")):
         raise ValueError("invalid controller origin")
+    sha256 = package_sha256() if sha256 is None else sha256
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("invalid package sha256")
     return ("""#!/bin/sh
 set -eu
 umask 077
@@ -41,11 +47,33 @@ if [ -n "$missing" ]; then
     fi
 fi
 "$python" -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"'
+expected=${HYDRAWEAVE_PKG_SHA256:-}
+if [ -z "$expected" ]; then
+    expected='""" + sha256 + """'
+    printf '%s\\n' 'Note: HYDRAWEAVE_PKG_SHA256 is unset; using the SHA-256 embedded in this script.' >&2
+fi
+package_dir=$(mktemp -d)
+trap 'rm -rf "$package_dir"' EXIT
+trap 'exit 1' HUP INT TERM
+package="$package_dir/package.tar.gz"
+curl -fsSL '""" + origin.rstrip("/") + """/node/package.tar.gz' -o "$package"
+if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$package")
+elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$package")
+else
+    actual=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$package")
+fi
+actual=${actual%% *}
+if [ "$actual" != "$expected" ]; then
+    printf '%s\\n' "Package SHA-256 mismatch: expected $expected, got $actual; installation aborted." >&2
+    exit 1
+fi
 mkdir -p "$root/etc" "$root/incoming" "$root/lab-arm" "$root/log" "$root/releases"
 if [ ! -x "$root/agent-venv/bin/python" ]; then
     "$python" -m venv "$root/agent-venv"
 fi
-"$root/agent-venv/bin/python" -m pip install --upgrade --force-reinstall 'hydraweave[node] @ """ + origin.rstrip("/") + """/node/package.tar.gz'
+"$root/agent-venv/bin/python" -m pip install --upgrade --force-reinstall "hydraweave[node] @ file://$package"
 if [ -n "${HYDRAWEAVE_LAB_DIR:-}" ]; then
     "$root/agent-venv/bin/hydraweave-node" install-service --root "$root" --lab-dir "$HYDRAWEAVE_LAB_DIR"
 else
@@ -65,18 +93,48 @@ printf '%s\\n' 'Reissue pairing code: hydraweave-node pair'
 """).encode()
 
 
-def source_package():
-    """Build from the checkout's allow-listed package resources, without executing a build backend."""
+_cache_lock = threading.Lock()
+_cache_key: tuple = ()
+_cache_package = b""
+_cache_sha256 = ""
+
+
+def _sources() -> list[tuple[Path, str]]:
     root = repo_root()
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
-        for name in ("pyproject.toml", "versions.lock", "README.md", "LICENSE", "NOTICE", "hydraweave", "hyperloom", "node"):
-            base = (Path(__file__).parent if name == "hydraweave" else
-                    Path(__file__).parent.parent / "hyperloom" if name == "hyperloom" else root / name)
-            paths = [base] if base.is_file() else sorted(base.rglob("*"))
-            for path in paths:
-                if (path.is_file() and not path.is_symlink() and "__pycache__" not in path.parts
-                        and path.suffix not in {".pyc", ".pyo"}):
-                    relative = name if base.is_file() else name + "/" + path.relative_to(base).as_posix()
-                    archive.add(path, arcname="hydraweave/" + relative, recursive=False)
-    return stream.getvalue()
+    sources = []
+    for name in ("pyproject.toml", "versions.lock", "README.md", "LICENSE", "NOTICE", "hydraweave", "hyperloom", "node"):
+        base = (Path(__file__).parent if name == "hydraweave" else
+                Path(__file__).parent.parent / "hyperloom" if name == "hyperloom" else root / name)
+        paths = [base] if base.is_file() else sorted(base.rglob("*"))
+        for path in paths:
+            if (path.is_file() and not path.is_symlink() and "__pycache__" not in path.parts
+                    and path.suffix not in {".pyc", ".pyo"}):
+                relative = name if base.is_file() else name + "/" + path.relative_to(base).as_posix()
+                sources.append((path, "hydraweave/" + relative))
+    return sources
+
+
+def package() -> tuple[bytes, str]:
+    """Cache the exact archive and its digest together until a source mtime/size or file list changes."""
+    global _cache_key, _cache_package, _cache_sha256
+    with _cache_lock:
+        sources = _sources()
+        key = tuple((str(path), name, stat.st_mtime_ns, stat.st_size)
+                    for path, name in sources for stat in [path.stat()])
+        if key != _cache_key or not _cache_package:
+            stream = io.BytesIO()
+            with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+                for path, name in sources:
+                    archive.add(path, arcname=name, recursive=False)
+            data = stream.getvalue()
+            _cache_key, _cache_package, _cache_sha256 = key, data, hashlib.sha256(data).hexdigest()
+        return _cache_package, _cache_sha256
+
+
+def source_package() -> bytes:
+    """Build only allow-listed resources, without executing a build backend."""
+    return package()[0]
+
+
+def package_sha256() -> str:
+    return package()[1]

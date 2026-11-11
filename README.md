@@ -147,6 +147,10 @@ Pending integration follows these decisions:
 **AMD-first inference, heterogeneous orchestration.** Hydraweave supports Strix Halo decode nodes while coordinating other resources when a profile requires them. It uses pinned upstream components rather than duplicating their kernels or inference implementations. Configuration is explicit; remote SSH commands are allow-listed; leases own GPU work; partial starts must clean up safely.
 
 For the complete security model and limitations, see [Technical overview — Security](docs/README-technical.md#security).
+LAN portal binds require a persistent access token for actions; the console prints a login URL. Loopback
+access is unchanged, and `--no-auth` explicitly allows unauthenticated LAN control with a warning.
+Worker bootstrap commands verify the package SHA-256 before pip installation. See
+[Installation — LAN access security](docs/install.md#lan-access-security) for token storage and HTTP trust requirements.
 
 ## Tests
 
