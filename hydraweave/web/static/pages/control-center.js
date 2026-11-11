@@ -96,7 +96,7 @@
     const pairText = (d.pairs || []).map(p => `<p class="hint">USB4 pair available: ${p.map(esc).join(" + ")}</p>`).join("");
     return H().card("Discovered on your LAN", `<p>On each worker: <code>curl -fsSL http://&lt;controller&gt;:18700/node/bootstrap.sh | sh</code></p>${d.error ? `<p role="alert">${esc(d.error)}</p>` : ""}${pairText}${rows.map(n => {
       const profiles = (doc().profiles || []).filter(p => (p.machines || p.nodes || []).includes(n.machine));
-      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)}</p></div>${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
+      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
     }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs. Engines use the existing GPU queue when launched.</p>`);
   }
   function render() {
