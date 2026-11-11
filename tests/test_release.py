@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tarfile
@@ -28,6 +29,35 @@ def _tar(**members):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_workflow_publishes_only_on_tag_push_even_for_manual_false_input(self):
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        triggers = workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"^  (\w+):", triggers, re.M), ["push", "workflow_dispatch"])
+        push = triggers.split("  push:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
+        self.assertEqual(push.strip(), "tags: ['v*']")
+        self.assertIn("dry_run:", triggers)
+        publish = workflow.split("\n  publish:\n", 1)[1]
+        guard = publish.split("    if: >-\n", 1)[1].split("    runs-on:", 1)[0]
+        self.assertIn("github.event_name == 'push'", guard)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", guard)
+        self.assertNotIn("inputs.", guard)
+        self.assertEqual(workflow.count("gh release create"), 1)
+        self.assertIn("gh release create", publish)
+
+    def test_checksums_include_all_release_assets_and_exclude_previous_sums(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary)
+            names = ("hydraweave-0.1.0-py3-none-any.whl", "hydraweave-0.1.0.tar.gz", "install.sh",
+                     "hydraweave-node-engine-0.1.0-linux-x86_64-gfx1151.tar.gz")
+            for name in names:
+                (out / name).write_bytes(name.encode())
+            (out / "SHA256SUMS").write_text("old checksums")
+            (out / "ignored-directory").mkdir()
+            make_release.main(["--out", str(out), "--checksums-only"])
+            expected = "".join(hashlib.sha256(name.encode()).hexdigest() + "  " + name + "\n"
+                               for name in sorted(names))
+            self.assertEqual((out / "SHA256SUMS").read_text(), expected)
+
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)

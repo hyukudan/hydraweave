@@ -18,6 +18,9 @@ import sys
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hydraweave_rocm import detect_rocm
+
 
 VERSION = "0.1.0"
 MAX_JSON = 256 * 1024
@@ -32,7 +35,7 @@ POLL_DEADLINE_S = 20.0
 POLL_REPLY = 1024 * 1024
 # Extension modules shipped beside this file (copied together by bootstrap). Each exposes
 # VERBS (set of names) and run(verb, payload: dict) -> dict; they get the raw JSON payload.
-EXTENSIONS = ("hydraweave_compat", "hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service",
+EXTENSIONS = ("hydraweave_rocm", "hydraweave_compat", "hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service",
               "hydraweave_observe", "hydraweave_usb4", "hydraweave_turns", "hydraweave_models", "hydraweave_logsearch")
 
 
@@ -180,9 +183,17 @@ class Inspector:
 
     def executable(self, name):
         if self.root is None:
-            return shutil.which(name)
-        for directory in ("/usr/bin", "/usr/local/bin", "/bin",
-                          "/opt/rocm/core-10.1/bin"):
+            found = shutil.which(name)
+            if found:
+                return found
+            rocm = detect_rocm()
+            candidate = rocm / "bin" / name if rocm else None
+            return str(candidate) if candidate and os.access(candidate, os.X_OK) else None
+        rocm = detect_rocm(environ={}, root=self.root)
+        directories = ["/usr/bin", "/usr/local/bin", "/bin"]
+        if rocm:
+            directories.append("/" + (rocm / "bin").relative_to(self.root).as_posix())
+        for directory in directories:
             try:
                 candidate = self.path(directory + "/" + name)
                 if candidate.is_file():
@@ -267,8 +278,13 @@ class Inspector:
         if self.executable(compiler) is None:
             compiler = "c++"
         checks["compiler"] = self.command(compiler, "--version")
-        checks["rocm_root"] = self.exists("/opt/rocm/core-10.1")
-        checks["rocm_version"] = self.read("/opt/rocm/core-10.1/.info/version")
+        rocm = detect_rocm(root=self.root, environ={} if self.root is not None else None)
+        checks["rocm_root"] = ok(True) if rocm else unavailable("ROCm not found; set ROCM_PATH")
+        if rocm:
+            logical = "/" + rocm.relative_to(self.root).as_posix() if self.root is not None else str(rocm)
+            checks["rocm_version"] = self.read(logical + "/.info/version")
+        else:
+            checks["rocm_version"] = unavailable("ROCm not found")
         if self.executable("dpkg-query"):
             package = self.command("dpkg-query", "-W", "-f=${Package}\t${Version}\n")
             if package["status"] == "ok":
