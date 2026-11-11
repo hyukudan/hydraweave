@@ -281,20 +281,24 @@ def test_prepare_preserves_real_layout_and_user_unit(tmp_path):
     (root / "log/node.log").write_text("keep logs")
     node_agent.prepare(root)
     first = (root / "etc/agent-id").read_text()
-    with patch.object(Path, "home", return_value=tmp_path), patch.object(node_agent.subprocess, "run") as run:
-        node_agent.install_service(root, str(tmp_path / "lab"))
+    calls = []
+    with patch.object(Path, "home", return_value=tmp_path):
+        node_agent.install_service(root, str(tmp_path / "lab"), run=lambda args, **kwargs: calls.append(args))
     assert (root / "etc/settings.json").read_text() == "keep settings"
     assert (root / "log/node.log").read_text() == "keep logs"
     assert (root / "etc/agent-id").read_text() == first
-    assert all(call.args[0][:2] == ["systemctl", "--user"] for call in run.call_args_list)
-    assert [call.args[0][2] for call in run.call_args_list] == ["daemon-reload", "enable", "restart"]
-    assert all("--now" not in call.args[0] for call in run.call_args_list)  # One start, one pairing code.
+    assert all(call[:2] == ["systemctl", "--user"] for call in calls[:2])
+    assert [call[2] for call in calls[:2]] == ["daemon-reload", "enable"]
+    assert calls[1][3] == "--now"
     unit = (tmp_path / ".config/systemd/user/hydraweave-node.service").read_text()
     assert "--lab-dir" in unit and "sudo" not in unit
-    with patch.object(Path, "home", return_value=tmp_path), patch.object(node_agent.subprocess, "run"):
+    assert "KillMode=process" in unit
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(node_agent.subprocess, "run"), \
+            patch.object(node_agent.sys, "platform", "linux"):
         node_agent.main(["install-service", "--root", str(root), "--no-announce"])
     unit = (tmp_path / ".config/systemd/user/hydraweave-node.service").read_text()
     assert "--no-announce" in unit
+    assert node_agent.main([]) == 0
     (root / "etc/agent-id").write_text("unexpected identity")
     with pytest.raises(ValueError, match="identity"):
         node_agent.prepare(root)
@@ -302,10 +306,12 @@ def test_prepare_preserves_real_layout_and_user_unit(tmp_path):
 
 def test_bootstrap_render_never_executes_sudo_and_shell_syntax(tmp_path):
     script = bootstrap.script("http://127.0.0.1:18700").decode()
-    before, rest = script.split("cat <<'PRIVILEGES'", 1)
-    printed, after = rest.split("\nPRIVILEGES\n", 1)
-    assert "sudo sh" in printed
-    assert "sudo" not in before + after
+    before, after = script.split('missing=\'\'\n', 1)
+    printed = after
+    assert "sudo apt-get" in printed
+    assert "amdgpu-dkms" not in printed
+    assert "hydraweave-node pair" in after
+    assert "sudo" not in before
     assert "rm " not in script and "systemctl --system" not in script
     assert "agent-venv" in script and "--upgrade" in script
     assert "--force-reinstall" in script  # Checkout builds can retain the same project version.
@@ -348,11 +354,57 @@ def test_pairing_refusal_expiry_replay_and_root_boundary(tmp_path):
         agent.server_close()
     expired = node_agent.Agent(("127.0.0.1", 0), tmp_path / "expired", record=record())
     try:
+        old = expired.code
+        fresh = expired.reissue_code()
+        assert fresh["code"] != old and fresh["expires_in"] == 600
         expired.code_expires = 0
         with pytest.raises(PermissionError):
             expired.pair(expired.code)
     finally:
         expired.server_close()
+
+
+def test_service_portal_unit_and_injected_runner(tmp_path):
+    calls = []
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(node_agent.sys, "platform", "linux"):
+        node_agent.service_command("install", run=lambda args, **kwargs: calls.append(args))
+    unit = (tmp_path / ".config/systemd/user/hydraweave.service").read_text()
+    assert "-m hydraweave ui --no-browser" in unit
+    assert "Restart=on-failure" in unit
+    assert calls[:2] == [["systemctl", "--user", "daemon-reload"],
+                         ["systemctl", "--user", "enable", "--now", "hydraweave.service"]]
+
+
+def test_service_start_stop_remove_and_status_exit_code(tmp_path):
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append((args, kwargs.get("check")))
+        return subprocess.CompletedProcess(args, 3)
+
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(node_agent.sys, "platform", "linux"):
+        node_agent.service_command("start", run=runner)
+        node_agent.service_command("stop", run=runner)
+        assert node_agent.service_command("status", run=runner) == 3
+        node_agent.service_command("remove", run=runner)
+    assert [args for args, _ in calls] == [
+        ["systemctl", "--user", "start", "hydraweave.service"],
+        ["systemctl", "--user", "stop", "hydraweave.service"],
+        ["systemctl", "--user", "status", "hydraweave.service"],
+        ["systemctl", "--user", "disable", "--now", "hydraweave.service"],
+        ["systemctl", "--user", "daemon-reload"]]
+    assert calls[2][1] is False
+    with patch.object(node_agent.sys, "platform", "win32"):
+        assert node_agent.service_command("start", run=runner) == 2
+
+
+def test_bootstrap_retries_pairing_and_keeps_messages_on_one_line():
+    script = bootstrap.script("http://127.0.0.1:18700").decode()
+    assert "until \"$root/agent-venv/bin/hydraweave-node\" pair" in script
+    assert "Reissue pairing code: hydraweave-node pair" in script
+    for line in script.splitlines():
+        if 'missing="$missing' in line:
+            assert "$missing\\n" in line
 
 
 def test_matching_keeps_stable_ids_and_refuses_ambiguity():

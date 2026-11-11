@@ -112,6 +112,12 @@ files against `RELEASE.json` (the Windows installer does). Unpack into an empty 
 Linux workers on the same LAN can instead announce themselves and be adopted from the portal with a console
 pairing code: see [Node discovery](node-discovery.md). The manual steps below remain the reference.
 
+On Linux, the optional portal user service is managed with `hydraweave service install`, `hydraweave service
+status`, and `hydraweave service uninstall`. Install enables it immediately and attempts `loginctl enable-linger
+$USER` so it can start without an interactive login; if that command is unavailable, run it yourself.
+Node bootstrap prints a pairing code and the command `hydraweave-node pair` to issue a fresh code after the
+10-minute expiry.
+
 ## 4. Describe the cluster
 
 The configuration lives in `%APPDATA%\hydraweave\cluster.json` (Linux: `~/.config/hydraweave/cluster.json`).
