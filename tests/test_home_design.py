@@ -37,7 +37,16 @@ for (const text of ['Qwen3.8','DeepSeek V4.1','MiniMax M3.1','GLM-5.3','MiniMax-
  'Needs a preset','USB4','2 cables / 4 streams','Queue is read only']) assert(html.includes(text),text);
 for (const action of ['cc-add-node','cc-edit-node','cc-trust-node','cc-router']) assert(html.includes(action),action);
 assert(html.includes('#/engines?profile=qwen'));
-assert.deepEqual(Array.from(page.endpoints()),['setup','turns']);
+assert.deepEqual(Array.from(page.endpoints()),['setup','discovery','turns']);
+state.docs.setup.nodes[1].trust = 'paired';
+state.docs.setup.profiles = [{id:'qwen',machines:['node-b']}];
+state.docs.discovery = {nodes:[{id:'found-a',hostname:'<untrusted>',state:'discovered, not adopted'},
+ {id:'found-b',hostname:'Worker',machine:'node-b',state:'adopted'}],pairs:[['found-a','found-b']]};
+html = render();
+for (const text of ['Agent paired','discovered, not adopted','USB4 pair available','cc-adopt','cc-provision'])
+ assert(html.includes(text),text);
+assert(!html.includes('<untrusted>'));
+assert(html.includes('&lt;untrusted&gt;'));
 state.docs.profiles.profiles[0].state = 'running';
 assert(render().includes('1 engine serving'));
 state.docs.profiles.profiles = null;

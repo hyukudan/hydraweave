@@ -812,6 +812,22 @@ def validate(payload):
     return {"journal": {"boot_id": request.get("boot_id"), "cursor": request.get("cursor")}}
 
 
+def identity(reader=None):
+    """Host router UUIDs and trained peers, using the existing bounded sysfs reader."""
+    collector = Collector(reader)
+    io = collector.io
+    base = "/sys/bus/thunderbolt/devices"
+    own = []
+    for name in (io.listdir(base) or [])[:128]:
+        if re.fullmatch(r"[0-9]+-0", name):
+            value = _text(io.read(base + "/" + name + "/unique_id"), 64)
+            if value:
+                own.append(value)
+    links = collector.links(collector.domains())
+    peers = [row["peer_unique_id"] for row in links if row.get("peer_unique_id")] if isinstance(links, list) else []
+    return {"usb4_ids": sorted(set(own))[:2], "usb4_peers": sorted(set(peers))[:2]}
+
+
 def run(verb, payload, reader=None):
     if verb not in VERBS:
         raise ValueError("unknown verb " + verb)

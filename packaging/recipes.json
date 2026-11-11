@@ -1,0 +1,4 @@
+{
+  "deb": {"depends": ["python3 >= 3.10", "python3-venv", "curl", "git", "cmake >= 3.24", "ninja-build"]},
+  "rpm": {"depends": ["python3 >= 3.10", "curl", "git", "cmake >= 3.24", "ninja-build"]}
+}

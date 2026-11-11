@@ -12,7 +12,10 @@ import hashlib
 import json
 import math
 import re
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Ubuntu 22 node/controller Python 3.10
+    import tomli as tomllib
 
 
 SCHEMA = "strix-stream/recipe-v1"

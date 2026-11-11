@@ -102,7 +102,7 @@ class NodePoll:
             return [], set()
         eligible = turns.eligible(cluster)[0]
         self._local_lab = [m.id for m in eligible if m.access == "local"]
-        return [m for m in cluster.machines.values() if m.access == "ssh"], {m.id for m in eligible}
+        return [m for m in cluster.machines.values() if m.access in {"ssh", "agent"}], {m.id for m in eligible}
 
     def plan(self, machine, lab, now):
         """The parts of this node's poll now ([{key, verb, payload}]), or None when none is due."""
@@ -187,6 +187,9 @@ class NodePoll:
                 self._busy.discard(LOCAL)
 
     def _remote_call(self, machine, payload):
+        if machine.access == "agent":
+            from .onboarding import Client
+            return Client(machine, self.api.config_path).call("poll", payload, timeout=CALL_TIMEOUT_S)
         client = self.api.remote.Remote(machine, self.api.orchestrate._known_hosts())
         return client.call("poll", payload, timeout=CALL_TIMEOUT_S)
 

@@ -507,6 +507,10 @@ class API:
         cannot turn them into a timeout. Feature calls (``node``) take the gate, reentrant for a collector that
         adopted it."""
         payload = payload or {}
+        if machine.access == "agent":
+            from hydraweave.onboarding import Client
+            with nodegate.hold(self.config_path, machine.id, wait=15.0):
+                return Client(machine, self.config_path).call(verb, payload, timeout=60)
         if machine.access == "ssh":
             call = lambda: self.remote.Remote(machine, self.orchestrate._known_hosts()).call(verb, payload, timeout=10)
             if not gated:
@@ -584,7 +588,7 @@ class API:
         verbs = ("doctor", "gpu")
         now = self.clock()
         paused = None
-        poll = nodepoll.of(self) if machine.access == "ssh" else None
+        poll = nodepoll.of(self) if machine.access in {"ssh", "agent"} else None
         for verb in verbs:
             if poll is not None:
                 # The portal's node poll reads the node (one session per cycle for every reader): its latest answer.

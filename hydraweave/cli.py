@@ -268,6 +268,10 @@ def _doctor(args):
             machine = cluster.machines[args.machine]
         except KeyError as exc:
             raise ValueError("unknown machine: " + args.machine) from exc
+        if machine.access == "agent":
+            from .onboarding import Client
+            _json(Client(machine, args.config).call("doctor", {"lab_dir": machine.lab_dir}, timeout=60))
+            return
         if machine.access != "local":
             if machine.access != "ssh":
                 raise ValueError("agent access is a later phase")
@@ -503,6 +507,8 @@ def build_parser(parser_class=argparse.ArgumentParser):
         asset_job.add_argument("--config", type=Path, default=config_path())
     nodes = commands.add_parser("nodes", help="node tool maintenance")
     node_commands = nodes.add_subparsers(dest="operation", required=True)
+    from .cliext.nodes import add as add_node_onboarding
+    add_node_onboarding(node_commands, config_path())
     update = node_commands.add_parser("update", help="redeploy the node tool to the profile's machines")
     update.add_argument("profile")
     update.add_argument("--machine")

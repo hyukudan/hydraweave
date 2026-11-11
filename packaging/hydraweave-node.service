@@ -1,0 +1,12 @@
+[Unit]
+Description=Hydraweave discovery agent
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/hydraweave-node serve --root %h/hydraweave
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

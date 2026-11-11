@@ -6,14 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "hydraweave"
 version = "0.1.0"
 description = "Cluster integration and control"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.10"
+dependencies = ["tomli>=2; python_version < '3.11'"]
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+node = ["zeroconf>=0.132", "cmake>=3.24", "ninja>=1.11"]
 
 [project.scripts]
 hydraweave = "hydraweave.cli:main"
+hydraweave-node = "hydraweave.node_agent:main"
 hyperloom = "hydraweave.cli:main"
 hloom = "hydraweave.cli:main"
 
@@ -28,4 +30,5 @@ norecursedirs = ["third_party", ".*"]
 hydraweave = ["presets/*.json", "data/*.json", "web/static/*", "web/static/pages/*", "web/static/assets/*", "bench/data/*.json", "recipes/builtin.json", "recipes/examples/*.toml", "recipes/examples/pending/*.toml"]
 
 [tool.setuptools.data-files]
-"share/hydraweave/node" = ["node/hydraweave-node"]
+"share/hydraweave/node" = ["node/hydraweave-node", "node/*.py", "node/build-node.sh"]
+"share/hydraweave" = ["versions.lock", "pyproject.toml", "LICENSE", "NOTICE"]

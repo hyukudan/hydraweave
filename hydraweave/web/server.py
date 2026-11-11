@@ -90,6 +90,8 @@ class PortalServer(ThreadingHTTPServer):
 
 
     def server_close(self):
+        if getattr(self.api, "node_discovery", None) is not None:
+            self.api.node_discovery.close()
         # Feature jobs own cancellable local work (including Git downloads). Stop
         # admission first, then let their finally blocks reap children and stages.
         # Detached core up/install workers are not feature contexts and keep running.
@@ -166,6 +168,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             parsed = urlsplit(self.path)
+            if parsed.path in {"/node/bootstrap.sh", "/node/package.tar.gz"}:
+                from hydraweave import bootstrap
+                body = (bootstrap.script("http://" + self.headers["Host"]) if parsed.path.endswith(".sh")
+                        else bootstrap.source_package())
+                self._send(200, body, "text/x-shellscript" if parsed.path.endswith(".sh") else "application/gzip", head=head)
+                return
             if parsed.path == "/favicon.ico":
                 self._send(204, b"", "image/x-icon", head=head)
                 return
@@ -454,6 +462,8 @@ def serve(port=None, no_browser=False, config_path=None, listen=None):
         # and the GPU turn check, which runs with or without the history store below.
         from hydraweave import nodepoll
         nodepoll.start(server.api)
+        from hydraweave import onboarding
+        onboarding.of(server.api).start()
         # Background samplers feed the history store (features' collectors); HYDRAWEAVE_TELEMETRY=0 disables them.
         if getenv("HYDRAWEAVE_TELEMETRY", "1") != "0":
             start_telemetry(server.api)

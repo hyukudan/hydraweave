@@ -280,8 +280,8 @@ def create_profile(raw, arguments):
     new = deepcopy(raw)
     new["profiles"][name] = p
     cluster = config.parse(new)  # validate membership before using the machine keys
-    if any(cluster.machines[mid].access != "ssh" for mid in engines.members(p, engine.family)):
-        raise config.ConfigError("engine workers require Linux SSH access; add this machine as an SSH worker to run an engine on it")
+    if any(cluster.machines[mid].access not in {"ssh", "agent"} for mid in engines.members(p, engine.family)):
+        raise config.ConfigError("engine workers require Linux SSH or paired agent access")
     changes = deepcopy(arguments.get("changes", {}))
     _object(changes, "changes", CHANGE_KEYS)
     for key in ("port", "assets", "api_key_files"):
