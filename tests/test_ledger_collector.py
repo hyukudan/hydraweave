@@ -3,13 +3,14 @@
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 from tests.portable_fixtures import read_fixture
-from hyperloom.telemetry.store import Store
-from hyperloom.web.api import API
-from hyperloom.web.features import ledger
+from hydraweave.telemetry.store import Store
+from hydraweave.web.api import API
+from hydraweave.web.features import ledger
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -370,7 +371,7 @@ class CollectorTests(unittest.TestCase):
         self.engine.text[18080] = self.engine.text[18081] = metrics(0, 0)
         self.engine.status[18081] = {"model": "qwen3.8", "started": self.clock.now - 50}
         times = iter([0.0, 0.0, 9.0])
-        with mock.patch.object(ledger.time, "monotonic", lambda: next(times, 9.0)):
+        with mock.patch.object(ledger, "time", SimpleNamespace(monotonic=lambda: next(times, 9.0))):
             self.collect()
         errors = [self.api.telemetry.get(ledger.SOURCES, k)["error"] for k in ("qwen/halo-1", "qwen/halo-2")]
         self.assertEqual(sum("round deadline" in (e or "") for e in errors), 1)
@@ -390,7 +391,7 @@ class CollectorTests(unittest.TestCase):
     def test_keyed_engine_without_its_key_is_not_read(self):
         source = ledger.sources_of(state())[0]
         fetch = mock.Mock(side_effect=AssertionError("no unkeyed request"))
-        with mock.patch("hyperloom.secrets.get", return_value=None), mock.patch.object(ledger, "_fetch", fetch):
+        with mock.patch("hydraweave.secrets.get", return_value=None), mock.patch.object(ledger, "_fetch", fetch):
             observation, why = ledger.observe(self.api, self.api.telemetry, source, self.clock.now, None)
         self.assertIsNone(observation)
         self.assertIn("engine key unavailable", why)
@@ -489,7 +490,9 @@ class CollectorTests(unittest.TestCase):
 
     def test_time_skipped_by_the_round_deadline_is_still_expected(self):
         times = iter([0.0, 9.0])                 # the round starts past its deadline: the engine is not read
-        with mock.patch.object(ledger.time, "monotonic", lambda: next(times, 9.0)):
+        # Keep the scripted clock local: background samplers and job threads use
+        # the real time module and must not consume this test's deadline values.
+        with mock.patch.object(ledger, "time", SimpleNamespace(monotonic=lambda: next(times, 9.0))):
             self.collect()
             for _ in range(6):
                 times = iter([0.0, 9.0])
@@ -549,9 +552,9 @@ class TextRuleTests(unittest.TestCase):
         import base64
         import re
         root = Path(__file__).parent.parent
-        files = [root / "hyperloom" / "web" / "features" / "ledger.py", root / "hyperloom" / "cliext" / "ledger.py",
+        files = [root / "hydraweave" / "web" / "features" / "ledger.py", root / "hydraweave" / "cliext" / "ledger.py",
                  *sorted((root / "tests").glob("test_ledger_*.py")), *sorted((root / "tests" / "fixtures" / "ledger").iterdir()),
-                 *sorted((root / "hyperloom" / "web" / "static" / "pages").glob("*.*")), root / "tests" / "ui" / "seeds" / "ledger.py"]
+                 *sorted((root / "hydraweave" / "web" / "static" / "pages").glob("*.*")), root / "tests" / "ui" / "seeds" / "ledger.py"]
         own = [f for f in files if f.exists() and (f.parent.name != "pages" or f.stem in ("tokens", "ceiling", "rtx", "value"))]
         # Encoded so this test itself stays clean: lab host names, user names, review and agent identities.
         words = [base64.b64decode(w).decode() for w in ("Y2x1c3RlcjE=", "Y2x1c3RlcjI=", "VXN1YXJpbw==", "Y2xhdWRl", "Y29kZXg=",
@@ -676,7 +679,7 @@ class FetchTests(unittest.TestCase):
 
     def test_key_comes_from_the_secret_store_for_keyed_engines_only(self):
         source = ledger.sources_of(state())[0]
-        with mock.patch("hyperloom.secrets.get", return_value="s" * 64) as get:
+        with mock.patch("hydraweave.secrets.get", return_value="s" * 64) as get:
             self.assertEqual(ledger._key(source), "s" * 64)
         get.assert_called_once()
         mm = ledger.sources_of(state("mm", "minimax-pair"))[0]
@@ -684,7 +687,7 @@ class FetchTests(unittest.TestCase):
 
     def test_a_key_file_release_is_read_over_the_lan_with_its_key(self):
         # The launched release decides the bind: a serve_auth "key-file" preset binds the LAN and is read with its key.
-        from hyperloom import engines
+        from hydraweave import engines
         real = engines.load_preset
         keyed = lambda name: (dict(real(name), serve_auth="key-file",
                                    argv=real(name)["argv"] + ["--api-key-file", "{key_file}"])
@@ -695,7 +698,7 @@ class FetchTests(unittest.TestCase):
         with mock.patch.object(engines, "load_preset", side_effect=keyed):
             source = ledger.sources_of(record)[0]
         self.assertEqual((source["bind"], source["keyed"], source["invalid"]), ("lan", True, None))
-        with mock.patch("hyperloom.secrets.get", return_value="s" * 64):
+        with mock.patch("hydraweave.secrets.get", return_value="s" * 64):
             self.assertEqual(ledger._key(source), "s" * 64)
 
 

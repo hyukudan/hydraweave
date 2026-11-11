@@ -7,10 +7,10 @@ import socket
 from pathlib import Path
 from unittest import mock
 
-from hyperloom import orchestrate, secrets
-from hyperloom.telemetry.store import Store
-from hyperloom.web.api import API
-from hyperloom.web.features import observe
+from hydraweave import orchestrate, secrets
+from hydraweave.telemetry.store import Store
+from hydraweave.web.api import API
+from hydraweave.web.features import observe
 
 
 HERE = Path(__file__).resolve().parent

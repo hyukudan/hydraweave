@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hyperloom.web.features import observe
+from hydraweave.web.features import observe
 from tests.fixtures.observe.fakes import HERE, NODE1, Env, fixture
 
 NODE = shutil.which("node")

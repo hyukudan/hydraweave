@@ -11,11 +11,11 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, config, mqtt, secrets, telemetry
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.api import API, redact
-from hyperloom.web.features import integrations
+from hydraweave import cli, config, mqtt, secrets, telemetry
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.api import API, redact
+from hydraweave.web.features import integrations
 
 from tests.test_mqtt import Broker, parse_connect
 
@@ -59,7 +59,7 @@ class FakeAPI:
                               assets={}, profiles={}, router={}, pc=self.pc, raw={})
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", **fields}
 
     def audit(self, action, arguments, result):
         self.audits.append((action, arguments, result))
@@ -170,14 +170,14 @@ class SettingsTests(Base):
 
     def test_test_publish_uses_its_own_client_id_and_no_will(self):
         self.api.pc = {"mqtt_broker": {"host": "workstation"}}       # the fake broker speaks plain MQTT: no password
-        self.enable(username="lab", client_id="hyperloom-ab12")
+        self.enable(username="lab", client_id="hydraweave-ab12")
         broker = Broker()
         self.addCleanup(broker.close)
         result = integrations.test_publish(self.api, {}, connect=broker.connect)
         broker.thread.join(2)
         self.assertTrue(result["ok"])
         connect = parse_connect(broker.packets[0][2])
-        self.assertEqual((connect["client_id"], connect["flags"] & 0x04, connect.get("password")), ("hyperloom-ab12-t", 0, None))
+        self.assertEqual((connect["client_id"], connect["flags"] & 0x04, connect.get("password")), ("hydraweave-ab12-t", 0, None))
         self.assertEqual(broker.publishes()[0]["topic"], "lab/portal/test")
         with self.assertRaises(ValueError):
             integrations.test_publish(self.api, {"host": "x"})

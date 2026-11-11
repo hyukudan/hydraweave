@@ -1,7 +1,7 @@
 """One set of redaction rules for free text: the portal's ``redact`` (documents, job messages, audits, log lines)
-and the node's log search (``node/hyperloom_logsearch.py``) mask the same credentials.
+and the node's log search (``node/hydraweave_logsearch.py``) mask the same credentials.
 
-The node tool is deployed as standalone files (``hyperloom nodes update`` copies the files the node CLI's
+The node tool is deployed as standalone files (``hydraweave nodes update`` copies the files the node CLI's
 EXTENSIONS tuple names), so it keeps a verbatim copy of the block between the two ``shared redaction rules``
 markers below; tests/test_redaction.py asserts the copies are identical and runs one case table against both.
 
@@ -28,7 +28,7 @@ repr ('bash -c \\'env API_KEY=\\'"\\'"\\'a"b x...'): the quote that ends the val
 
 import re
 
-# --- shared redaction rules (node/hyperloom_logsearch.py keeps a verbatim copy) ---
+# --- shared redaction rules (node/hydraweave_logsearch.py keeps a verbatim copy) ---
 # Credentials after an authorization scheme, any name that carries key/secret/token/password/credential/auth
 # (AWS_SECRET_ACCESS_KEY=, "db.password": ...), the value after a password word ("password x"), option forms, URL
 # user information, the value after an environment-style name, clients that take a password after -p, curl's user

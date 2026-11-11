@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 
-from hyperloom import nodegate
+from hydraweave import nodegate
 
 
 class NodeGateTests(unittest.TestCase):
@@ -48,7 +48,7 @@ class NodeGateTests(unittest.TestCase):
         other_release()
 
     def test_another_process_holding_the_gate_is_respected(self):
-        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from hyperloom import nodegate; "
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from hydraweave import nodegate; "
                 "r = nodegate.try_hold(sys.argv[2], 'halo-1'); print('held' if r else 'busy', flush=True); time.sleep(3)")
         child = subprocess.Popen([sys.executable, "-c", code, str(Path(__file__).resolve().parents[1]), str(self.config)],
                                  stdout=subprocess.PIPE, text=True)

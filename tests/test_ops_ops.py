@@ -9,13 +9,13 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import admission, config
-from hyperloom.telemetry import Sampler
-from hyperloom.web import features
-from hyperloom.web.features import ops
+from hydraweave import admission, config
+from hydraweave.telemetry import Sampler
+from hydraweave.web import features
+from hydraweave.web.features import ops
 from tests.test_ops_turns import APIFixture
 
-RAW = {"schema": "hyperloom/cluster-v1",
+RAW = {"schema": "hydraweave/cluster-v1",
        "machines": [{"id": "workstation", "os": "windows", "access": "local", "http_address": "127.0.0.1",
                      "install_root": "C:/hl"},
                     {"id": "halo-1", "os": "linux", "access": "ssh", "http_address": "192.0.2.10", "ssh_target": "halo-1",
@@ -41,7 +41,7 @@ class Base(APIFixture):
             reply = self.replies.get((machine.id, verb), self.replies.get(verb))
             if isinstance(reply, Exception):
                 raise reply
-            return reply if reply is not None else {"schema": "hyperloom/node-v1", "verb": verb}
+            return reply if reply is not None else {"schema": "hydraweave/node-v1", "verb": verb}
         patcher = mock.patch.object(ops, "_node_call", node)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -94,13 +94,13 @@ class NodeToolTests(Base, unittest.TestCase):
         self.assertEqual(built, [1])
 
     def test_collectors_skip_a_machine_whose_node_gate_is_held(self):
-        from hyperloom import nodegate
-        from hyperloom.web.features import turns
+        from hydraweave import nodegate
+        from hydraweave.web.features import turns
         calls = []
 
         def record(api, machine, verb, payload=None):
             calls.append((machine.id, verb))
-            return {"schema": "hyperloom/node-v1", "checks": {"tool": {"value": "x"}}} if verb != "host" else {}
+            return {"schema": "hydraweave/node-v1", "checks": {"tool": {"value": "x"}}} if verb != "host" else {}
         lab = mock.patch.object(turns, "eligible", lambda c: ([m for m in c.machines.values() if m.access == "ssh"], {}))
         lab.start()
         self.addCleanup(lab.stop)
@@ -123,8 +123,8 @@ class NodeToolTests(Base, unittest.TestCase):
         self.assertIn(("halo-1", "version"), calls)
 
     def test_collectors_release_the_gate_when_a_worker_cannot_start_or_the_gate_fails(self):
-        from hyperloom import nodegate
-        from hyperloom.web.features import turns
+        from hydraweave import nodegate
+        from hydraweave.web.features import turns
 
         def refuse(self, *a, **k):
             raise RuntimeError("can't start new thread")
@@ -200,7 +200,7 @@ class NodeToolTests(Base, unittest.TestCase):
 
     def test_a_status_reply_without_lease_records_is_unknown(self):
         self.api.orchestrate.nodes_update = mock.Mock()
-        for reply in ({"schema": "hyperloom/node-v1"}, {"leases": ["x"]}, {"leases": [{"lease": "a"}]}):
+        for reply in ({"schema": "hydraweave/node-v1"}, {"leases": ["x"]}, {"leases": [{"lease": "a"}]}):
             self.replies[("halo-1", "status")] = reply
             job = self.wait(self.api.mutate("ops/nodes-update", {"profile": "qwen-replicas"}))
             self.assertIn("unreadable", job["error"], reply)
@@ -611,11 +611,11 @@ class CollectorTests(Base, unittest.TestCase):
 
 class CLITests(Base, unittest.TestCase):
     def test_cli_commands_reach_the_same_functions(self):
-        from hyperloom import cli
-        from hyperloom.cliext import ops as cliops
+        from hydraweave import cli
+        from hydraweave.cliext import ops as cliops
         with mock.patch.object(cliops, "cli_api", return_value=self.api), mock.patch("builtins.print") as printed:
             self.assertEqual(cli.main(["ops", "machine", "list", "--config", str(self.config)]), 0)
-            self.assertEqual(json.loads(printed.call_args[0][0])["schema"], "hyperloom/ui-ops-config-v1")
+            self.assertEqual(json.loads(printed.call_args[0][0])["schema"], "hydraweave/ui-ops-config-v1")
             self.assertEqual(cli.main(["ops", "machine", "remove", "halo-2", "--config", str(self.config)]), 1)
             self.assertEqual(cli.main(["ops", "wake", "nope", "--config", str(self.config)]), 1)
             self.assertEqual(cli.main(["ops", "nodes", "--config", str(self.config)]), 0)
@@ -649,24 +649,24 @@ class CLIRenewalTests(unittest.TestCase):
         self.assertEqual(db.holds(), [])
 
     def test_ops_hold(self):
-        from hyperloom.cliext import ops as cli_ops
+        from hydraweave.cliext import ops as cli_ops
         self.check(lambda: cli_ops._hold(mock.Mock(config_path="cfg.json"), {"halo-1"}, "cli test"))
 
     def test_cli_hold(self):
         from types import SimpleNamespace
-        from hyperloom import cli
+        from hydraweave import cli
         self.check(lambda: cli._admission_hold(SimpleNamespace(command="install", profile=None, config="cfg.json")))
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 
@@ -681,7 +681,7 @@ if __name__ == "__main__":
 
 class FleetHostMacTests(unittest.TestCase):
     def test_macs_from_the_fleet_host_reply_shape(self):
-        from hyperloom.web.features import ops
-        reply = {"schema": "hyperloom/node-v1", "verb": "host", "checks": {"nics": {"status": "ok", "value": [
+        from hydraweave.web.features import ops
+        reply = {"schema": "hydraweave/node-v1", "verb": "host", "checks": {"nics": {"status": "ok", "value": [
             {"iface": "eth0", "mac": "02:00:00:00:00:0A"}, {"iface": "wl0", "mac": "01:00:5e:00:00:01"}]}}}
         self.assertEqual(ops.macs_in(reply), ["02:00:00:00:00:0a"])     # multicast dropped, lower-cased

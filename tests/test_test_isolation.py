@@ -10,9 +10,9 @@ import unittest
 from unittest import mock
 
 import tests
-from hyperloom import cli
-from hyperloom.recipes import service
-from hyperloom.web.api import API
+from hydraweave import cli
+from hydraweave.recipes import service
+from hydraweave.web.api import API
 from tests.ui import smoke
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,18 +33,18 @@ class TestIsolationTests(unittest.TestCase):
         api = API()
         self.assertTrue(api.audit_path.is_relative_to(tests._test_root))
         if tests._outer_admission_db is None:
-            self.assertEqual(os.environ["HYPERLOOM_ADMISSION_DB"], ":memory:")
-        self.assertFalse(tests._inside_real_config(os.environ["HYPERLOOM_ADMISSION_DB"]))
+            self.assertEqual(os.environ["HYDRAWEAVE_ADMISSION_DB"], ":memory:")
+        self.assertFalse(tests._inside_real_config(os.environ["HYDRAWEAVE_ADMISSION_DB"]))
         self.assertFalse(tests._test_root.is_relative_to(Path(__file__).resolve().parents[1]))
 
     def test_cli_child_inherits_isolation(self):
         child = subprocess.run([sys.executable, "-c",
-            "import json, os; from hyperloom.cli import config_path; "
-            "print(json.dumps([str(config_path()), os.environ['HYPERLOOM_ADMISSION_DB']]))"],
+            "import json, os; from hydraweave.cli import config_path; "
+            "print(json.dumps([str(config_path()), os.environ['HYDRAWEAVE_ADMISSION_DB']]))"],
             check=True, capture_output=True, text=True, timeout=30)
         path, database = json.loads(child.stdout)
         self.assertEqual(Path(path), cli.config_path())
-        self.assertEqual(database, os.environ["HYPERLOOM_ADMISSION_DB"])
+        self.assertEqual(database, os.environ["HYDRAWEAVE_ADMISSION_DB"])
 
     def test_real_configuration_writes_fail_before_open(self):
         for root in tests._real_config_dirs:
@@ -87,14 +87,14 @@ class TestIsolationTests(unittest.TestCase):
         if os.name == "nt":
             for folder in (tests._ROAMING_APP_DATA, tests._LOCAL_APP_DATA):
                 with self.subTest(folder=folder):
-                    self.assertTrue(tests._spellings(Path(tests._known_folder(folder)) / "hyperloom") <= moved)
+                    self.assertTrue(tests._spellings(Path(tests._known_folder(folder)) / "hydraweave") <= moved)
             for name in ("Roaming", "Local"):
                 with self.subTest(profile=name):
-                    self.assertTrue(tests._spellings(Path(tests._profile_directory(), "AppData", name, "hyperloom"))
+                    self.assertTrue(tests._spellings(Path(tests._profile_directory(), "AppData", name, "hydraweave"))
                                     <= profile)
         else:
             import pwd
-            self.assertTrue(tests._spellings(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".config/hyperloom") <= profile)
+            self.assertTrue(tests._spellings(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".config/hydraweave") <= profile)
         # A nested run (this sandboxed environment) keeps guarding every original root.
         nested = set(json.loads(_child(code).stdout))
         self.assertTrue(set(tests._real_config_dirs) <= nested)
@@ -157,22 +157,22 @@ class TestIsolationTests(unittest.TestCase):
             self.assertEqual(clean.returncode, 0, clean.stderr)
 
     def test_admission_database_override_is_kept_unless_it_is_real_configuration(self):
-        code = "import os, tests; print(os.environ['HYPERLOOM_ADMISSION_DB'])"
+        code = "import os, tests; print(os.environ['HYDRAWEAVE_ADMISSION_DB'])"
         with tempfile.TemporaryDirectory() as directory:
             chosen = str(Path(directory) / "admission.sqlite3")
-            self.assertEqual(_child(code, HYPERLOOM_ADMISSION_DB=chosen).stdout.strip(), chosen)
-        self.assertEqual(_child(code, HYPERLOOM_ADMISSION_DB=None).stdout.strip(), ":memory:")
+            self.assertEqual(_child(code, HYDRAWEAVE_ADMISSION_DB=chosen).stdout.strip(), chosen)
+        self.assertEqual(_child(code, HYDRAWEAVE_ADMISSION_DB=None).stdout.strip(), ":memory:")
         real = str(Path(tests._real_config_dirs[0]) / "run" / "admission.sqlite3")
         for value in (real, Path(real).as_uri()):
             with self.subTest(value=value):
-                self.assertEqual(_child(code, HYPERLOOM_ADMISSION_DB=value).stdout.strip(), ":memory:")
+                self.assertEqual(_child(code, HYDRAWEAVE_ADMISSION_DB=value).stdout.strip(), ":memory:")
 
     def test_sandbox_keeps_user_tools_reachable(self):
         for name in ("PYTHONUSERBASE", tests._ORIGINAL_LOCALAPPDATA):
             with self.subTest(name=name):
                 self.assertFalse(Path(os.environ[name]).is_relative_to(tests._test_root))
         if os.name == "nt":
-            # Git for Windows reads the global config from HOME; hyperloom's Windows roots do not use it.
+            # Git for Windows reads the global config from HOME; hydraweave's Windows roots do not use it.
             self.assertFalse(Path(os.environ.get("HOME", os.sep)).is_relative_to(tests._test_root))
         with tempfile.TemporaryDirectory() as directory:
             chrome = Path(directory) / "Google/Chrome/Application/chrome.exe"

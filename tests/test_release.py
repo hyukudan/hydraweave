@@ -48,19 +48,19 @@ class ReleaseTests(unittest.TestCase):
     def test_archives_are_reproducible_with_fixed_modes(self):
         tree = self.directory / "tree"
         (tree / "node").mkdir(parents=True)
-        (tree / "node" / "hyperloom-node").write_bytes(b"#!/usr/bin/env python3\n")
+        (tree / "node" / "hydraweave-node").write_bytes(b"#!/usr/bin/env python3\n")
         (tree / "README.md").write_bytes(b"readme\n")
         digests = []
         for run in ("one", "two"):
             out = self.directory / run
             out.mkdir()
-            paths = make_release.write_archives(tree, "hyperloom-0-g000000000000", out, 1700000000)
+            paths = make_release.write_archives(tree, "hydraweave-0-g000000000000", out, 1700000000)
             digests.append([hashlib.sha256(p.read_bytes()).hexdigest() for p in paths])
         self.assertEqual(digests[0], digests[1])
-        with tarfile.open(self.directory / "one" / "hyperloom-0-g000000000000.tar.gz") as archive:
+        with tarfile.open(self.directory / "one" / "hydraweave-0-g000000000000.tar.gz") as archive:
             modes = {m.name: m.mode for m in archive.getmembers()}
-        self.assertEqual(modes["hyperloom-0-g000000000000/node/hyperloom-node"], 0o755)
-        self.assertEqual(modes["hyperloom-0-g000000000000/README.md"], 0o644)
+        self.assertEqual(modes["hydraweave-0-g000000000000/node/hydraweave-node"], 0o755)
+        self.assertEqual(modes["hydraweave-0-g000000000000/README.md"], 0o644)
 
     def test_git_archive_line_endings_do_not_depend_on_local_config(self):
         repo = self.directory / "repo"
@@ -87,7 +87,7 @@ class ReleaseTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows PowerShell installer")
     def test_installer_verifies_release_before_any_change(self):
-        release = self.directory / "hyperloom-0.1.0-g0123456789ab"
+        release = self.directory / "hydraweave-0.1.0-g0123456789ab"
         (release / "windows").mkdir(parents=True)
         shutil.copyfile(ROOT / "windows" / "install.ps1", release / "windows" / "install.ps1")
         (release / "README.md").write_text("readme\n", encoding="utf-8")
@@ -96,7 +96,7 @@ class ReleaseTests(unittest.TestCase):
         files = {p.relative_to(release).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in release.rglob("*") if p.is_file()}
         (release / "RELEASE.json").write_text(json.dumps(
-            {"schema": "hyperloom/release-v1", "name": release.name, "version": "0.1.0",
+            {"schema": "hydraweave/release-v1", "name": release.name, "version": "0.1.0",
              "commit": "0123456789ab" * 3 + "0123", "components": {}, "files": files}), encoding="utf-8")
         local, roaming = self.directory / "local app", self.directory / "roaming app"
         env = dict(os.environ, LOCALAPPDATA=str(local), APPDATA=str(roaming))
@@ -109,12 +109,12 @@ class ReleaseTests(unittest.TestCase):
         result = run()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("verified 3 files", result.stdout)
-        self.assertIn(str(local / "hyperloom" / "venvs" / release.name), result.stdout)
-        self.assertIn("-P -m hyperloom ui", result.stdout)
+        self.assertIn(str(local / "hydraweave" / "venvs" / release.name), result.stdout)
+        self.assertIn("-P -m hydraweave ui", result.stdout)
         # pip installs from the verified copy, wheels included, never from the extracted archive.
         line = next(x for x in result.stdout.splitlines() if x.startswith("Pip arguments: "))
         pip = json.loads(line[len("Pip arguments: "):])
-        copy = local / "hyperloom" / "releases" / release.name
+        copy = local / "hydraweave" / "releases" / release.name
         self.assertEqual(pip[pip.index("--find-links") + 1], str(copy / "wheels"))
         self.assertEqual(pip[-1], str(copy))
         (release / "wheels" / "w-1-py3-none-any.whl").write_bytes(b"tampered")

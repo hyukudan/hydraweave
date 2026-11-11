@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import telemetry
-from hyperloom.telemetry.store import MAX_EVENTS, MAX_POINTS, Store
+from hydraweave import telemetry
+from hydraweave.telemetry.store import MAX_EVENTS, MAX_POINTS, Store
 
 
 class Clock:
@@ -357,7 +357,7 @@ class ConcurrencyAndPruningTests(unittest.TestCase):
         clock = Clock()
         store = Store(":memory:", clock=clock)
         self.addCleanup(store.close)
-        with mock.patch("hyperloom.telemetry.store.MAX_DOCS", 5):
+        with mock.patch("hydraweave.telemetry.store.MAX_DOCS", 5):
             for index in range(12):
                 clock.now += 1
                 store.put("library/jobs", f"job-{index:02d}", {"i": index})
@@ -369,12 +369,12 @@ class ConcurrencyAndPruningTests(unittest.TestCase):
 
 class CorruptStoreTests(unittest.TestCase):
     def test_the_portal_starts_without_history_when_the_store_is_corrupt(self):
-        """``hyperloom ui`` with a corrupt telemetry.sqlite3: the portal still serves; the pages say why there is no
+        """``hydraweave ui`` with a corrupt telemetry.sqlite3: the portal still serves; the pages say why there is no
         history, and nothing exits."""
         import contextlib
         import io
-        from hyperloom.web import server as web_server
-        from hyperloom.web.api import API
+        from hydraweave.web import server as web_server
+        from hydraweave.web.api import API
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "telemetry.sqlite3").write_bytes(b"this is not a database" * 64)
             orchestrator = mock.Mock()
@@ -387,7 +387,7 @@ class CorruptStoreTests(unittest.TestCase):
             err = io.StringIO()
             with mock.patch.object(web_server, "create_server", return_value=portal), \
                     mock.patch.object(web_server.webbrowser, "open"), \
-                    mock.patch.dict("os.environ", {"HYPERLOOM_TELEMETRY": "1"}), \
+                    mock.patch.dict("os.environ", {"HYDRAWEAVE_TELEMETRY": "1"}), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
                 web_server.serve(0, no_browser=True)
             self.assertEqual(served, [True])

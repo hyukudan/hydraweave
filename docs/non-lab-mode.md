@@ -8,7 +8,7 @@ It wraps the **same** node `supervise` in a user unit, with no turn and no deadl
 - Every machine of the profile sets `"lab_mode": false` in `cluster.json` (the default is `true`). The control
   machine refuses otherwise, before any remote call.
 - The node checks again and fails closed. It refuses unless the root's `etc/install-policy.json` exists and records
-  `"lab_dir": null` explicitly (a root installed by `hyperloom install` with `lab_mode: false`), when a request carries
+  `"lab_dir": null` explicitly (a root installed by `hydraweave install` with `lab_mode: false`), when a request carries
   a lab directory, and when lab turn files (`gpu-turn.sh`, `gpu-turn-pair.sh`, `.gpu-turn`) exist in `$HOME`, the
   install root's parent directory, a direct subdirectory of either, or a `PATH` directory. `service stop`, `status`
   and `remove` stay available so a unit can always be taken down.
@@ -16,8 +16,8 @@ It wraps the **same** node `supervise` in a user unit, with no turn and no deadl
   - a GPU lease (`single`/`pair`, or any lease with a lab directory) and a pair peer refuse while an
     `etc/service-<profile>.json` exists (an enabled unit would start again), and every lease refuses while a unit's
     lease record is live; `hl-svc-` labels are reserved for units;
-  - `hyperloom install` with a lab directory refuses on a root with an installed unit, and `uninstall` refuses while
-    one exists (its spec references the root's releases): run `hyperloom service remove` first;
+  - `hydraweave install` with a lab directory refuses on a root with an installed unit, and `uninstall` refuses while
+    one exists (its spec references the root's releases): run `hydraweave service remove` first;
   - a unit start (`service start`, and the unit itself at every (re)start) refuses while any lease record of the root
     is live or turn files are found.
 - Only `qwen-replicas`. The DeepSeek pair needs a peer turn on the second node and stays lease-only.
@@ -25,12 +25,12 @@ It wraps the **same** node `supervise` in a user unit, with no turn and no deadl
 
 ## Commands
 ```
-hyperloom install qwen-replicas                        # as usual: builds and activates a release
-hyperloom service install qwen-replicas [--enable]     # render, push keys, write the unit on every node
-hyperloom service start   qwen-replicas
-hyperloom service status  qwen-replicas                # systemd state + the latest supervise record
-hyperloom service stop    qwen-replicas                # drain/stop through supervise, waits up to 120 s
-hyperloom service remove  qwen-replicas                # refuses while the unit is active
+hydraweave install qwen-replicas                        # as usual: builds and activates a release
+hydraweave service install qwen-replicas [--enable]     # render, push keys, write the unit on every node
+hydraweave service start   qwen-replicas
+hydraweave service status  qwen-replicas                # systemd state + the latest supervise record
+hydraweave service stop    qwen-replicas                # drain/stop through supervise, waits up to 120 s
+hydraweave service remove  qwen-replicas                # refuses while the unit is active
 ```
 Every operation runs on every profile node and reports each node's result (or error); the command exits 1 when any
 node failed, after trying the others.
@@ -42,7 +42,7 @@ preset, release id and per-node key files; no raw env, the numerical identity is
 list to each node. The node:
 1. validates it with the lease validator (`kind: none`, label `hl-svc-<profile>`; reserved and loader env names are
    still rejected) and requires immutable `releases/<id>/bin/` executables and local processes only;
-2. copies `hyperloom-node`, `hyperloom_lease.py` and `hyperloom_service.py` into `<root>/bin/`, writes the spec to
+2. copies `hydraweave-node`, `hydraweave_lease.py` and `hydraweave_service.py` into `<root>/bin/`, writes the spec to
    `<root>/etc/service-<profile>.json`, and writes `~/.config/systemd/user/hl-<profile>.service` atomically;
 3. runs `systemctl --user daemon-reload` (and `enable` with `--enable`) and reports what `is-enabled` says: a
    reinstall without `--enable` keeps an earlier enable. Nothing else is changed: no root, no system units, no
@@ -56,7 +56,7 @@ active, then disables it, deletes the unit file and spec, reloads and runs `rese
 ## The unit
 The content is fixed by code; only the validated profile id and plain absolute paths (`[A-Za-z0-9_./-]`) are
 substituted, and it holds no secrets (keys stay in `<root>/etc/keys`, mode 0600).
-- `ExecStart=<python3> <root>/bin/hyperloom_service.py service-run <spec>`: publishes a lease record owned by the
+- `ExecStart=<python3> <root>/bin/hydraweave_service.py service-run <spec>`: publishes a lease record owned by the
   unit's process and runs `supervise` in the foreground (logs in `<root>/log/`, records in `<root>/run/`). The
   interpreter is the node's `sys.executable` as invoked (for example `/usr/bin/python3`), not its resolved versioned
   file.
@@ -75,7 +75,7 @@ substituted, and it holds no secrets (keys stay in `<root>/etc/keys`, mode 0600)
 While a unit runs, its lease record is active, so `activate` and `uninstall` refuse as they do during a lease.
 
 A unit's lease record can also be stopped through the lease API (`stop` with its lease id). That is a requested stop:
-the unit exits 0 and stays **inactive** (it is not restarted) until `hyperloom service start`.
+the unit exits 0 and stays **inactive** (it is not restarted) until `hydraweave service start`.
 
 Records left behind when the unit process dies without writing its result (SIGKILL, OOM kill, power loss) never block
 the root: a record whose process is gone or whose boot id differs no longer counts as live for leases, `activate`
@@ -83,8 +83,8 @@ and `uninstall` (lease starts also rewrite it as failed), and each unit start (a
 earlier unfinished records failed, since systemd runs one instance per unit. Each start keeps the newest 5 finished
 records of the unit and deletes older ones with their spec, owner and log files.
 
-## Your own steps (never run by hyperloom)
+## Your own steps (never run by Hydraweave)
 - A user manager must be running for `systemctl --user` (log in, or `loginctl enable-linger <user>` if you want the
-  units to run without a session; that is your decision and needs no hyperloom code).
-- The router is not part of the unit. Start it on the control machine with `hyperloom router start --profile
-  <profile>` and a `router.replica_api_key_files` entry per node, or keep using `hyperloom up` on lab machines.
+  units to run without a session; that is your decision and needs no Hydraweave code).
+- The router is not part of the unit. Start it on the control machine with `Hydraweave router start --profile
+  <profile>` and a `router.replica_api_key_files` entry per node, or keep using `Hydraweave up` on lab machines.

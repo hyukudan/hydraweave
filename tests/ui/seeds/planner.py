@@ -13,7 +13,7 @@ NODE = {"name": "AMD Radeon 8060S", "memory_gib": 120.0, "host_ram_gib": 125.0}
 
 
 def facts_record(now):
-    return {"schema": "hyperloom/recipe-facts-v1", "profile": "qwen-two", "observed_at": now - 1800,
+    return {"schema": "hydraweave/recipe-facts-v1", "profile": "qwen-two", "observed_at": now - 1800,
             "inventory": {"cuda": [{"uuid": GPU, "name": "NVIDIA RTX PRO 6000 Blackwell", "memory_gib": 95.6}]},
             "facts": {"model": "qwen3.8-flash-next",
                       "devices": {GPU: {"name": "NVIDIA RTX PRO 6000 Blackwell", "memory_gib": 95.6,
@@ -33,8 +33,8 @@ def facts_record(now):
 
 def run_in_process(api, argv, stdin):
     """The planner command line in this process: the CLI's own parser and the command's ext_run."""
-    from hyperloom import cli
-    from hyperloom.web import recipes as recipe_web
+    from hydraweave import cli
+    from hydraweave.web import recipes as recipe_web
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
             _stdin((stdin or b"").decode("utf-8")):
@@ -42,7 +42,7 @@ def run_in_process(api, argv, stdin):
             args = cli.build_parser(recipe_web.RaisingParser).parse_args(argv)
             code = args.ext_run(args)
         except Exception as exc:  # the CLI's own error line
-            print(f"hyperloom: {exc}", file=sys.stderr)
+            print(f"hydraweave: {exc}", file=sys.stderr)
             code = 1
     return recipe_web.Result(code, out.getvalue().encode("utf-8"), err.getvalue().encode("utf-8"))
 
@@ -78,9 +78,9 @@ def planner_in_process(parts, hardware_path, request, *, timeout_s, workdir):
 
 
 def patches(directory, now):
-    from hyperloom.cliext import planner as cli_planner
-    from hyperloom.web.features import planner as feature
-    facts = Path(directory) / "hyperloom" / "run" / "facts"
+    from hydraweave.cliext import planner as cli_planner
+    from hydraweave.web.features import planner as feature
+    facts = Path(directory) / "hydraweave" / "run" / "facts"
     facts.mkdir(parents=True, exist_ok=True)
     (facts / "planner-lab.json").write_text(json.dumps(facts_record(now)), encoding="utf-8")
     return [(feature, "run", run_in_process), (cli_planner, "run_planner", planner_in_process)]

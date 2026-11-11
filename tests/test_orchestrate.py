@@ -16,9 +16,9 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import cli, orchestrate as orch, secrets
-from hyperloom.config import Cluster, Machine
-from hyperloom.render import ProcessSpec
+from hydraweave import cli, orchestrate as orch, secrets
+from hydraweave.config import Cluster, Machine
+from hydraweave.render import ProcessSpec
 
 
 RELEASE = "a" * 12
@@ -26,7 +26,7 @@ RELEASE = "a" * 12
 
 def cluster_fixture(pair=False):
     machines = {mid: Machine(mid, "linux", "ssh", "192.0.2." + str(index + 10), mid, 22,
-                              "/opt/hyperloom/" + mid, True, [{"id": "gpu"}])
+                              "/opt/hydraweave/" + mid, True, [{"id": "gpu"}])
                 for index, mid in enumerate(("halo-1", "halo-2"))}
     profile = "ds41-pair" if pair else "qwen-replicas"
     settings = {"rank0": "halo-1", "rank1": "halo-2"} if pair else {"nodes": list(machines)}
@@ -73,7 +73,7 @@ class FakeRemote:
 
 class OrchestrationTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom orchestration ")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave orchestration ")
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         self.calls, self.leases, self.fail = [], {}, set()
@@ -94,7 +94,7 @@ class OrchestrationTests(unittest.TestCase):
     def processes(self, cluster, profile):
         _, kind, mids = orch._profile(cluster, profile)
         return [ProcessSpec(mid, "replica" if kind == "qwen-replicas" else f"rank{index}",
-                            ["/opt/hyperloom/" + mid + "/releases/" + RELEASE + "/bin/engine", "--http-port", "18501"],
+                            ["/opt/hydraweave/" + mid + "/releases/" + RELEASE + "/bin/engine", "--http-port", "18501"],
                             {}, "qwen-stderr" if kind == "qwen-replicas" else "ds41-json")
                 for index, mid in enumerate(mids)]
 
@@ -182,7 +182,7 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(orch._read(orch._state_path("qwen-replicas")), state)
 
     def test_up_records_the_configuration_of_the_call(self):
-        from hyperloom.recipes import service
+        from hydraweave.recipes import service
         config = self.directory / "cluster.json"
         config.write_text('{"fixture": true}', encoding="utf-8")
         with service.configured(config):
@@ -197,7 +197,7 @@ class OrchestrationTests(unittest.TestCase):
 
     def test_an_up_from_another_configuration_is_refused_naming_the_owner(self):
         # Profile names are unique across the configurations that share the runtime directory (docs/install.md).
-        from hyperloom.recipes import service
+        from hydraweave.recipes import service
         mine, theirs = self.directory / "a" / "cluster.json", self.directory / "b" / "cluster.json"
         for config in (mine, theirs):
             config.parent.mkdir()
@@ -273,7 +273,7 @@ class OrchestrationTests(unittest.TestCase):
                            lambda: orch.up(self.cluster, "qwen-replicas")):
                 self.calls.clear()
                 with self.assertRaisesRegex(orch.OrchestrationError, "halo-2: no node tool.*"
-                                            "'hyperloom nodes update qwen-replicas --machine halo-2'"):
+                                            "'hydraweave nodes update qwen-replicas --machine halo-2'"):
                     action()
                 self.assertFalse({"bootstrap", "lease", "install"} & {verb for _, verb, _ in self.calls})
             self.calls.clear()
@@ -287,15 +287,15 @@ class OrchestrationTests(unittest.TestCase):
 
     def test_control_and_node_tool_digests_agree(self):
         import importlib.machinery, importlib.util
-        path = Path(orch.repo_root()) / "node" / "hyperloom-node"
-        loader = importlib.machinery.SourceFileLoader("hyperloom_node_digest", str(path))
+        path = Path(orch.repo_root()) / "node" / "hydraweave-node"
+        loader = importlib.machinery.SourceFileLoader("hydraweave_node_digest", str(path))
         module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
         loader.exec_module(module)
         self.assertEqual(module.tool_digest(path.parent), orch.remote.tool_digest())
         # One source of truth: both lists come from the node CLI's EXTENSIONS.
         self.assertEqual(sorted(module.TOOL_FILES), sorted(orch.remote.NODE_FILES))
         self.assertEqual(set(orch.remote.NODE_FILES),
-                         {"hyperloom-node", "build-node.sh", *(name + ".py" for name in module.EXTENSIONS)})
+                         {"hydraweave-node", "build-node.sh", *(name + ".py" for name in module.EXTENSIONS)})
         for name in orch.remote.NODE_FILES:
             self.assertTrue((path.parent / name).is_file(), name)
 
@@ -443,12 +443,12 @@ class OrchestrationTests(unittest.TestCase):
         process = payload["processes"][0]
         config = json.loads(process["argv"][4])
         self.assertEqual(config["listen"]["address"], "192.0.2.10")
-        self.assertEqual(config["api_key_file"].split("/")[:4], ["", "opt", "hyperloom", "halo-1"])
-        self.assertTrue(all(row["api_key_file"].startswith("/opt/hyperloom/halo-1/") for row in config["replicas"]))
+        self.assertEqual(config["api_key_file"].split("/")[:4], ["", "opt", "hydraweave", "halo-1"])
+        self.assertTrue(all(row["api_key_file"].startswith("/opt/hydraweave/halo-1/") for row in config["replicas"]))
         self.assertIn("tensormeld-", process["argv"][-1])
         self.assertIn("PYTHONPATH", process["argv"][2])
         self.assertEqual(process["ready"], "http-health")
-        module_path = Path(__file__).resolve().parents[1] / "node/hyperloom_lease.py"
+        module_path = Path(__file__).resolve().parents[1] / "node/hydraweave_lease.py"
         if module_path.exists():
             spec = importlib.util.spec_from_file_location("lease_contract", module_path)
             module = importlib.util.module_from_spec(spec)
@@ -516,7 +516,7 @@ class OrchestrationTests(unittest.TestCase):
 
     def test_install_never_deploys_the_node_tool(self):
         with patch.object(FakeRemote, "tool", "0" * 64, create=True):
-            with self.assertRaisesRegex(orch.OrchestrationError, "hyperloom nodes update qwen-replicas"):
+            with self.assertRaisesRegex(orch.OrchestrationError, "hydraweave nodes update qwen-replicas"):
                 orch.install(self.cluster, "halo-1", ["strix-hip-decode-token"], profile="qwen-replicas")
         self.assertEqual({verb for _, verb, _ in self.calls}, {"has-tool", "version"})
 
@@ -536,8 +536,8 @@ class OrchestrationTests(unittest.TestCase):
         client = Mock(machine=self.cluster.machines["halo-1"])
         client.call.return_value = {"job": "abc", "state": "failed", "reason": "synthetic compiler failure", "tail": "diagnostic"}
         with self.assertRaisesRegex(orch.OrchestrationError, "synthetic compiler failure"):
-            orch._wait_job(client, "/opt/hyperloom/halo-1", "abc")
-        client.call.assert_called_once_with("job", {"root": "/opt/hyperloom/halo-1", "job": "abc"}, timeout=60)
+            orch._wait_job(client, "/opt/hydraweave/halo-1", "abc")
+        client.call.assert_called_once_with("job", {"root": "/opt/hydraweave/halo-1", "job": "abc"}, timeout=60)
 
     def test_activation_failure_restores_previous_release(self):
         self.fail.add(("halo-2", "activate"))
@@ -578,7 +578,7 @@ class OrchestrationTests(unittest.TestCase):
     def test_cli_arguments_and_rotation_never_print_key(self):
         output, error = io.StringIO(), io.StringIO()
         with patch.object(orch, "up", return_value={"state": "fixture"}) as up, patch(
-                "hyperloom.config.load", return_value=self.cluster), redirect_stdout(output), redirect_stderr(error):
+                "hydraweave.config.load", return_value=self.cluster), redirect_stdout(output), redirect_stderr(error):
             result = cli.main(["up", "qwen-replicas", "--node", "halo-1", "halo-2", "--device", "halo-1:gpu",
                                "--deadline", "1200", "--approval-ref", "coord ACK fixture", "--approval-lease", "1260",
                                "--approval-end", "2099-01-01T00:00:00Z"])
@@ -653,7 +653,7 @@ class LocalRouterTests(unittest.TestCase):
                 self.assertEqual(orch._read(directory / "state.json"), {"state": "stopped"})
 
     def test_replica_monitor_requires_every_owned_engine_to_be_terminal(self):
-        state = {"known_hosts": "synthetic-known-hosts", "machines": {"halo-1": {"install_root": "/opt/hyperloom"}},
+        state = {"known_hosts": "synthetic-known-hosts", "machines": {"halo-1": {"install_root": "/opt/hydraweave"}},
                  "leases": [{"role": "engine", "machine": "halo-1", "lease": "one"},
                             {"role": "engine", "machine": "halo-1", "lease": "two"}]}
         for second in ("queued", "ready", "stopped", "failed", "aborted", "cancelled", None):
@@ -667,7 +667,7 @@ class LocalRouterTests(unittest.TestCase):
 
     def test_hard_killed_waiting_up_is_cleaned_by_detached_watchdog(self):
         fixture = Path(__file__).parent / "fixtures/orchestrate_lifecycle.py"
-        with tempfile.TemporaryDirectory(prefix="hyperloom killed controller ") as temporary:
+        with tempfile.TemporaryDirectory(prefix="hydraweave killed controller ") as temporary:
             directory = Path(temporary)
             with (directory / "owner.log").open("wb") as log:
                 owner = subprocess.Popen([sys.executable, str(fixture), str(directory), "owner"], stdout=log, stderr=log)
@@ -709,7 +709,7 @@ class LocalRouterTests(unittest.TestCase):
                 self.assertEqual(kernel.SetConsoleCtrlHandler.call_args.args[1], False)
 
     def test_persistent_local_router_stop_removes_plaintext_and_releases_port(self):
-        with tempfile.TemporaryDirectory(prefix="hyperloom local router ") as temporary:
+        with tempfile.TemporaryDirectory(prefix="hydraweave local router ") as temporary:
             directory = Path(temporary)
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", 0))

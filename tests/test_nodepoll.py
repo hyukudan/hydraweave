@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import nodepoll, pollbudget
-from hyperloom.web.features import machines, turns
+from hydraweave import nodepoll, pollbudget
+from hydraweave.web.features import machines, turns
 
 from tests.test_fleet_support import Clock, FakeAPI, host, lab
 
@@ -25,7 +25,7 @@ NODE = Path(__file__).resolve().parents[1] / "node"
 
 
 def node_tool():
-    loader = importlib.machinery.SourceFileLoader("hyperloom_node_poll_test", str(NODE / "hyperloom-node"))
+    loader = importlib.machinery.SourceFileLoader("hydraweave_node_poll_test", str(NODE / "hydraweave-node"))
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(module)
     return module
@@ -33,7 +33,7 @@ def node_tool():
 
 def turn_reply(label=None):
     holder = {"parsed": True, "alive": True, "label": label, "kind": "single"} if label else None
-    return {"schema": "hyperloom/node-v1", "verb": "turns", "holder": holder, "now": 0}
+    return {"schema": "hydraweave/node-v1", "verb": "turns", "holder": holder, "now": 0}
 
 
 class Node:
@@ -49,9 +49,9 @@ class Node:
             if part["verb"] == "turns":
                 parts[part["key"]] = turn_reply(self.holder.get(machine.id))
             else:
-                parts[part["key"]] = {"schema": "hyperloom/node-v1", "verb": part["verb"], "checks": {},
+                parts[part["key"]] = {"schema": "hydraweave/node-v1", "verb": part["verb"], "checks": {},
                                       "payload": part["payload"]}
-        return {"schema": "hyperloom/node-v1", "verb": "poll", "parts": parts}
+        return {"schema": "hydraweave/node-v1", "verb": "poll", "parts": parts}
 
 
 class PollTests(unittest.TestCase):
@@ -177,7 +177,7 @@ class PollTests(unittest.TestCase):
         real = threading.Thread.start
 
         def start(thread):
-            if thread.name == "hyperloom-node-poll-local":
+            if thread.name == "hydraweave-node-poll-local":
                 raise RuntimeError("can't start new thread")
             return real(thread)
         with mock.patch.object(turns, "fetch") as fetch:
@@ -195,7 +195,7 @@ class PollTests(unittest.TestCase):
         answer, error, _ = self.poll.read("halo-2", "host", "host", {})
         self.assertIsNone(answer)
         self.assertIn("ssh refused", error)
-        from hyperloom import nodegate
+        from hydraweave import nodegate
         release = nodegate.try_hold(self.api.config_path, "halo-1")
         try:
             self.clock.now += 60
@@ -219,7 +219,7 @@ class PollTests(unittest.TestCase):
 
 class StartTests(unittest.TestCase):
     def serve(self, environment, telemetry_fails=False):
-        from hyperloom.web import server
+        from hydraweave.web import server
         api = SimpleNamespace(config_path=Path(tempfile.gettempdir()) / "unused" / "cluster.json",
                               _cluster=lambda: lab(), telemetry=None)
         fake = mock.MagicMock()
@@ -230,7 +230,7 @@ class StartTests(unittest.TestCase):
                 mock.patch.object(nodepoll, "start", side_effect=lambda a: started.append(a)), \
                 mock.patch.object(server, "start_telemetry", side_effect=RuntimeError("store failed")
                                   if telemetry_fails else None) as telemetry, \
-                mock.patch("hyperloom.nodegate.portal"), mock.patch.dict(os.environ, environment), \
+                mock.patch("hydraweave.nodegate.portal"), mock.patch.dict(os.environ, environment), \
                 contextlib.redirect_stdout(io.StringIO()):
             try:
                 server.serve(no_browser=True)
@@ -239,10 +239,10 @@ class StartTests(unittest.TestCase):
         return started, telemetry, api
 
     def test_the_turn_check_runs_with_telemetry_off_or_a_failed_store(self):
-        started, telemetry, api = self.serve({"HYPERLOOM_TELEMETRY": "0"})
+        started, telemetry, api = self.serve({"HYDRAWEAVE_TELEMETRY": "0"})
         self.assertEqual(started, [api])
         telemetry.assert_not_called()
-        started, telemetry, api = self.serve({"HYPERLOOM_TELEMETRY": "1"}, telemetry_fails=True)
+        started, telemetry, api = self.serve({"HYDRAWEAVE_TELEMETRY": "1"}, telemetry_fails=True)
         self.assertEqual(started, [api])                        # started before the store is even tried
 
     def test_turns_are_recorded_without_any_store(self):
@@ -269,7 +269,7 @@ class NodeVerbTests(unittest.TestCase):
             @staticmethod
             def run(verb, payload):
                 seen.append((verb, payload))
-                return {"schema": "hyperloom/node-v1", "verb": verb, "body": "x" * 10}
+                return {"schema": "hydraweave/node-v1", "verb": verb, "body": "x" * 10}
         with mock.patch.object(tool, "extension_for", return_value=Extension):
             reply = tool.poll({"parts": [{"key": "v", "verb": "version", "payload": {}},
                                          {"key": "s", "verb": "status", "payload": {"root": "/opt/x"}},
@@ -293,7 +293,7 @@ class NodeVerbTests(unittest.TestCase):
         class Big:
             @staticmethod
             def run(verb, payload):
-                return {"schema": "hyperloom/node-v1", "verb": verb, "body": "x" * (tool.POLL_REPLY // 2 + 10)}
+                return {"schema": "hydraweave/node-v1", "verb": verb, "body": "x" * (tool.POLL_REPLY // 2 + 10)}
         with mock.patch.object(tool, "extension_for", return_value=Big):
             reply = tool.poll({"parts": [{"key": str(i), "verb": "host", "payload": {}} for i in range(2)]},
                               clock=lambda: next(times))
@@ -305,11 +305,11 @@ class NodeVerbTests(unittest.TestCase):
         self.assertIn("reply is full", reply["parts"]["1"]["error"])
 
     def test_the_transport_takes_a_poll_reply_up_to_its_own_limit(self):
-        from hyperloom import remote
+        from hydraweave import remote
         self.assertIn("poll", remote.VERBS)
         client = remote.Remote(SimpleNamespace(id="halo-1", http_address="192.0.2.1", ssh_target="op@halo-1",
                                                ssh_port=22), mock.Mock(spec=remote.KnownHosts, **{"options.return_value": []}))
-        client.node_path = "/opt/boot/hyperloom-node"
+        client.node_path = "/opt/boot/hydraweave-node"
         limits = []
         with mock.patch.object(remote, "_run", side_effect=lambda *a, **kw: limits.append(a[4]) or b"{}"):
             client.call("poll", {"parts": []})
@@ -323,12 +323,12 @@ class NodeVerbTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "install"
             root.mkdir()
-            (root / ".hyperloom-root").write_text("marked\n", encoding="utf-8")
+            (root / ".hydraweave-root").write_text("marked\n", encoding="utf-8")
             reply = tool.poll({"parts": [
                 {"key": "s", "verb": "status", "payload": {"root": root.as_posix()}},
                 {"key": "l", "verb": "logs", "payload": {"root": root.as_posix(), "lease": "abc", "name": "n",
                                                        "tail": 5}}]})
-            self.assertEqual(sorted(p.name for p in root.iterdir()), [".hyperloom-root"])
+            self.assertEqual(sorted(p.name for p in root.iterdir()), [".hydraweave-root"])
             self.assertEqual(reply["parts"]["s"].get("leases"), [], reply["parts"]["s"])
 
     def test_a_home_is_never_a_model_root_on_the_node(self):
@@ -336,7 +336,7 @@ class NodeVerbTests(unittest.TestCase):
         import sys
         sys.path.insert(0, str(NODE))
         self.addCleanup(sys.path.remove, str(NODE))
-        models = importlib.import_module("hyperloom_models")
+        models = importlib.import_module("hydraweave_models")
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "accounts" / "researcher"
             home.mkdir(parents=True)
@@ -350,7 +350,7 @@ class NodeVerbTests(unittest.TestCase):
         import sys
         sys.path.insert(0, str(NODE))
         self.addCleanup(sys.path.remove, str(NODE))
-        lease = importlib.import_module("hyperloom_lease")
+        lease = importlib.import_module("hydraweave_lease")
         state = {"lease": "abc", "state": "queued", "turn_pid": 1, "label": "hl-x"}
         with mock.patch.object(lease, "waiter_alive", return_value=False), \
                 mock.patch.object(lease, "tail_file", return_value="refused\n"), \

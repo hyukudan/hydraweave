@@ -17,9 +17,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import bundles, config, engines, knobs, orchestrate as orch, render, secrets
-from hyperloom.config import ConfigError, parse
-from hyperloom.render import render_processes, render_router, validate_router
+from hydraweave import bundles, config, engines, knobs, orchestrate as orch, render, secrets
+from hydraweave.config import ConfigError, parse
+from hydraweave.render import render_processes, render_router, validate_router
 from tests.test_config import ROOT, example
 from tests.test_orchestrate import RELEASE, FakeRemote
 from tests.test_render import FIXTURES
@@ -35,10 +35,10 @@ def _load(name):
     return module
 
 
-node_install = _load("hyperloom_install")
-lease = _load("hyperloom_lease")
+node_install = _load("hydraweave_install")
+lease = _load("hydraweave_lease")
 NEW = ("qwen-replicas-w5", "ds41-pair-w5", "minimax-pair")
-KEYS = {"halo-1": "/opt/hyperloom/secrets/engine.key", "halo-2": "/opt/hyperloom/secrets/engine.key"}
+KEYS = {"halo-1": "/opt/hydraweave/secrets/engine.key", "halo-2": "/opt/hydraweave/secrets/engine.key"}
 
 
 def cluster_obj():
@@ -104,7 +104,7 @@ class RegistryTests(unittest.TestCase):
             engines.adapter("other")
 
     def test_service_units_follow_the_adapter_capability(self):
-        from hyperloom import service
+        from hydraweave import service
         self.assertEqual([f for f, row in engines.FAMILIES.items() if "service-unit" in row.capabilities],
                          ["qwen-replicas"])
         cluster = parse(cluster_obj())
@@ -153,7 +153,7 @@ class RegistryTests(unittest.TestCase):
 
 class PresetRenderTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom engines ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave engines ")
         self.addCleanup(self.tmp.cleanup)
         self.key = Path(self.tmp.name) / "router.key"
         self.key.write_text("synthetic-test-token\n", encoding="ascii")
@@ -237,7 +237,7 @@ class PresetRenderTests(unittest.TestCase):
         self.assertEqual(summary["engine_sha"], config.preset("minimax-pair")["engine_sha"])
 
     def test_rtx_service_hands_off_only_at_its_own_engine_pin(self):
-        from hyperloom import rtx
+        from hydraweave import rtx
         self.obj["profiles"]["ds41-pair-w5"]["prefill_service"] = {
             "preset": "rtx-prefill-ds41", "machine": "workstation", "device": "rtx-pro"}
         self.obj["machines"][0]["devices"] = [{"id": "rtx-pro", "type": "nvidia", "uuid": "GPU-test"}]
@@ -253,7 +253,7 @@ class BundleTests(unittest.TestCase):
     def setUp(self):
         if not git_available():
             self.skipTest("git unavailable")
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom bundles ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave bundles ")
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.repo = self.base / "engine source"
@@ -431,7 +431,7 @@ class LifecycleTests(unittest.TestCase):
     """install (with a bundle) and up/down of the new presets through a fake node transport."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hyperloom engine lifecycle ")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hydraweave engine lifecycle ")
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name)
         self.calls, self.leases = [], {}

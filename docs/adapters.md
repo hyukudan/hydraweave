@@ -1,7 +1,7 @@
 # Engine adapters, per-preset pins and unpublished sources
 
-Each model runs on its own engine. hyperloom keeps that modular with one adapter per engine family
-(`hyperloom/engines.py`). Presets stay pure data: argv, env, assets and pins. The adapter decides how the
+Each model runs on its own engine. Hydraweave keeps that modular with one adapter per engine family
+(`hydraweave/engines.py`). Presets stay pure data: argv, env, assets and pins. The adapter decides how the
 family is built, placed, waited for and stopped.
 
 ## Adapter registry
@@ -87,14 +87,14 @@ optional keys `trellis_mode`, `trellis_api` and `trellis_configure` only when a 
 - **Host tests:** the same named ctest subset for all three engines
   (`strix-serve-{frontend,deepseek-chat,api}-tests`, `strix-host-upload-tests`); all four exist at every pin.
 
-## Unpublished sources (`hyperloom install PROFILE --source NAME=DIR[@COMMIT]`)
+## Unpublished sources (`hydraweave install PROFILE --source NAME=DIR[@COMMIT]`)
 
 The w5 integration branches, the MiniMax engine and the trellis commits they link are on no remote, and they are
 not pushed. To install them:
 
 1. On the control machine, `bundles.resolve` checks that the commit in DIR equals the preset's pin (or matches its
    prefix, plus `@COMMIT` when given).
-2. `bundles.create` writes a bundle that carries exactly `refs/hyperloom/source` at that commit, at depth 1 (the commit
+2. `bundles.create` writes a bundle that carries exactly `refs/hydraweave/source` at that commit, at depth 1 (the commit
    and its tree, like the remote `fetch --depth 1`; a few MB for the engine). It works in a throwaway bare repository
    that borrows DIR's objects through `objects/info/alternates`, so DIR gains no ref, object or config. Shallow source
    checkouts work too.
@@ -104,7 +104,7 @@ not pushed. To install them:
    removes the stage it hands out or an accepted `<commit>.bundle`.
 4. `bundle-accept` checks size, sha256 and the single head, then renames the file to `<root>/incoming/<commit>.bundle`.
 5. In the install payload the component becomes `{"repo", "commit", "published": false, "bundle_sha256"}`. The node's
-   `fetch_sources` re-verifies the bundle, marks the commit shallow and fetches `refs/hyperloom/source` from it, never
+   `fetch_sources` re-verifies the bundle, marks the commit shallow and fetches `refs/hydraweave/source` from it, never
    from the remote. It then checks `rev-parse HEAD`.
 6. That component record goes into `MANIFEST.json`, so a release built from a bundle always has a different release
    id from a published build of the same commit. The record includes `bundle_sha256`, and the bundle bytes depend on
@@ -171,7 +171,7 @@ An RTX prefill service hands off only to a decode preset at its own engine pin. 
 
 ## Hardware check: ds41-pair-w5 (2026-10-24)
 
-One pair GPU lease, three arms in order A B A, release built by hyperloom from integrate/ds41-w5 cab238d6 + strix-trellis
+One pair GPU lease, three arms in order A B A, release built by Hydraweave from integrate/ds41-w5 cab238d6 + strix-trellis
 c95a169 (node build) vs the lab's own build of the same commits (A, launched by hand):
 - both arms loaded the w5 identity `ds41-trellis-mix-v1{head=K5, q_a/kv/q_b/o_a/o_b/shexp K4}` on every site;
 - token gate: 8 greedy prompts, 284 tokens, identical in A1, B and A2;

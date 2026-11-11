@@ -1,4 +1,4 @@
-"""CLI equivalents: hyperloom health ... and hyperloom alerts ... call the portal's functions."""
+"""CLI equivalents: hydraweave health ... and hydraweave alerts ... call the portal's functions."""
 
 import contextlib
 import io
@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom import cli, secrets
-from hyperloom.telemetry.store import Store
-from hyperloom.web.features import alerts, health
+from hydraweave import cli, secrets
+from hydraweave.telemetry.store import Store
+from hydraweave.web.features import alerts, health
 
 HOST = ".".join(("hooks", "example", "test"))           # a reserved test name, built at run time
 

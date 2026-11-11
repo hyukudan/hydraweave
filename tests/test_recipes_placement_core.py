@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom.recipes import core, placement, reader, session
+from hydraweave.recipes import core, placement, reader, session
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -21,19 +21,19 @@ class DiscoveryTests(unittest.TestCase):
                 path.touch()
                 path.chmod(0o755)
             cluster = SimpleNamespace(raw={"pc": {"recipe_core": str(configured)}})
-            with mock.patch.dict(os.environ, {"HYPERLOOM_TS_RECIPE": str(ts), "HYPERLOOM_SS_RECIPE": str(ss),
+            with mock.patch.dict(os.environ, {"HYDRAWEAVE_TS_RECIPE": str(ts), "HYDRAWEAVE_SS_RECIPE": str(ss),
                                              "PATH": tmp}), mock.patch.object(core, "_names", return_value=[ts.name, ss.name]):
                 self.assertEqual(core.locate(cluster), str(configured))
                 self.assertEqual(core.locate(), str(ts))
-                os.environ["HYPERLOOM_TS_RECIPE"] = ""
+                os.environ["HYDRAWEAVE_TS_RECIPE"] = ""
                 self.assertEqual(core.locate(), str(ss))    # explicit legacy env keeps the base's priority over PATH
-                os.environ["HYPERLOOM_SS_RECIPE"] = ""
+                os.environ["HYDRAWEAVE_SS_RECIPE"] = ""
                 self.assertEqual(core.locate(), str(ts))
                 ts.unlink()
                 self.assertEqual(core.locate(), str(ss))
                 cluster.raw["pc"]["recipe_core"] = str(configured) + ".missing"
                 self.assertEqual(core.locate(cluster), str(ss))    # renamed sibling, as on the base
-                os.environ["HYPERLOOM_TS_RECIPE"] = str(ts) + ".missing"
+                os.environ["HYDRAWEAVE_TS_RECIPE"] = str(ts) + ".missing"
                 self.assertIsNone(core.locate())
                 ss.unlink()
                 self.assertIsNone(core.locate(cluster))
@@ -151,10 +151,10 @@ class InvocationTests(unittest.TestCase):
 
 class TierstreamParityTests(unittest.TestCase):
     def setUp(self):
-        executable = os.environ.get("HYPERLOOM_TS_RECIPE") or shutil.which("ts-recipe")
-        golden = os.environ.get("HYPERLOOM_PLACEMENT_GOLDEN")
+        executable = os.environ.get("HYDRAWEAVE_TS_RECIPE") or shutil.which("ts-recipe")
+        golden = os.environ.get("HYDRAWEAVE_PLACEMENT_GOLDEN")
         if not executable or not golden:
-            self.skipTest("set HYPERLOOM_TS_RECIPE and HYPERLOOM_PLACEMENT_GOLDEN for CPU golden parity")
+            self.skipTest("set HYDRAWEAVE_TS_RECIPE and HYDRAWEAVE_PLACEMENT_GOLDEN for CPU golden parity")
         self.executable, self.golden = Path(executable).resolve(), Path(golden).resolve()
         self.backend = core.CoreBackend(core.Core(str(self.executable)))
 
@@ -208,7 +208,7 @@ class TierstreamParityTests(unittest.TestCase):
             self.skipTest("build Tierstream's CPU ts-test-place target for all G4/SV1 vectors")
         # The upstream CPU harness constructs components/recipes from the abstract vectors and compares every
         # allocation and prediction with the frozen expected files. Run it on the contract's own goldens;
-        # no reference arithmetic is imported into Hyperloom, and the external worktree remains read-only.
+        # no reference arithmetic is imported into Hydraweave, and the external worktree remains read-only.
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp) / "tests/data/placement"
             data.mkdir(parents=True)

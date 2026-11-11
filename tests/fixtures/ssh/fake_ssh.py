@@ -10,8 +10,8 @@ import time
 
 
 argv = sys.argv[1:]
-mode = os.environ.get("HYPERLOOM_FAKE_MODE", "ok")
-log = os.environ.get("HYPERLOOM_FAKE_LOG")
+mode = os.environ.get("HYDRAWEAVE_FAKE_MODE", "ok")
+log = os.environ.get("HYDRAWEAVE_FAKE_LOG")
 if log:
     with open(log, "a", encoding="utf-8") as stream:
         stream.write(json.dumps({"argv": argv, "pid": os.getpid()}) + "\n")
@@ -22,7 +22,7 @@ if argv[0] == "ssh-keyscan":
     if mode == "malformed_scan":
         print("not a key")
         raise SystemExit(0)
-    key = os.environ["HYPERLOOM_FAKE_KEY"]
+    key = os.environ["HYDRAWEAVE_FAKE_KEY"]
     print("# synthetic keyscan")
     print(f"[192.0.2.1]:2222 ssh-ed25519 {key}")
     print(f"[192.0.2.1]:2222 ssh-ed25519 {key}")
@@ -34,7 +34,7 @@ for flag in ("StrictHostKeyChecking=yes", "GlobalKnownHostsFile=none",
         raise SystemExit(90)
 known = next(shlex.split(value.split("=", 1)[1])[0].replace("%%", "%")
              for value in argv if value.startswith("UserKnownHostsFile="))
-expected = os.environ["HYPERLOOM_FAKE_KEY"]
+expected = os.environ["HYDRAWEAVE_FAKE_KEY"]
 if expected not in Path(known).read_text(encoding="utf-8"):
     raise SystemExit(255)
 if argv[0] == "scp":
@@ -46,7 +46,7 @@ if mode == "sleep":
     time.sleep(30)
 if mode == "descendant":
     descendant = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    Path(os.environ["HYPERLOOM_FAKE_CHILD_LOG"]).write_text(json.dumps({"pid": descendant.pid}))
+    Path(os.environ["HYDRAWEAVE_FAKE_CHILD_LOG"]).write_text(json.dumps({"pid": descendant.pid}))
     time.sleep(30)
 if mode == "huge":
     sys.stdout.write("x" * (1024 * 1024))
@@ -56,8 +56,9 @@ if mode == "stderr_huge":
     raise SystemExit(0)
 
 command = argv[-1]
-if command.startswith("umask ") or command.startswith("printf "):
-    sys.stdout.buffer.write("/opt/operator space ' Ω/.hyperloom-boot/hyperloom-node\n".encode("utf-8"))
+if (command.startswith("umask ") or command.startswith("printf ")
+        or (command.startswith("if test -f ") and "printf" in command and "elif" in command)):
+    sys.stdout.buffer.write("/opt/operator space ' Ω/.hydraweave-boot/hydraweave-node\n".encode("utf-8"))
 elif command.startswith("chmod ") or command.startswith("cd -- "):
     pass
 elif mode == "eof":

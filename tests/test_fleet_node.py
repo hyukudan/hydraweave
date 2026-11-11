@@ -21,7 +21,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fleet"
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("fleet_node_observe", NODE / "hyperloom_observe.py")
+    spec = importlib.util.spec_from_file_location("fleet_node_observe", NODE / "hydraweave_observe.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -137,7 +137,7 @@ class HostVerbTests(unittest.TestCase):
 
     def test_sections_from_a_fixture_tree(self):
         result = self.collect()
-        self.assertEqual(result["schema"], "hyperloom/node-v1")
+        self.assertEqual(result["schema"], "hydraweave/node-v1")
         checks = result["checks"]
         self.assertEqual({k for k, v in checks.items() if v["status"] != "ok"}, set())
         self.assertEqual(checks["boot_id"]["value"], "0000000a-0000-4000-8000-00000000000a")
@@ -249,7 +249,7 @@ class HostVerbTests(unittest.TestCase):
                               "net", "nics", "gpu_processes", "listeners"})
 
     def test_node_cli_refuses_a_bad_payload(self):
-        result = subprocess.run([sys.executable, str(NODE / "hyperloom-node"), "host"], input=b'{"root": "/etc"}',
+        result = subprocess.run([sys.executable, str(NODE / "hydraweave-node"), "host"], input=b'{"root": "/etc"}',
                                 capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 2)
         self.assertIn("host payload takes only", json.loads(result.stdout)["error"])

@@ -1,8 +1,18 @@
-<p align="center"><img src="docs/img/hyperloom-banner.jpg" alt="Hyperloom: distributed AI inference" width="100%"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hydraweave-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/hydraweave-logo.svg">
+    <img src="docs/assets/hydraweave-logo.svg" alt="Hydraweave — many devices weaving one inference" width="420">
+  </picture>
+</p>
 
-# Hyperloom
+# Hydraweave
 
-**One control plane for AI inference across different machines.** Hyperloom brings a Windows workstation with an NVIDIA GPU and AMD Strix Halo Linux mini-PCs into one explicitly configured cluster. It installs pinned components, manages their lifecycle, starts a router, and gives operators a unified view of nodes, links, logs, and performance.
+Many heads — nodes and GPUs — weaving one inference. Hydraweave places, schedules and serves LLM inference across several devices.
+
+**Renamed from hyperloom.** Existing imports and the `hyperloom` command remain available; old environment variables and config/state paths are read as fallbacks. See the [migration note](docs/rename.md).
+
+**One control plane for AI inference across different machines.** Hydraweave brings a Windows workstation with an NVIDIA GPU and AMD Strix Halo Linux mini-PCs into one explicitly configured cluster. It installs pinned components, manages their lifecycle, starts a router, and gives operators a unified view of nodes, links, logs, and performance.
 
 > [!IMPORTANT]
 > **Development status — not production-ready (2026-10-25 evening):** deployment and the DeepSeek pair have passed hardware acceptance. The local portal has a hardware start/stop smoke test, with crash-cleanup acceptance still open. RTX prefill build, standalone exactness and capped placement are validated; the complete pair + RTX placement run remains pending. Recipe orchestration, the expanded portal and context-aware placement are pending integration.
@@ -11,23 +21,23 @@
 
 Large models, fast prefill, and high-throughput decoding may need different hardware. Running each engine manually across multiple machines means coordinating versions, network endpoints, model files, launches, GPU reservations, and failures yourself.
 
-Hyperloom is the **integration and orchestration layer**, not another inference engine. It connects:
+Hydraweave is the **integration and orchestration layer**, not another inference engine. It connects:
 
 | Component | Responsibility |
 |---|---|
 | [TensorMeld](https://github.com/hyukudan/tensormeld) | Request routing, replica balancing, placement and benchmarking |
 | [Strix Halo Engine](https://github.com/hyukudan/strix-halo-engine-lab) | AMD HIP decode workers and an NVIDIA CUDA prefill service |
 | [Strix Trellis](https://github.com/hyukudan/strix-trellis) | Quantized dense kernels used by supported engine profiles |
-| **Hyperloom** | Reproducible installs, configuration, machine checks, safe process lifecycle, CLI and local portal |
+| **Hydraweave** | Reproducible installs, configuration, machine checks, safe process lifecycle, CLI and local portal |
 
-**Accepted deployments:** two Strix Halo nodes can serve Qwen replicas or run DeepSeek as a pair over USB4. Optional long-prompt prefill on an RTX PRO 6000 (96 GB, Windows WDDM) has standalone validation; end-to-end acceptance through Hyperloom is still pending. Per-preset engine adapters also cover MiniMax; see [pins and launch constraints](docs/adapters.md).
+**Accepted deployments:** two Strix Halo nodes can serve Qwen replicas or run DeepSeek as a pair over USB4. Optional long-prompt prefill on an RTX PRO 6000 (96 GB, Windows WDDM) has standalone validation; end-to-end acceptance through Hydraweave is still pending. Per-preset engine adapters also cover MiniMax; see [pins and launch constraints](docs/adapters.md).
 
 ## How it fits together
 
 ```mermaid
 flowchart LR
   C[API client] --> R[TensorMeld router]
-  H[Hyperloom CLI and control plane] --> R
+  H[Hydraweave CLI and control plane] --> R
   H --> A[Strix Halo node 1]
   H --> B[Strix Halo node 2]
   R --> A
@@ -43,9 +53,11 @@ The CLI uses a versioned cluster configuration and pinned releases. Machines are
 
 **Prerequisites (control machine):** Python 3.11+, Git and OpenSSH. The Windows installation workflow is documented in [Installation](docs/install.md), including node prerequisites and rollback.
 
+Set `REPOSITORY_URL` to this repository’s current clone URL; the hosting repository has not been renamed.
+
 ```powershell
-git clone --recurse-submodules https://github.com/hyukudan/hyperloom.git
-cd hyperloom
+git clone --recurse-submodules $env:REPOSITORY_URL hydraweave
+cd hydraweave
 .\windows\install.ps1
 hloom --help
 ```
@@ -53,7 +65,7 @@ hloom --help
 Then use [the sample cluster configuration](examples/cluster.example.json) to describe your machines, model assets and profiles:
 
 ```powershell
-hloom config validate "$env:APPDATA\hyperloom\cluster.json"
+hloom config validate "$env:APPDATA\hydraweave\cluster.json"
 hloom doctor halo-1
 hloom doctor halo-2
 hloom render qwen-replicas
@@ -72,19 +84,19 @@ hloom render qwen-replicas
 | 3 — optional RTX prefill and heterogeneous inference extensions | 3a in progress: CUDA build and prefill service on the RTX PRO accepted (fidelity gate equal to the exact reference at 512 / 2K / 8K / 32K); pair + RTX placement through `up` pending; optional operator gate before the device is touched |
 | 4 — operational extensions | Installation/release tooling, qualified knobs, diagnostics, Prometheus export and optional non-lab service mode implemented; discovery/pairing and Windows workers remain later work |
 
-These statuses describe **Hyperloom integration work**, not the maturity of individual underlying engines. See the [full roadmap and acceptance criteria](docs/SPEC.md) and the acceptance records for [Phase 1a](docs/acceptance-1a.md), [Phase 2](docs/acceptance-2.md) and [Phase 3a](docs/acceptance-3a.md).
+These statuses describe **Hydraweave integration work**, not the maturity of individual underlying engines. See the [full roadmap and acceptance criteria](docs/SPEC.md) and the acceptance records for [Phase 1a](docs/acceptance-1a.md), [Phase 2](docs/acceptance-2.md) and [Phase 3a](docs/acceptance-3a.md).
 
 ### Measured integration results
 
-Hyperloom versus the same engine launched by the lab, on two Strix Halo nodes (DeepSeek uses USB4). Token identity is relative to the named quantized profile. Historical component-only results remain in the [technical overview](docs/README-technical.md#performance).
+Hydraweave versus the same engine launched by the lab, on two Strix Halo nodes (DeepSeek uses USB4). Token identity is relative to the named quantized profile. Historical component-only results remain in the [technical overview](docs/README-technical.md#performance).
 
 | Profile / conditions | Measured result | Evidence |
 |---|---|---|
 | Qwen3.8-Flash-Next, UD-Q4_K_XL + Q8_0 MTP, context 12,288; 8 greedy prompts, up to 64 output tokens | 478 tokens identical across both launchers | [2026-10-23 acceptance](docs/acceptance-1a.md) |
-| DeepSeek V4.1 Flash, Q2 experts + 6.5-bit overlay and trellis mix-B, context 4,096; 8 fixed prompts × 192 output tokens, C1 / C4 | Full Hyperloom start: 36.5 / 55.9 tok/s aggregate; separate greedy gate: 290 identical tokens | [2026-10-23/24 acceptance](docs/acceptance-2.md) |
+| DeepSeek V4.1 Flash, Q2 experts + 6.5-bit overlay and trellis mix-B, context 4,096; 8 fixed prompts × 192 output tokens, C1 / C4 | Full Hydraweave start: 36.5 / 55.9 tok/s aggregate; separate greedy gate: 290 identical tokens | [2026-10-23/24 acceptance](docs/acceptance-2.md) |
 | DeepSeek updated preset, same base quantization with trellis attention/dense sites enabled, context 4,096; 8 fixed prompts × 192 output tokens, C1 / C4 | 39.4 / 64.7 tok/s aggregate; separate greedy gate: 284 tokens identical in all three A/B/A arms | [2026-10-24 adapter check](docs/adapters.md#hardware-check-ds41-pair-w5-2026-10-24) |
 
-The updated-preset comparison uses engine `cab238d6` + trellis `c95a1695`: Hyperloom versus a manual build of the same commits. DeepSeek prompt lengths/categories are not recorded in the acceptance summaries. These integration runs have no reported hardware ceiling.
+The updated-preset comparison uses engine `cab238d6` + trellis `c95a1695`: Hydraweave versus a manual build of the same commits. DeepSeek prompt lengths/categories are not recorded in the acceptance summaries. These integration runs have no reported hardware ceiling.
 
 Pending integration follows these decisions:
 
@@ -109,7 +121,7 @@ Pending integration follows these decisions:
 
 ## Design principles
 
-**AMD-first inference, heterogeneous orchestration.** Hyperloom supports Strix Halo decode nodes while coordinating other resources when a profile requires them. It uses pinned upstream components rather than duplicating their kernels or inference implementations. Configuration is explicit; remote SSH commands are allow-listed; leases own GPU work; partial starts must clean up safely.
+**AMD-first inference, heterogeneous orchestration.** Hydraweave supports Strix Halo decode nodes while coordinating other resources when a profile requires them. It uses pinned upstream components rather than duplicating their kernels or inference implementations. Configuration is explicit; remote SSH commands are allow-listed; leases own GPU work; partial starts must clean up safely.
 
 For the complete security model and limitations, see [Technical overview — Security](docs/README-technical.md#security).
 

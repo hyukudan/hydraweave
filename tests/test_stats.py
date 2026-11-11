@@ -1,7 +1,7 @@
 import unittest
 
-from hyperloom.adapters import engine
-from hyperloom.stats import Window
+from hydraweave.adapters import engine
+from hydraweave.stats import Window
 
 
 def request(index, stamp, value):

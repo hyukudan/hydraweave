@@ -7,9 +7,9 @@ import threading
 import unittest
 from unittest import mock
 
-from hyperloom.recipes import service
-from hyperloom.web.api import API, APIError, redact
-from hyperloom.web.features import launch
+from hydraweave.recipes import service
+from hydraweave.web.api import API, APIError, redact
+from hydraweave.web.features import launch
 
 
 class LaunchTests(unittest.TestCase):
@@ -191,7 +191,7 @@ class LaunchTests(unittest.TestCase):
         import hashlib
         import os
         expected = hashlib.sha256(os.path.normcase(os.path.abspath(str(self.api.config_path))).encode("utf-8")).hexdigest()[:16]
-        with mock.patch("hyperloom.orchestrate._config_key", return_value=None):
+        with mock.patch("hydraweave.orchestrate._config_key", return_value=None):
             self.assertEqual(launch.config_key(self.api), expected)
             self.assertEqual(launch.estimate(self.api, "qwen")["n"], 0)
 
@@ -307,7 +307,7 @@ class LaunchTests(unittest.TestCase):
                     mock.patch.object(self.api, "_unhold"), \
                     mock.patch.object(self.api, "_resources_of_profile", return_value=set()), \
                     mock.patch.object(self.api, "_execute", return_value={"phase": "running", "profile": "qwen"}), \
-                    mock.patch.object(launch, "record_ready", side_effect=observe),                     mock.patch("hyperloom.recipes.preflight.cli", return_value=None):
+                    mock.patch.object(launch, "record_ready", side_effect=observe),                     mock.patch("hydraweave.recipes.preflight.cli", return_value=None):
                 recorded.clear()
                 # Validation and admission are covered separately; this checks the real common worker.
                 with mock.patch.object(self.api, "_arguments", return_value={"profile": "qwen"} if action == "up" else {"inputs": "a" * 64, "stop": []}):

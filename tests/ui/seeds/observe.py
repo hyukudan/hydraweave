@@ -51,7 +51,7 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom.web.features import observe
+    from hydraweave.web.features import observe
 
     shift = _shift(now)
     page = _load("router-requests.json")

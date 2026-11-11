@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hyperloom import cli
+from hydraweave import cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +31,7 @@ class Spec:
 
 class CLITests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="hyperloom cli tests ")
+        self.temporary = tempfile.TemporaryDirectory(prefix="hydraweave cli tests ")
         self.directory = Path(self.temporary.name)
         self.cluster = SimpleNamespace(profiles={"qwen-replicas": {}}, machines={})
         self.config = SimpleNamespace(load=Mock(return_value=self.cluster))
@@ -40,7 +40,7 @@ class CLITests(unittest.TestCase):
                                       render_processes=Mock(return_value=[Spec(env={})]),
                                       launch_summary=Mock(return_value={"production": True}))
         self.real_module = importlib.import_module
-        self.modules = {"hyperloom.config": self.config, "hyperloom.render": self.render}
+        self.modules = {"hydraweave.config": self.config, "hydraweave.render": self.render}
         self.module_patch = patch.object(cli, "_module", side_effect=lambda name:
                                          self.modules.get(name) or self.real_module(name))
         self.module_patch.start()
@@ -81,7 +81,7 @@ class CLITests(unittest.TestCase):
             status, _, err = self.invoke("config", "validate", "example.json")
         self.module_patch.start()
         self.assertEqual(status, 1)
-        self.assertIn("hyperloom.config is unavailable", err)
+        self.assertIn("hydraweave.config is unavailable", err)
         self.assertNotIn("Traceback", err)
 
     def test_phase_placeholders(self):
@@ -90,10 +90,10 @@ class CLITests(unittest.TestCase):
 
     def test_platform_default_paths(self):
         with patch.object(cli, "os", SimpleNamespace(name="nt", environ={"APPDATA": str(self.directory)})):
-            self.assertEqual(cli.config_path(), self.directory / "hyperloom" / "cluster.json")
+            self.assertEqual(cli.config_path(), self.directory / "hydraweave" / "cluster.json")
         with patch.object(cli, "os", SimpleNamespace(name="posix")), patch.object(
                 cli.Path, "home", return_value=self.directory):
-            self.assertEqual(cli.config_path(), self.directory / ".config" / "hyperloom" / "cluster.json")
+            self.assertEqual(cli.config_path(), self.directory / ".config" / "hydraweave" / "cluster.json")
 
     def test_local_doctor_direct_subprocess(self):
         completed = subprocess.CompletedProcess([], 0, '{"commands":[]}', "")
@@ -112,7 +112,7 @@ class CLITests(unittest.TestCase):
         remote = SimpleNamespace(Remote=Mock(), tool_digest=Mock(return_value="d" * 64))
         client = remote.Remote.return_value
         version = {"checks": {"tool": {"status": "ok", "value": "d" * 64}}}
-        self.modules["hyperloom.remote"] = remote
+        self.modules["hydraweave.remote"] = remote
         # Fresh machine: no node tool yet. The tool reaches a node only through `nodes update`: doctor says so
         # and changes nothing (no bootstrap, no verb call).
         client.has_tool.return_value = False
@@ -120,7 +120,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 0, err)
         tool = json.loads(out)["node_tool"]
         self.assertEqual((tool["status"], tool["deployed"]), ("absent", None))
-        self.assertIn("hyperloom nodes update", tool["hint"])
+        self.assertIn("hydraweave nodes update", tool["hint"])
         self.assertNotIn("--force", tool["hint"])
         client.bootstrap.assert_not_called()
         client.call.assert_not_called()
@@ -139,12 +139,12 @@ class CLITests(unittest.TestCase):
         client = remote.Remote.return_value
         client.has_tool.return_value = True
         client.call.side_effect = [{"checks": {"tool": {"status": "ok", "value": "e" * 64}}}, {"commands": []}]
-        self.modules["hyperloom.remote"] = remote
+        self.modules["hydraweave.remote"] = remote
         status, out, err = self.invoke("doctor", "halo-1")
         self.assertEqual(status, 0, err)
         tool = json.loads(out)["node_tool"]
         self.assertEqual((tool["status"], tool["deployed"]), ("stale", "e" * 64))
-        self.assertIn("hyperloom nodes update", tool["hint"])
+        self.assertIn("hydraweave nodes update", tool["hint"])
         # The live-lease guard of `nodes update` is never bypassed: doctor does not redeploy.
         client.bootstrap.assert_not_called()
 
@@ -217,17 +217,17 @@ class CLITests(unittest.TestCase):
                                  "-File", str(windows / "install.ps1"), "-WhatIf"],
                                 env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(str(local / "hyperloom" / "venv"), result.stdout)
+        self.assertIn(str(local / "hydraweave" / "venv"), result.stdout)
         self.assertIn("--no-index", result.stdout)
         self.assertIn("--find-links", result.stdout)
         self.assertIn('"-e"', result.stdout)
         self.assertIn("checkout with spaces", result.stdout)
-        self.assertIn("-m hyperloom ui", result.stdout)
+        self.assertIn("-m hydraweave ui", result.stdout)
         self.assertFalse(local.exists())
         self.assertFalse(roaming.exists())
 
     def test_module_entry_point(self):
-        result = subprocess.run([sys.executable, "-m", "hyperloom", "up"], cwd=ROOT,
+        result = subprocess.run([sys.executable, "-m", "hydraweave", "up"], cwd=ROOT,
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "Phase 1a")
@@ -239,13 +239,13 @@ class StopWithoutAdmissionTests(unittest.TestCase):
 
     def setUp(self):
         import sqlite3
-        from hyperloom import admission
+        from hydraweave import admission
         self.sqlite3 = sqlite3
         self.orchestrate = Mock()
         self.orchestrate.down.return_value = {"state": "stopped"}
         self.admission = SimpleNamespace(Refused=admission.Refused, for_config=Mock(),
                                          profile_resources=Mock(return_value={"halo-1", "router"}))
-        modules = {"hyperloom.orchestrate": self.orchestrate, "hyperloom.admission": self.admission}
+        modules = {"hydraweave.orchestrate": self.orchestrate, "hydraweave.admission": self.admission}
         real = importlib.import_module
         patcher = patch.object(cli, "_module", side_effect=lambda name: modules.get(name) or real(name))
         patcher.start()
@@ -253,7 +253,7 @@ class StopWithoutAdmissionTests(unittest.TestCase):
         cluster = patch.object(cli, "_cluster", return_value=SimpleNamespace(machines={}, profiles={}))
         cluster.start()
         self.addCleanup(cluster.stop)
-        preflight = patch("hyperloom.recipes.preflight.cli")
+        preflight = patch("hydraweave.recipes.preflight.cli")
         preflight.start()
         self.addCleanup(preflight.stop)  # this fixture tests admission failures; launch validation has its own tests
 
@@ -330,7 +330,7 @@ class ConfigScopeTests(unittest.TestCase):
     --all-configs: every configuration's launch states share one runtime directory."""
 
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom cli scope ")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave cli scope ")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.run_dir, self.mine, self.theirs = root / "run", root / "a" / "cluster.json", root / "b" / "cluster.json"
@@ -340,14 +340,14 @@ class ConfigScopeTests(unittest.TestCase):
             if config is not None:
                 state["config"] = {"path": str(config), "sha256": None}
             (self.run_dir / f"up-{name}.json").write_text(json.dumps(state), encoding="utf-8")
-        for patcher in (patch("hyperloom.secrets.runtime_dir", return_value=self.run_dir),
+        for patcher in (patch("hydraweave.secrets.runtime_dir", return_value=self.run_dir),
                         patch.object(cli, "config_path", return_value=self.mine)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def invoke(self, *args):
         out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err),                 patch("hyperloom.orchestrate._http_json", side_effect=OSError("not reached")):
+        with redirect_stdout(out), redirect_stderr(err),                 patch("hydraweave.orchestrate._http_json", side_effect=OSError("not reached")):
             status = cli.main(list(args))
         return status, out.getvalue(), err.getvalue()
 
@@ -380,7 +380,7 @@ class ConfigScopeTests(unittest.TestCase):
         for args, expected in ((("metrics", "dump"), {"pa", "legacy"}), (("metrics", "dump", "--all-configs"), {"pa", "pb", "legacy"})):
             _, out, _ = self.invoke(*args)
             profiles = {line.split('profile="')[1].split('"')[0] for line in out.splitlines()
-                        if line.startswith("hyperloom_source_up") and 'profile="' in line}
+                        if line.startswith("hydraweave_source_up") and 'profile="' in line}
             self.assertEqual(profiles, expected, args)
 
 

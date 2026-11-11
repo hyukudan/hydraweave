@@ -1,9 +1,9 @@
-"""Runs rtx.service_run in its own process (as `hyperloom _prefill-run` does) with GPU queries stubbed out."""
+"""Runs rtx.service_run in its own process (as `hydraweave _prefill-run` does) with GPU queries stubbed out."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hyperloom import procs, rtx  # noqa: E402
+from hydraweave import procs, rtx  # noqa: E402
 
 
 class NoGpuDog(rtx.Watchdog):

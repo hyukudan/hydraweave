@@ -5,7 +5,7 @@ canned replies instead of the network."""
 import json
 from pathlib import Path
 
-from hyperloom.web.features import endpoints
+from hydraweave.web.features import endpoints
 
 
 FIXTURES = Path(__file__).resolve().parents[1].parent / "fixtures" / "endpoints"
@@ -58,7 +58,7 @@ def seed(store, now):
     store.put(endpoints.PREFS, endpoints.TARGETS_KEY, {"version": 1, "targets": TARGETS})
     for machine, ports in (("halo-1", [(18501, "lan"), (22, "any")]), ("halo-2", [(18431, "lan"), (18501, "lan")])):
         store.put("fleet/host", machine, {"ts": now, "ok": True, "error": None, "host": {
-            "schema": "hyperloom/node-v1", "verb": "host",
+            "schema": "hydraweave/node-v1", "verb": "host",
             "checks": {"listeners": {"status": "ok", "value": [{"port": p, "family": "ipv4", "scope": s} for p, s in ports]}}}})
     for name, kind, unit, legend in endpoints.SERIES:
         store.describe(name, kind, unit=unit, interval=endpoints.INTERVAL_S, legend=legend)
@@ -75,7 +75,7 @@ def seed(store, now):
 
 
 def patches(directory, now):
-    from hyperloom import secrets
+    from hydraweave import secrets
     secrets.ensure("engine-key")              # the lab engine's key, in the fixture's own secret directory
     # The fleet answers above stay fresh for the whole smoke run.
     return [(endpoints, "Session", FakeSession), (endpoints, "LISTENER_FRESH_S", 10 ** 9)]

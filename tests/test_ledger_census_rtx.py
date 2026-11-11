@@ -8,9 +8,9 @@ import subprocess
 import unittest
 from unittest import mock
 
-from hyperloom.web import features
-from hyperloom.web.api import APIError
-from hyperloom.web.features import ledger
+from hydraweave.web import features
+from hydraweave.web.api import APIError
+from hydraweave.web.features import ledger
 from tests.test_ledger_collector import make_api, state
 
 

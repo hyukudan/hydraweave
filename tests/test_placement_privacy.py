@@ -160,8 +160,8 @@ def findings():
         if private(doc):
             found[name] = hashlib.sha256(raw).hexdigest()
     for path in [*ROOT.glob("*.md"), *ROOT.glob("docs/**/*.md"), *ROOT.glob("tests/**/*.md"),
-                 *ROOT.glob("hyperloom/**/*.py"), *ROOT.glob("hyperloom/**/*.json"),
-                 *ROOT.glob("hyperloom/recipes/examples/**/*.toml")]:
+                 *ROOT.glob("hydraweave/**/*.py"), *ROOT.glob("hydraweave/**/*.json"),
+                 *ROOT.glob("hydraweave/recipes/examples/**/*.toml")]:
         raw = path.read_bytes()
         text = raw.decode("utf-8")
         values = [text] if path.suffix != ".py" else [node.value for node in ast.walk(ast.parse(text))
@@ -202,7 +202,7 @@ class PrivacyTests(unittest.TestCase):
                     self.assertFalse(private(text))
 
     def test_download_home_examples_are_portable(self):
-        from hyperloom.downloads import too_wide
+        from hydraweave.downloads import too_wide
         self.assertEqual(list(private_paths(too_wide.__doc__)), [])
         self.assertIsNone(LOCAL_IDENTITY.search(too_wide.__doc__))
         self.assertFalse(private(too_wide.__doc__))

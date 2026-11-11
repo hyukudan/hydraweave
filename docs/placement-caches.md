@@ -17,7 +17,7 @@ configuration. The local cache stores that exact selection separately from the e
 
 At admission, `load(reference, selected=paths)` checks the cache key, stored document integrity, exact selected
 paths and the selected files' size and nanosecond mtime. Missing or changed content refuses `PL_E_STALE` until an
-explicit approved `hyperloom probe --manifest` refresh. Planning never hashes content, reads full model files or
+explicit approved `hydraweave probe --manifest` refresh. Planning never hashes content, reads full model files or
 launches an engine. The engine's header checks and receipt validation remain authoritative at load. As specified
 by the contract, same-size changes with deliberately preserved mtime are outside the stat-only admission check.
 
@@ -31,6 +31,6 @@ retain their original `mtime` comparison; records with `mtime_ns` from the initi
 `descriptors.PlacementStore` uses a separate `placement-headers-v1` directory and schema with nanosecond identity.
 Placement's separate versioned header, manifest and component caches always check nanosecond mtimes.
 
-`hyperloom probe --manifest --file FILE --window WINDOW.json` invokes the packaged CPU `ts-recipe manifest --full`
+`hydraweave probe --manifest --file FILE --window WINDOW.json` invokes the packaged CPU `ts-recipe manifest --full`
 only within the approved window. The child has the window's remaining time as its timeout; expired or failed
 acquisitions publish nothing. Successful, validated manifests are saved in the local manifest store.

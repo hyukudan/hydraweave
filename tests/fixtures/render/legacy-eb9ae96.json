@@ -5,7 +5,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "0",
@@ -22,7 +22,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_DS41_CB4": "1",
@@ -38,7 +38,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "1",
@@ -55,7 +55,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_DS41_CB4": "1",
@@ -237,7 +237,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "0",
@@ -254,7 +254,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -274,7 +274,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "1",
@@ -291,7 +291,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -477,7 +477,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "0",
@@ -494,7 +494,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_DS41_CB4": "1",
@@ -511,7 +511,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "1",
@@ -528,7 +528,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_DS41_CB4": "1",
@@ -723,7 +723,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "0",
@@ -740,7 +740,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -760,7 +760,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "1",
@@ -777,7 +777,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -847,8 +847,8 @@
       },
       "service": {
         "argv": [
-          "<drive-c>\\hyperloom\\cuda\\9211b07e13c6\\bin\\strix-cuda-ds41-prefill-service.exe",
-          "<drive-c>/hyperloom/assets/ds41.gguf",
+          "<drive-c>\\hydraweave\\cuda\\9211b07e13c6\\bin\\strix-cuda-ds41-prefill-service.exe",
+          "<drive-c>/hydraweave/assets/ds41.gguf",
           "--host",
           "<ipv4-loopback>",
           "--port",
@@ -883,7 +883,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "0",
@@ -900,7 +900,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -920,7 +920,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-deepseek41-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-deepseek41-serve",
             "<posix>/opt/assets/ds41.gguf",
             "--rank",
             "1",
@@ -937,7 +937,7 @@
             "--http-port",
             "18431",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key",
+            "<posix>/opt/hydraweave/secrets/engine.key",
             "--context",
             "33024",
             "--slots",
@@ -1007,8 +1007,8 @@
       },
       "service": {
         "argv": [
-          "<drive-c>\\hyperloom\\cuda\\9211b07e13c6\\bin\\strix-cuda-ds41-prefill-service.exe",
-          "<drive-c>/hyperloom/assets/ds41.gguf",
+          "<drive-c>\\hydraweave\\cuda\\9211b07e13c6\\bin\\strix-cuda-ds41-prefill-service.exe",
+          "<drive-c>/hydraweave/assets/ds41.gguf",
           "--host",
           "<ipv4-loopback>",
           "--port",
@@ -1099,7 +1099,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-minimax-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-minimax-serve",
             "<posix>/models/minimax",
             "--rank",
             "0",
@@ -1127,7 +1127,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-minimax-serve",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-minimax-serve",
             "<posix>/models/minimax",
             "--rank",
             "1",
@@ -1354,7 +1354,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-hip-decode-token",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-hip-decode-token",
             "<posix>/opt/assets/qwen.gguf",
             "11",
             "22",
@@ -1516,7 +1516,7 @@
             "--http-bind",
             "<ipv4-node-a>",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_COHORT_ROWS": "32",
@@ -1545,7 +1545,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-hip-decode-token",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-hip-decode-token",
             "<posix>/opt/assets/qwen.gguf",
             "11",
             "22",
@@ -1707,7 +1707,7 @@
             "--http-bind",
             "<ipv4-node-b>",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_COHORT_ROWS": "32",
@@ -2166,7 +2166,7 @@
       "processes": [
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-hip-decode-token",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-hip-decode-token",
             "<posix>/opt/assets/qwen.gguf",
             "11",
             "22",
@@ -2328,7 +2328,7 @@
             "--http-bind",
             "<ipv4-node-a>",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_COHORT_ROWS": "32",
@@ -2357,7 +2357,7 @@
         },
         {
           "argv": [
-            "<posix>/opt/hyperloom/releases/000000000000/bin/strix-hip-decode-token",
+            "<posix>/opt/hydraweave/releases/000000000000/bin/strix-hip-decode-token",
             "<posix>/opt/assets/qwen.gguf",
             "11",
             "22",
@@ -2519,7 +2519,7 @@
             "--http-bind",
             "<ipv4-node-b>",
             "--http-api-key-file",
-            "<posix>/opt/hyperloom/secrets/engine.key"
+            "<posix>/opt/hydraweave/secrets/engine.key"
           ],
           "env": {
             "STRIX_COHORT_ROWS": "32",

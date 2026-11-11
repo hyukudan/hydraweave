@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from hyperloom.web.features import observe
+from hydraweave.web.features import observe
 
 
 LOOPBACK = str(ipaddress.ip_address(socket.INADDR_LOOPBACK))

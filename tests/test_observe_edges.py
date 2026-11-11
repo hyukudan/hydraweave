@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from hyperloom.web.features import observe
+from hydraweave.web.features import observe
 from tests.fixtures.observe.fakes import LOOPBACK, NODE1, NODE2, ROUTER, Env, fixture
 
 
@@ -422,7 +422,7 @@ class ExactIdentityTests(FleetBase):
         self.assertEqual(env.store.get("observe/engine", "qwen/halo-1")["instance_basis"], "conflict")
 
     def test_oversized_ids_are_refused(self):
-        from hyperloom.adapters import engine
+        from hydraweave.adapters import engine
         self.assertIsNone(engine.identity_text("x" * 129))
         self.assertIsNone(engine.identity_text("a" + chr(10) + "b"))
         self.assertEqual(engine.identity_text("x" * 128), "x" * 128)
@@ -469,7 +469,7 @@ class UsablePayloadTests(FleetBase):
 
 class RouterIdentityTests(unittest.TestCase):
     def test_page_identity_is_exact(self):
-        from hyperloom.adapters import AdapterError, router
+        from hydraweave.adapters import AdapterError, router
         page = fixture("router-requests.json")
         self.assertEqual(router.parse_requests({**page, "instance": "r" * 128}).instance, "r" * 128)
         for bad in ("r" * 129, "a" + chr(10) + "b"):
@@ -478,14 +478,14 @@ class RouterIdentityTests(unittest.TestCase):
 
 
 # These tests drive the collectors with their own clock to check accounting, not pacing: the polling budget
-# (hyperloom.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
+# (hydraweave.pollbudget, tested in tests/test_pollbudget.py) grants every read here.
 _unpaced = None
 
 
 def setUpModule():
     global _unpaced
     from unittest import mock as _mock
-    from hyperloom import pollbudget as _pollbudget
+    from hydraweave import pollbudget as _pollbudget
     _unpaced = _mock.patch.multiple(_pollbudget, CYCLE_S=0.0, NODE_SPACING_S=0.0, ENGINE_CYCLE_S=0.0, TURN_CHECK_S=0.0)
     _unpaced.start()
 

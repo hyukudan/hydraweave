@@ -49,7 +49,7 @@ python tests/legacy_render.py --source "<baseline-checkout>" --output tests/fixt
 python -m pytest -q tests/test_legacy_render.py
 ```
 
-The generator imports Hyperloom only from `--source` in a fresh interpreter.
+The generator imports Hydraweave only from `--source` in a fresh interpreter.
 The stored fixture uses portable placeholders. `tests/portable_fixtures.py`
 reconstructs its original values only in memory; the reconstructed bytes retain
 SHA-256 `40489d24e0a9b64d9b6186b2742d2fff734e4d66e310dd1776d8b62c340168e7`.

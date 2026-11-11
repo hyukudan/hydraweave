@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom.web.features import launch, results
-from hyperloom.winproc import no_window
+from hydraweave.web.features import launch, results
+from hydraweave.winproc import no_window
 from tests import test_launch_feature
 
 
@@ -97,7 +97,7 @@ class LaunchReviewTests(unittest.TestCase):
         code = """import sys, time
 from pathlib import Path
 from types import SimpleNamespace
-from hyperloom.web.features import launch
+from hydraweave.web.features import launch
 api = SimpleNamespace(config_path=Path(sys.argv[1]))
 while not Path(sys.argv[2]).exists(): time.sleep(.01)
 for i in range(8):
@@ -120,7 +120,7 @@ for i in range(8):
 
 class ConfigurationReviewTests(unittest.TestCase):
     def test_published_survives_missing_and_invalid_configuration(self):
-        from hyperloom.web.api import API
+        from hydraweave.web.api import API
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "cluster.json"
             api = API(path, audit_path=Path(directory) / "audit.jsonl")
@@ -166,17 +166,17 @@ class SourceReviewTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         # Explicit branch inventory: this test also runs without repository history.
         names = (
-          "hyperloom/adapters/sessions.py",
-          "hyperloom/data/results.json",
-          "hyperloom/web/features/launch.py",
-          "hyperloom/web/features/results.py",
-          "hyperloom/web/features/sessioncache.py",
-          "hyperloom/web/static/pages/launch.css",
-          "hyperloom/web/static/pages/launch.js",
-          "hyperloom/web/static/pages/results.css",
-          "hyperloom/web/static/pages/results.js",
-          "hyperloom/web/static/pages/sessioncache.css",
-          "hyperloom/web/static/pages/sessioncache.js",
+          "hydraweave/adapters/sessions.py",
+          "hydraweave/data/results.json",
+          "hydraweave/web/features/launch.py",
+          "hydraweave/web/features/results.py",
+          "hydraweave/web/features/sessioncache.py",
+          "hydraweave/web/static/pages/launch.css",
+          "hydraweave/web/static/pages/launch.js",
+          "hydraweave/web/static/pages/results.css",
+          "hydraweave/web/static/pages/results.js",
+          "hydraweave/web/static/pages/sessioncache.css",
+          "hydraweave/web/static/pages/sessioncache.js",
           "tests/fixtures/frontend/polling.js",
           "tests/fixtures/sessioncache/README.md",
           "tests/fixtures/sessioncache/deepseek.json",
@@ -223,9 +223,9 @@ class RenderReviewTests(unittest.TestCase):
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 const H = {state: {docs: {}, errors: {}}, esc: s => String(s),
            card: (title, body) => title + body, unavailable: why => 'Unavailable: ' + why};
-const context = {window: {Hyperloom: H}};
-vm.runInNewContext(fs.readFileSync('hyperloom/web/static/pages/sessioncache.js', 'utf8'), context);
-const render = () => context.window.HyperloomPages.sessioncache.render();
+const context = {window: {Hydraweave: H}};
+vm.runInNewContext(fs.readFileSync('hydraweave/web/static/pages/sessioncache.js', 'utf8'), context);
+const render = () => context.window.HydraweavePages.sessioncache.render();
 H.state.docs.sessioncache = {profiles: [], why: {profiles: 'configuration unavailable'}};
 assert(render().includes('Unavailable: configuration unavailable'));
 assert(!render().includes('No running profiles collected yet.'));

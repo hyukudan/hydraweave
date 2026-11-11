@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def seed(store, now):
-    from hyperloom.bench import store as bench_store, targets
+    from hydraweave.bench import store as bench_store, targets
     recorded = json.loads(read_fixture(Path(__file__).resolve().parents[2] / "fixtures" / "bench" / "seed-runs.json"))
     store.put(targets.PREFS_NAMESPACE, targets.PREFS_KEY, {"targets": recorded["targets"]})
     for run in recorded["runs"]:

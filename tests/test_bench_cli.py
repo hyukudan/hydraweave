@@ -1,4 +1,4 @@
-"""hyperloom bench CLI: the same arguments as the portal, command-line previews, a run with its own hold, history,
+"""hydraweave bench CLI: the same arguments as the portal, command-line previews, a run with its own hold, history,
 share, receipt export and verification."""
 
 import argparse
@@ -15,13 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures" / "bench"))
 
 import support  # noqa: E402
 
-from hyperloom import admission, cli  # noqa: E402
-from hyperloom.bench import commands  # noqa: E402
-from hyperloom.cliext import bench as bench_cli  # noqa: E402
+from hydraweave import admission, cli  # noqa: E402
+from hydraweave.bench import commands  # noqa: E402
+from hydraweave.cliext import bench as bench_cli  # noqa: E402
 
 
 def parse(argv):
-    parser = argparse.ArgumentParser(prog="hyperloom")
+    parser = argparse.ArgumentParser(prog="hydraweave")
     sub = parser.add_subparsers(dest="command")
     bench_cli.add(sub)
     return parser.parse_args(argv)
@@ -75,7 +75,7 @@ class CLIRunTests(unittest.TestCase):
         code, out, _ = self.main(["bench", "runs", "list", "--kind", "decode"])
         self.assertEqual([r["id"] for r in json.loads(out)], [run_id])
         code, out, _ = self.main(["bench", "share", run_id])
-        self.assertIn("hyperloom bench · decode", out)
+        self.assertIn("hydraweave bench · decode", out)
         self.assertNotIn("127.0.0.1", out)
         code, out, err = self.main(["bench", "ab", "--a-profile", "qwen", "--b-target", "fake", "--cases", "2", "--max-tokens", "8", "--quiet"])
         self.assertEqual(code, 0, out + err)

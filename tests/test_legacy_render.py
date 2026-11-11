@@ -24,7 +24,7 @@ class LegacyRenderTests(unittest.TestCase):
     def test_oracle_covers_every_shipped_preset_and_cap(self):
         doc = json.loads(read_fixture(FIXTURE))
         self.assertEqual(doc["oracle"], "eb9ae96")
-        presets = {p.stem for p in (ROOT / "hyperloom/presets").glob("*.json")
+        presets = {p.stem for p in (ROOT / "hydraweave/presets").glob("*.json")
                    if "argv" in json.loads(p.read_text(encoding="utf-8"))}
         profiles = {r["profile"] for r in doc["rows"]}
         self.assertEqual(profiles - {"ds41-rtx"}, presets - {"rtx-prefill-ds41"})

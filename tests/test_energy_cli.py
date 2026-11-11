@@ -1,4 +1,4 @@
-"""`hyperloom energy` and `hyperloom thermals`: the portal's functions and dispatcher, audited the same way."""
+"""`hydraweave energy` and `hydraweave thermals`: the portal's functions and dispatcher, audited the same way."""
 
 import contextlib
 import io
@@ -9,16 +9,16 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, telemetry
-from hyperloom.web import features
-from hyperloom.web.features import energy
+from hydraweave import cli, telemetry
+from hydraweave.web import features
+from hydraweave.web.features import energy
 
 
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        self.config = Path(self.dir.name) / "hyperloom" / "cluster.json"
+        self.config = Path(self.dir.name) / "hydraweave" / "cluster.json"
         patcher = mock.patch.object(cli, "config_path", lambda: self.config)
         patcher.start()
         self.addCleanup(patcher.stop)

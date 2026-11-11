@@ -12,9 +12,9 @@ except ImportError:
     from unittest import SkipTest
     raise SkipTest("requires the test extra (pytest)") from None
 
-from hyperloom import admission, cli, orchestrate, placement_supervision, rtx
-from hyperloom.config import parse
-from hyperloom.recipes import launch, service, grants, reader, runtime, core
+from hydraweave import admission, cli, orchestrate, placement_supervision, rtx
+from hydraweave.config import parse
+from hydraweave.recipes import launch, service, grants, reader, runtime, core
 
 from tests import test_recipes, test_rtx
 from tests.placement_fixtures import grant, identity, files

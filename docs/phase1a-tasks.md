@@ -1,6 +1,6 @@
 # Phase 1a tasks: Qwen two replicas + router, from the CLI (code only)
 
-Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/phase0-tasks.md` (its rules apply unchanged). Read the Phase 0 code you build on: `hyperloom/config.py`, `render.py`, `remote.py`, `procs.py`, `cli.py`, and `node/hyperloom-node`.
+Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/phase0-tasks.md` (its rules apply unchanged). Read the Phase 0 code you build on: `hydraweave/config.py`, `render.py`, `remote.py`, `procs.py`, `cli.py`, and `node/hydraweave-node`.
 
 **Scope boundary:** in this phase **nobody touches a GPU, a real node or a real lab script.** Tests use fakes and temp dirs. The reviewer runs the real acceptance later, in leases approved by main.
 
@@ -26,15 +26,15 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 
 **Node-to-node ssh:** node 1 can ssh to node 2 with BatchMode keys, using a node-side alias configured in `cluster.json` as `machines.<id>.peer_ssh.<peer id>`.
 
-## Node extension contract (already wired; do not change `hyperloom-node`)
-- `node/hyperloom-node` dispatches any verb it does not know to `hyperloom_install.VERBS` / `hyperloom_lease.VERBS`. Each module exposes `VERBS: set[str]` and `run(verb, payload: dict) -> dict`.
-- The payload is the JSON from stdin. Return `{"schema": "hyperloom/node-v1", "verb": ..., ...}`, plus `"error": "..."` on failure.
-- The modules are imported from the same directory (`~/.hyperloom-boot/`) and are **stdlib only, Python ≥ 3.10**.
+## Node extension contract (already wired; do not change `hydraweave-node`)
+- `node/hydraweave-node` dispatches any verb it does not know to `hydraweave_install.VERBS` / `hydraweave_lease.VERBS`. Each module exposes `VERBS: set[str]` and `run(verb, payload: dict) -> dict`.
+- The payload is the JSON from stdin. Return `{"schema": "hydraweave/node-v1", "verb": ..., ...}`, plus `"error": "..."` on failure.
+- The modules are imported from the same directory (`~/.hydraweave-boot/`) and are **stdlib only, Python ≥ 3.10**.
 - Every path in a payload is absolute and validated: no `..`, no control characters.
-- **Marked install root:** `<root>/.hyperloom-root` contains a random id written by `install` on first use. Refuse a root that is or contains `$HOME`, the lab dir, a git repository, or a configured asset path (canonicalized with `realpath`).
+- **Marked install root:** `<root>/.hydraweave-root` contains a random id written by `install` on first use. Refuse a root that is or contains `$HOME`, the lab dir, a git repository, or a configured asset path (canonicalized with `realpath`).
 
 ## Task F: node install and releases (owner: worker F)
-**Files:** `node/hyperloom_install.py`, `node/build-node.sh`, `tests/test_node_install.py`, `tests/fixtures/node_install/*`
+**Files:** `node/hydraweave_install.py`, `node/build-node.sh`, `tests/test_node_install.py`, `tests/fixtures/node_install/*`
 
 **`VERBS = {"install", "job", "releases", "activate", "uninstall", "verify-model", "push-release"}`**
 
@@ -45,7 +45,7 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 - **Build envelope:** `systemd-run --user --scope -p MemoryMax=16G nice -n 19` when `systemd-run --user` works, else `nice -n 19`.
 - **Lab mode:** refuse to start while the lab holder line starts with `PAIR`.
 - On success the job writes `<root>/releases/<release-id>/{bin,MANIFEST.json}`:
-  - the manifest lists component commits, the configure recipe, toolchain versions (`amdclang++ --version`, ROCm version, cmake, ninja), every binary's sha256, the hyperloom-node version, and `runtime_env: {"LD_LIBRARY_PATH": "/opt/rocm/core-10.1/lib"}`;
+  - the manifest lists component commits, the configure recipe, toolchain versions (`amdclang++ --version`, ROCm version, cmake, ninja), every binary's sha256, the hydraweave-node version, and `runtime_env: {"LD_LIBRARY_PATH": "/opt/rocm/core-10.1/lib"}`;
   - `release-id` = the first 12 hex characters of the sha256 of the canonical manifest JSON.
 - **Capability check:** run `<bin> --help` (expect exit 0 or a usage text) for every target, and record it.
 
@@ -56,7 +56,7 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 **Other verbs**
 - `job {root, job}` returns the recorded job fields (including `state`, and `release_id` or `verified` on success) plus `tail`, the last at most 64 KiB of its UTF-8 log. Both build and hash jobs use this interface. A failed job remains queryable with exit 0, with its diagnostic in `reason`; `error` is reserved for a failed query.
 - `releases` lists releases with their manifests and marks the active one per profile.
-- `activate {root, profile, release_id}` writes `<root>/etc/active-<profile>.json` atomically (temp file + rename). It refuses if a lease for that profile is running (check `hyperloom_lease` state files under `<root>/run/`).
+- `activate {root, profile, release_id}` writes `<root>/etc/active-<profile>.json` atomically (temp file + rename). It refuses if a lease for that profile is running (check `hydraweave_lease` state files under `<root>/run/`).
 - `push-release {root, release_id, peer_ssh, peer_root}` copies a release to the peer node (rsync over ssh if present, else `tar | ssh tar`) and verifies the sha256 of every binary on the peer (ssh `sha256sum`). It also fetches the manifest's pinned TensorMeld source into `<peer_root>/src/tensormeld-<commit>` without building it.
 - `verify-model {path, bytes, sha256|null}` checks the size; with a `sha256` it hashes in a background job in the same job framework, at `nice -n 19` / `ionice -c3`.
 - `uninstall {root, keep_logs}` works only on a marked root, never deletes `releases/<active>` while a lease runs, and never touches anything outside the root.
@@ -64,7 +64,7 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 **Tests:** temp roots; fake `git`, `cmake`, `ninja`, `ctest` and `systemd-run` scripts on PATH (POSIX only, so skip on Windows where needed); the marker refusals; release-id stability; activation refused while a lease is running; uninstall boundaries.
 
 ## Task G: leases and the supervisor (owner: worker G)
-**Files:** `node/hyperloom_lease.py`, `tests/test_node_lease.py`, `tests/fixtures/node_lease/*` (fake gpu-turn scripts, a fake engine that prints the Qwen stderr line or the DeepSeek READY JSON and serves `/health` on 127.0.0.1)
+**Files:** `node/hydraweave_lease.py`, `tests/test_node_lease.py`, `tests/fixtures/node_lease/*` (fake gpu-turn scripts, a fake engine that prints the Qwen stderr line or the DeepSeek READY JSON and serves `/health` on 127.0.0.1)
 
 **`VERBS = {"lease", "cancel", "status", "logs", "stop", "put-secret", "peer-run"}`**
 
@@ -74,8 +74,8 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
  processes: [{name, machine: "local"|"peer", argv, env, ready: "qwen-stderr"|"ds41-json"|"http-health", health_url, ready_timeout_s}],
  peer_ssh|null, peer_root|null, peer_lab_dir|null, layout_required: null|"1"}
 ```
-- It runs `setsid <lab>/gpu-turn.sh <label> <boot>/hyperloom-node supervise-internal <spec-file>`: `gpu-turn-pair.sh` for `kind: pair`; no turn script for `kind: none`, which is the router (no GPU). The spec file is written 0600 in `<root>/run/`.
-- `supervise-internal` is a private CLI entry. Implement it in `hyperloom_lease.py` and add it to `VERBS`; it is a plain module function invoked by `hyperloom-node`.
+- It runs `setsid <lab>/gpu-turn.sh <label> <boot>/hydraweave-node supervise-internal <spec-file>`: `gpu-turn-pair.sh` for `kind: pair`; no turn script for `kind: none`, which is the router (no GPU). The spec file is written 0600 in `<root>/run/`.
+- `supervise-internal` is a private CLI entry. Implement it in `hydraweave_lease.py` and add it to `VERBS`; it is a plain module function invoked by `hydraweave-node`.
 - **Labels** must match `^hl-[a-z0-9-]{1,40}$`.
 - **deadline_s:** the default and maximum is 1140 for `single` (the turn cap is 1200 minus the drain margin).
   - A larger value needs `approval` with `lease_s >= deadline_s + 60`, `end_epoch` in the future and a non-empty `ref`.
@@ -88,7 +88,7 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 3. Start each process in its own process group (`start_new_session`) with `env -i`-style env: `PATH=/usr/local/bin:/usr/bin:/bin`, `HOME`, the release `runtime_env`, plus the spec env.
    - **Reject** spec env names matching `LD_PRELOAD`, `LD_AUDIT`, `PYTHON*`, `BASH_ENV`, `ENV` (`LD_LIBRARY_PATH` only from `runtime_env`).
    - stdout and stderr go to separate log files under `<root>/log/`.
-   - Peer processes run through `ssh <peer_ssh> -- <peer boot>/hyperloom-node peer-run` with the process JSON on stdin. `peer-run` starts the child in its own group and kills the whole group when its stdin hits EOF (dead-man), and it streams nothing back except a final JSON status.
+   - Peer processes run through `ssh <peer_ssh> -- <peer boot>/hydraweave-node peer-run` with the process JSON on stdin. `peer-run` starts the child in its own group and kills the whole group when its stdin hits EOF (dead-man), and it streams nothing back except a final JSON status.
 4. Readiness per adapter, plus `health_url` 200, within `ready_timeout_s`. If any process fails, stop all and set state `failed` with the reason (partial-start cleanup).
 5. Run until `stop` is requested (the `run/lease-<id>.stop` file appears), the deadline is reached (60 s before the turn cap), or a process dies. Stop order:
    - DeepSeek gets `POST /admin/drain` if `ready == ds41-json` (localhost, with the key file if given), then SIGTERM;
@@ -117,37 +117,37 @@ Read `docs/SPEC.md` §2.5–2.7, §4, §6 (Phase 1a), §15 and §16, plus `docs/
 POSIX-only parts are skipped on Windows, and the pure logic is tested everywhere.
 
 ## Task H: control-machine orchestration and CLI (owner: worker H)
-**Files:** `hyperloom/orchestrate.py`, `hyperloom/secrets.py`, `hyperloom/cli.py` (you now own it), `hyperloom/remote.py` (you own the edits: bootstrap copies `NODE_FILES` into `~/.hyperloom-boot/` with one scp of the four files, then `chmod`; keep the rest intact), `tests/test_orchestrate.py`, `tests/test_secrets.py`, `tests/test_remote.py` (only the bootstrap tests)
+**Files:** `hydraweave/orchestrate.py`, `hydraweave/secrets.py`, `hydraweave/cli.py` (you now own it), `hydraweave/remote.py` (you own the edits: bootstrap copies `NODE_FILES` into `~/.hydraweave-boot/` with one scp of the four files, then `chmod`; keep the rest intact), `tests/test_orchestrate.py`, `tests/test_secrets.py`, `tests/test_remote.py` (only the bootstrap tests)
 
-**`hyperloom.secrets`**
-- API keys are 32 random bytes, hex, stored in `%APPDATA%\hyperloom\secrets\<name>` on Windows, protected with **DPAPI** (`CryptProtectData` via ctypes, user scope), or `~/.config/hyperloom/secrets` 0600 on POSIX.
-- `get(name)`, `ensure(name)`, `path_for_router(name)` (the decrypted key written to a 0600 file under `%LOCALAPPDATA%\hyperloom\run\` only while the router runs, deleted at stop), and `rotate(name)`.
+**`hydraweave.secrets`**
+- API keys are 32 random bytes, hex, stored in `%APPDATA%\hydraweave\secrets\<name>` on Windows, protected with **DPAPI** (`CryptProtectData` via ctypes, user scope), or `~/.config/hydraweave/secrets` 0600 on POSIX.
+- `get(name)`, `ensure(name)`, `path_for_router(name)` (the decrypted key written to a 0600 file under `%LOCALAPPDATA%\hydraweave\run\` only while the router runs, deleted at stop), and `rotate(name)`.
 
-**`hyperloom.orchestrate`** (all node work goes through `hyperloom.remote.Remote.call`):
-- `install(cluster, build_machine, targets)`: bootstrap hyperloom-node on every machine of the profile, `install` on the build machine (poll `job`), `push-release` to the others, then return the 12-character release id. The recipe comes from `versions.lock` `toolchains.hip_configure`; components include pinned TensorMeld source, which is fetched without building it.
+**`hydraweave.orchestrate`** (all node work goes through `hydraweave.remote.Remote.call`):
+- `install(cluster, build_machine, targets)`: bootstrap hydraweave-node on every machine of the profile, `install` on the build machine (poll `job`), `push-release` to the others, then return the 12-character release id. The recipe comes from `versions.lock` `toolchains.hip_configure`; components include pinned TensorMeld source, which is fetched without building it.
 - `up(cluster, profile, router="local"|machine_id, nodes=[...], devices=[...])`:
   - validates that every declared machine is reachable (doctor) **before** any lease;
-  - ensures keys (`put-secret` on each node, from `hyperloom.secrets`);
+  - ensures keys (`put-secret` on each node, from `hydraweave.secrets`);
   - starts the leases (qwen-replicas: one `single` lease per node with label `hl-qwen-<node>-<rand4>`; ds41-pair: one `pair` lease on rank 0's node, with `layout_required: "1"` and rank 1 as a `peer` process);
   - waits for `ready`;
   - starts the router: `local` = `procs.LocalChild` running `<abs python> -m tensormeld serve-replicas <rendered>`; `<machine>` = a `kind: none` lease on that machine running the router from `<root>/src/tensormeld-<commit>/src` via `PYTHONPATH`, with listen on its private address and a key file;
-  - writes `%LOCALAPPDATA%\hyperloom\run\up-<profile>.json` (lease ids, router).
+  - writes `%LOCALAPPDATA%\hydraweave\run\up-<profile>.json` (lease ids, router).
   - A start failure stops everything it started.
 - `down(profile)`: stop the router first, then `stop` every lease (and `cancel` queued ones). `status(profile)` merges node `status` with router `/api/status`.
 
 **CLI**
-- `hyperloom install PROFILE [--build-on MACHINE]`
-- `hyperloom up PROFILE [--router local|MACHINE] [--node ID ...] [--device MACHINE:DEVICE ...] [--deadline S] [--approval-ref TEXT --approval-lease S --approval-end ISO]`
-- `hyperloom down PROFILE`
-- `hyperloom down --force PROFILE` recovers saved leases after a controller crash, including when an old lock file remains. Both forms can stop a still-waiting `up`: they write a stop marker, cancel queued leases and stop running ones without waiting for the `up` lock.
-- `hyperloom status [PROFILE] [--config FILE | --all-configs]` lists the launches of `--config` (default: the default configuration) and, marked, states that record no configuration; another configuration's profile answers stopped with the reason. `--all-configs` reads every configuration's. `logs` and `metrics` take the same two options (another configuration's launch only with `--all-configs`).
-- `hyperloom endpoint PROFILE` prints the saved router URL and its client key name (never the key).
-- `hyperloom logs PROFILE PROCESS [--tail N] [--config FILE | --all-configs]`
-- `hyperloom keys rotate NAME`
-- `hyperloom keys export PROFILE --out FILE` exports the saved router client key as plaintext for a client. The router requires this key even on loopback. Run `up` first to create the key; export refuses to overwrite an existing file or symlink. The export has a protected user-only DACL on Windows and mode `0600` on POSIX. Clients send it as `Authorization: Bearer <key>`; keep the exported file private.
+- `hydraweave install PROFILE [--build-on MACHINE]`
+- `hydraweave up PROFILE [--router local|MACHINE] [--node ID ...] [--device MACHINE:DEVICE ...] [--deadline S] [--approval-ref TEXT --approval-lease S --approval-end ISO]`
+- `hydraweave down PROFILE`
+- `hydraweave down --force PROFILE` recovers saved leases after a controller crash, including when an old lock file remains. Both forms can stop a still-waiting `up`: they write a stop marker, cancel queued leases and stop running ones without waiting for the `up` lock.
+- `hydraweave status [PROFILE] [--config FILE | --all-configs]` lists the launches of `--config` (default: the default configuration) and, marked, states that record no configuration; another configuration's profile answers stopped with the reason. `--all-configs` reads every configuration's. `logs` and `metrics` take the same two options (another configuration's launch only with `--all-configs`).
+- `hydraweave endpoint PROFILE` prints the saved router URL and its client key name (never the key).
+- `hydraweave logs PROFILE PROCESS [--tail N] [--config FILE | --all-configs]`
+- `hydraweave keys rotate NAME`
+- `hydraweave keys export PROFILE --out FILE` exports the saved router client key as plaintext for a client. The router requires this key even on loopback. Run `up` first to create the key; export refuses to overwrite an existing file or symlink. The export has a protected user-only DACL on Windows and mode `0600` on POSIX. Clients send it as `Authorization: Bearer <key>`; keep the exported file private.
 - `--node`/`--device` default to the profile's machines. A declared machine that is not in the config, or is unreachable, fails before any lease.
 
-Machine `lab_dir` and `peer_ssh` are shared `hyperloom/cluster-v1` fields, accepted by `config validate` and all loaders. `lab_dir` is an absolute POSIX path without `..`; `peer_ssh` maps known machine IDs to node-side SSH aliases.
+Machine `lab_dir` and `peer_ssh` are shared `hydraweave/cluster-v1` fields, accepted by `config validate` and all loaders. `lab_dir` is an absolute POSIX path without `..`; `peer_ssh` maps known machine IDs to node-side SSH aliases.
 
 Every accepted lease ID is saved before readiness polling. A waiting `up` polls the stop marker and cleans its owned resources on cancellation, SIGINT, SIGTERM, SIGBREAK or Windows console close. A detached watcher retries cleanup if the starting controller is forcibly terminated. Failed cleanup retains the ownership state for `down --force` to retry; the OS lock file is left in place because its lock is released by process exit. An unavailable node can only be cleaned once it is reachable again.
 
@@ -155,7 +155,7 @@ The local router inherits the earliest engine lease deadline and stops when that
 
 ## Integration notes (worker I)
 
-- The Windows installer installs hyperloom with `pip install -e <checkout>` so node scripts, `versions.lock`, and pinned component sources stay available. `hyperloom.paths.repo_root()` resolves the package parent once and explains missing repository resources.
+- The Windows installer installs Hydraweave with `pip install -e <checkout>` so node scripts, `versions.lock`, and pinned component sources stay available. `hydraweave.paths.repo_root()` resolves the package parent once and explains missing repository resources.
 - Release IDs are exactly 12 lowercase hex characters in config, node records, rendered paths, and orchestration.
 - POSIX port probes use `SO_REUSEADDR` so a stopped router's TIME_WAIT connections do not block restart; Windows keeps `SO_EXCLUSIVEADDRUSE`.
 - Node launches use Python's `start_new_session=True` (the POSIX `setsid` operation), without relying on a `setsid` executable. Single turns remain `<lab>/gpu-turn.sh <label> <cmd...>`; pairs use `<lab>/gpu-turn-pair.sh` on rank 0. Ambient/spec `GPU_TURN_MAX` cannot set the cap; only a validated single-turn approval can.

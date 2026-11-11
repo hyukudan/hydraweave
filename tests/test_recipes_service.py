@@ -1,4 +1,4 @@
-"""The recipe catalog and operations shared by the CLI and the portal (hyperloom/recipes/service.py): built-in
+"""The recipe catalog and operations shared by the CLI and the portal (hydraweave/recipes/service.py): built-in
 examples, ids and collisions, the user-directory writes, snapshots of launch inputs, plan / deploy, the launch record
 and the route statistics. No machine is contacted: hardware facts are saved records."""
 from contextlib import redirect_stdout
@@ -14,9 +14,9 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import cli, orchestrate, render
-from hyperloom.recipes import commands, launch, reader, service, session
-from hyperloom.recipes.reader import RecipeError
+from hydraweave import cli, orchestrate, render
+from hydraweave.recipes import commands, launch, reader, service, session
+from hydraweave.recipes.reader import RecipeError
 from tests.recipe_fixtures import PRO, builtin_text, copy_of, isolated
 
 QWEN = "qwen3.8-flash-next.lab"
@@ -35,7 +35,7 @@ MM = "minimax-m3.1-flash.lab"
 
 
 def run_cli(*argv, stdin=None):
-    """(exit code, stdout JSON or None, stderr) of `hyperloom ARGV` in this process."""
+    """(exit code, stdout JSON or None, stderr) of `hydraweave ARGV` in this process."""
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), mock.patch("sys.stderr", err), mock.patch("sys.stdin", io.TextIOWrapper(
             io.BytesIO((stdin or "").encode("utf-8")), encoding="utf-8")):
@@ -51,7 +51,7 @@ class BuiltinTests(unittest.TestCase):
                  for p in service.BUILTIN_DIR.rglob("*.toml")}
         self.assertEqual(files, manifest["files"])
         self.assertTrue(all(b"\r\n" not in p.read_bytes() for p in service.BUILTIN_DIR.rglob("*.toml")))
-        upstream = os.environ.get("HYPERLOOM_TIERSTREAM") or os.environ.get("HYPERLOOM_STRIX_STREAM")   # a checkout
+        upstream = os.environ.get("HYDRAWEAVE_TIERSTREAM") or os.environ.get("HYDRAWEAVE_STRIX_STREAM")   # a checkout
         if upstream:
             for name in files:
                 source = Path(upstream) / "recipes" / "examples" / name
@@ -187,7 +187,7 @@ class CatalogTests(unittest.TestCase):
                 with self.subTest(ref=ref), self.assertRaises(ValueError):
                     service.argv("diff", {"a": QWEN, "b": ref}, config=env.config)
             self.assertIn("auto", service.argv("plan", {"recipe": "auto", "profile": "ds41-rtx"}, config=env.config))
-            # Layer, facts and out names are files of hyperloom's directories: never a Windows device name, in any
+            # Layer, facts and out names are files of hydraweave's directories: never a Windows device name, in any
             # case, with or without an extension.
             devices = ("CON", "con", "Nul", "nul.json", "PRN.toml", "aux.txt", "COM1", "com9.json", "LPT1",
                        "lpt9.toml", "con.x.json")
@@ -313,7 +313,7 @@ class WriteTests(unittest.TestCase):
                 thread.join()
             self.assertEqual(sorted(results), ["conflict"] * 5 + ["ok"])
             # Another process (the CLI) competing with this one through the same file lock.
-            procs = [subprocess.Popen([sys.executable, "-m", "hyperloom", "recipe", "save", f"p{i}", "--from", "-",
+            procs = [subprocess.Popen([sys.executable, "-m", "hydraweave", "recipe", "save", f"p{i}", "--from", "-",
                                        "--config", str(env.config)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE) for i in range(3)]
             codes = []

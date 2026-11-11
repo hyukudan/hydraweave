@@ -9,13 +9,13 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hyperloom import orchestrate, secrets
-from hyperloom.web.features import ledger, logsearch, machines, observe
+from hydraweave import orchestrate, secrets
+from hydraweave.web.features import ledger, logsearch, machines, observe
 
 
 class LaunchStatesTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hyperloom-launch-states-")
+        temporary = tempfile.TemporaryDirectory(prefix="hydraweave-launch-states-")
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         self.run = self.directory / "run"
@@ -149,8 +149,8 @@ class LaunchStatesTests(unittest.TestCase):
     def test_status_retries_never_repeat_the_router_or_prefill_reads(self):
         """A node read the 5 s spacing refused is retried at the next snapshot; the profile's local router and prefill
         service are still read at most once per 30 s (real orchestrator status, mocked transports)."""
-        from hyperloom import pollbudget
-        from hyperloom.web.api import API
+        from hydraweave import pollbudget
+        from hydraweave.web.api import API
         self.state("prof-b", self.config_b, machines={"node-b": {"install_root": "/opt/b"}},
                    prefill_service={"port": 18890})
         now = [1000.0]
@@ -206,13 +206,13 @@ class LaunchStatesTests(unittest.TestCase):
         self.assertEqual(orchestrate.endpoint("prof-a", config_path=self.config_a)["url"], "http://127.0.0.1:18600")
 
     def test_cli_up_records_its_own_config_even_inside_another(self):
-        from hyperloom import cli
-        from hyperloom.recipes import service
+        from hydraweave import cli
+        from hydraweave.recipes import service
         seen = []
         fake = SimpleNamespace(up=lambda *a, **kw: seen.append(service.configured_file()) or {"state": "running"})
         args = cli.build_parser().parse_args(["up", "prof-b", "--config", str(self.config_b)])
         # This test injects only the launcher; passive profile validation is covered by preflight tests.
-        with mock.patch("hyperloom.recipes.preflight.cli"):
+        with mock.patch("hydraweave.recipes.preflight.cli"):
             cli.up_command(args, orchestrate=fake, load_cluster=lambda path: None)
             with service.configured(self.config_a):             # an ambient configuration never wins over --config
                 cli.up_command(args, orchestrate=fake, load_cluster=lambda path: None)

@@ -4,8 +4,8 @@ and histograms; the instrumented MiniMax serve status and metrics)."""
 import tempfile
 import unittest
 
-from hyperloom.adapters import engine, minimax, prom, router
-from hyperloom.web.features import observe
+from hydraweave.adapters import engine, minimax, prom, router
+from hydraweave.web.features import observe
 from tests.fixtures.observe.fakes import LOOPBACK, NODE1, ROUTER, Env, fixture
 
 

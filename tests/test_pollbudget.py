@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hyperloom import pollbudget
-from hyperloom.web.features import machines
+from hydraweave import pollbudget
+from hydraweave.web.features import machines
 
 from tests.test_fleet_support import FakeAPI, host
 
@@ -87,13 +87,13 @@ class BudgetTests(unittest.TestCase):
         """A collector's call holds the node gate when the turn check comes: the check is not made, its grant is
         given back, and the next collector yields to it (no starvation at the gate)."""
         from types import SimpleNamespace
-        from hyperloom.web.features import ops
+        from hydraweave.web.features import ops
         api = SimpleNamespace(config_path="unused/cluster.json")
         machine = SimpleNamespace(id="halo-1", access="ssh")
         budget = pollbudget.for_api(api)
         budget.node("halo-1", "turns", now=1000.0)                         # the previous check
         busy = [True]
-        with mock.patch("hyperloom.nodegate.try_hold", lambda config, mid: None if busy[0] else (lambda: None)):
+        with mock.patch("hydraweave.nodegate.try_hold", lambda config, mid: None if busy[0] else (lambda: None)):
             self.assertIsNone(budget.node("halo-1", "fleet-nodes", now=1029.0))   # its call holds the gate
             self.assertFalse(ops.sampler_gate(api, machine, "turns", 1030.0)[0])   # busy: no check made
             busy[0] = False
@@ -121,12 +121,12 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(len(api.calls), 1)
 
     def test_the_turns_collector_reading_pauses_the_others(self):
-        from hyperloom.web.features import turns
+        from hydraweave.web.features import turns
         with tempfile.TemporaryDirectory() as directory:
             api = FakeAPI(directory)
             self.addCleanup(api.telemetry.close)
             machine = next(m for m in api.cluster().machines.values() if m.access == "ssh")
-            reply = {"schema": "hyperloom/node-v1", "holder": {"parsed": True, "label": "someone-bench",
+            reply = {"schema": "hydraweave/node-v1", "holder": {"parsed": True, "label": "someone-bench",
                                                                  "alive": True}}
             with mock.patch.object(turns.eligible.__globals__["ops"], "_node_call", lambda *a, **k: reply), \
                     mock.patch.object(turns, "eligible", lambda cluster: ([machine], {})):

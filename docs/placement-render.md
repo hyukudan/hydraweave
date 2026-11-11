@@ -85,7 +85,7 @@ cutoff, so their location after loading does not conceal a preflight rule.
 
 | Rule / refusal | Source file:line at a919c257 | Mirrored / ownership and reason |
 |---|---|---|
-| A positional MODEL is required before options; it must be a readable regular file. | apps/cuda_ds41_replica.cu:271; apps/cuda_ds41_replica.cu:219 | Yes. Missing model, unreadable/stat-failing model, empty or NUL/CR/LF-bearing tokens are refused synchronously. Token framing is also a hyperloom spool constraint. |
+| A positional MODEL is required before options; it must be a readable regular file. | apps/cuda_ds41_replica.cu:271; apps/cuda_ds41_replica.cu:219 | Yes. Missing model, unreadable/stat-failing model, empty or NUL/CR/LF-bearing tokens are refused synchronously. Token framing is also a Hydraweave spool constraint. |
 | Every value option needs a separate value; unknown options, extra positional tokens and `--option=value` are refused. | apps/cuda_ds41_replica.cu:319; apps/cuda_ds41_replica.cu:441 | Yes. The 97-branch table exhausts the accepted option names and arities. A following option cannot hide a missing value. |
 | Every U32, signed-long, F32 and F64 conversion can reject invalid syntax / native overflow / underflow. | apps/cuda_ds41_replica.cu:322; apps/cuda_ds41_replica.cu:327; apps/cuda_ds41_replica.cu:334; apps/cuda_ds41_replica.cu:366; apps/cuda_ds41_replica.cu:374; apps/cuda_ds41_replica.cu:392; apps/cuda_ds41_replica.cu:430 | Yes: conversions below for accepted options; conflict for allocation/dispatch options. Windows widths and numeric-prefix semantics are described above. No additional probability, sign, window-size or serve-idle range is invented. |
 | `--env` needs NAME=VALUE and one of the two exact allowed names. | apps/cuda_ds41_replica.cu:464; apps/cuda_ds41_replica_serve.hpp:51 | Yes, for every occurrence. Empty VALUE and further `=` characters are allowed. |
@@ -110,7 +110,7 @@ cutoff, so their location after loading does not conceal a preflight rule.
 | JSON/timeline/trace/controller-save/residency-save output cannot be opened, flushed or atomically renamed. | apps/cuda_ds41_replica.cu:617; apps/cuda_ds41_replica.cu:1167; src/ds41_dspark_driver.cpp:401; src/ds41_dspark_driver.cpp:409; apps/cuda_ds41_replica_serve.hpp:109; apps/cuda_ds41_replica_serve.hpp:111; apps/cuda_ds41_replica_serve.hpp:119; apps/cuda_ds41_replica.cu:2223 | Yes for determinable failures: target is a directory/non-file, parent missing/non-directory, known non-writable file/parent; residency also checks the `.tmp` target and rename parent. No creation, write or truncation. Actual ACL/sharing/open/flush/rename failures and races remain engine-owned runtime I/O. |
 | Absolute capacity must cover imported.position + needed_extra. | apps/cuda_ds41_replica.cu:633; apps/cuda_ds41_replica.cu:634 | Yes for the lower bound needed_extra <= admitted config.max_context_tokens, even at imported position zero. Engine-owned for the remaining imported-position term, because rendering does not read state contents. |
 | Draft keep other than 0/64 needs a stats file; draft vocabulary has full/numeric/files:/auto: syntax; warmup-graphs entries convert with U32. | apps/cuda_ds41_replica.cu:664; src/ds41_dspark_vocab.cpp:55; src/ds41_dspark_vocab.cpp:59; src/ds41_dspark_vocab.cpp:68; src/ds41_dspark_vocab.cpp:96; src/ds41_dspark_vocab.cpp:97; apps/cuda_ds41_replica.cu:2036 | Yes, conflict for all associated allocation/graph options. An argv-only required combination cannot bypass placement by matching the plan. |
-| Repeated scalar/flag options and mutually overriding dispatch flags. | apps/cuda_ds41_replica.cu:315; apps/cuda_ds41_replica.cu:440; apps/cuda_ds41_replica.cu:486; apps/cuda_ds41_replica.cu:487 | No native duplicate-option refusal exists. Scalars are usually last-wins; env accumulates; router-pf0 and qakv-auto have explicit precedence. Hyperloom deliberately validates every supplied value/input/phase and conflicts on every allocation override, including repeats/equals spellings. There is no additional native generic mutual-exclusion rule. |
+| Repeated scalar/flag options and mutually overriding dispatch flags. | apps/cuda_ds41_replica.cu:315; apps/cuda_ds41_replica.cu:440; apps/cuda_ds41_replica.cu:486; apps/cuda_ds41_replica.cu:487 | No native duplicate-option refusal exists. Scalars are usually last-wins; env accumulates; router-pf0 and qakv-auto have explicit precedence. Hydraweave deliberately validates every supplied value/input/phase and conflicts on every allocation override, including repeats/equals spellings. There is no additional native generic mutual-exclusion rule. |
 
 The remaining startup refusals depend on contents, resources or a loaded external implementation. They are
 explicitly engine-owned; a native syntax check that is delayed until after loading is **not** included in this
@@ -162,7 +162,7 @@ Replica follow-up remains explicit: implement the placement loader and its capac
 loader-derived prediction limit not represented by cached allocation flags, and load an admitted drafter without
 `--draft`. Native `seed_order` currently takes M from `--seqmod` and uses `% M` (`apps/cuda_ds41_replica.cu:179`)
 without checking M != 0: that is a potential native division-by-zero bug, not a parser refusal to mirror. The
-replica must define/refuse it; hyperloom must review that parser change and repin before qualifying the release.
+replica must define/refuse it; Hydraweave must review that parser change and repin before qualifying the release.
 
 <!-- replica-parser-table:start -->
 | Native option | Source at a919c257 | Native conversion | Pure rendering rule |
@@ -291,7 +291,7 @@ The helper substitutes a fresh directory under its own runtime directory for DIR
 options are sent to the replica. The existing request port (8096 by default, optionally `placement-inputs.port`)
 still undergoes pure admission and helper race checks; this adapter opens no listener on it.
 
-`hyperloom.replica_spool.Client(directory, alive=...)` forwards native runtime arguments as one UTF-8 argument per
+`hydraweave.replica_spool.Client(directory, alive=...)` forwards native runtime arguments as one UTF-8 argument per
 LF line: write `queue/NAME.tmp`, rename to `queue/NAME.req`, then await `done/NAME.json`. The worker owns the move
 through `run/NAME.req` into `done/NAME.req`. Responses, including rc 2 request rejections, are returned intact;
 request outputs are at the paths supplied with native options such as `--json`. Requests are never retried after

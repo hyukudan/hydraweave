@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from hyperloom.config import ConfigError, load, parse
+from hydraweave.config import ConfigError, load, parse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +18,7 @@ class ConfigTests(unittest.TestCase):
     def test_lab_fields_share_one_schema_for_parse_load_and_cli(self):
         from contextlib import redirect_stdout
         import io
-        from hyperloom import cli, orchestrate
+        from hydraweave import cli, orchestrate
         obj = example()
         obj["machines"][1].update(lab_dir="/opt/lab", peer_ssh={"halo-2": "operator@halo-2"})
         parsed = parse(obj)
@@ -129,14 +129,14 @@ class ConfigTests(unittest.TestCase):
             parse(obj)
 
     def test_absolute_paths_for_correct_host_os(self):
-        for index, path in ((0, "relative"), (0, "C:relative"), (1, "relative"), (1, "C:/hyperloom")):
+        for index, path in ((0, "relative"), (0, "C:relative"), (1, "relative"), (1, "C:/hydraweave")):
             with self.subTest(index=index, path=path):
                 obj = example()
                 obj["machines"][index]["install_root"] = path
                 with self.assertRaises(ConfigError):
                     parse(obj)
         obj = example()
-        obj["machines"][0]["install_root"] = "C:/path with spaces/hyperloom"
+        obj["machines"][0]["install_root"] = "C:/path with spaces/hydraweave"
         parse(obj)
 
     def test_duplicate_or_missing_references(self):
@@ -153,7 +153,7 @@ class ConfigTests(unittest.TestCase):
                 parse(obj)
 
     def test_types_versions_and_bounds(self):
-        cases = [((), "schema", "hyperloom/cluster-v2"), ((), "machines", []),
+        cases = [((), "schema", "hydraweave/cluster-v2"), ((), "machines", []),
                  (("machines", 1), "ssh_port", True), (("machines", 1), "lab_mode", "true"),
                  (("machines", 1), "os", "other"), (("machines", 1), "access", "other"),
                  (("router",), "max_inflight", 65), (("router",), "balance_active_decodes", 1),

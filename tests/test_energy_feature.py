@@ -10,11 +10,11 @@ import types
 import unittest
 from unittest import mock
 
-from hyperloom import telemetry
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features, server
-from hyperloom.web.api import API, APIError, redact
-from hyperloom.web.features import energy
+from hydraweave import telemetry
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features, server
+from hydraweave.web.api import API, APIError, redact
+from hydraweave.web.features import energy
 
 
 HOUR, QUARTER, DAY = 3600, 900, 86400
@@ -40,7 +40,7 @@ class FakeAPI:
         self.config_path = None
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", "server_time": self.clock(), "why": {}, **fields}
 
     def cluster(self):
         if self.machines is None:
@@ -896,7 +896,7 @@ class HttpTests(unittest.TestCase):
             if origin:
                 headers["Origin"] = f"http://{host}:{self.port}"
             if csrf:
-                headers["X-Hyperloom-CSRF"] = self.server.csrf_token
+                headers["X-Hydraweave-CSRF"] = self.server.csrf_token
         connection.request(method, path, body=data, headers=headers)
         response = connection.getresponse()
         return response.status, response.read()
@@ -905,8 +905,8 @@ class HttpTests(unittest.TestCase):
         host = self.server.server_address[0]
         data = b'{"price_per_kwh": 1e400, "currency": "EUR"}'
         connection = http.client.HTTPConnection(host, self.port, timeout=30)
-        connection.request("POST", "/hyperloom/api/energy/price", body=data, headers={
-            "Host": f"{host}:{self.port}", "Origin": f"http://{host}:{self.port}", "X-Hyperloom-CSRF": self.server.csrf_token,
+        connection.request("POST", "/hydraweave/api/energy/price", body=data, headers={
+            "Host": f"{host}:{self.port}", "Origin": f"http://{host}:{self.port}", "X-Hydraweave-CSRF": self.server.csrf_token,
             "Content-Type": "application/json", "Content-Length": str(len(data))})
         self.assertEqual(connection.getresponse().status, 400)
         audit = Path(self.dir.name) / "audit.jsonl"
@@ -919,9 +919,9 @@ class HttpTests(unittest.TestCase):
                              ("energy/thresholds", b'{"gpu": {"warn": [1e400], "crit": 90}}'),
                              ("energy/reset", b'{"confirm": [1e400]}')):
             connection = http.client.HTTPConnection(host, self.port, timeout=30)
-            connection.request("POST", "/hyperloom/api/" + action, body=data, headers={
+            connection.request("POST", "/hydraweave/api/" + action, body=data, headers={
                 "Host": f"{host}:{self.port}", "Origin": f"http://{host}:{self.port}",
-                "X-Hyperloom-CSRF": self.server.csrf_token, "Content-Type": "application/json",
+                "X-Hydraweave-CSRF": self.server.csrf_token, "Content-Type": "application/json",
                 "Content-Length": str(len(data))})
             self.assertEqual(connection.getresponse().status, 400, action)
             last = json.loads(audit.read_text().splitlines()[-1])
@@ -929,14 +929,14 @@ class HttpTests(unittest.TestCase):
 
     def test_post_checks_and_documents(self):
         body = {"price_per_kwh": 0.2, "currency": "EUR"}
-        self.assertEqual(self.request("POST", "/hyperloom/api/energy/price", body, origin=False)[0], 403)
-        self.assertEqual(self.request("POST", "/hyperloom/api/energy/price", body, csrf=False)[0], 403)
-        self.assertEqual(self.request("POST", "/hyperloom/api/energy/price", body)[0], 200)
-        self.assertEqual(self.request("GET", "/hyperloom/api/energy/price")[0], 405)       # no GET of a write name
-        status, raw = self.request("GET", "/hyperloom/api/energy?range=7d")
+        self.assertEqual(self.request("POST", "/hydraweave/api/energy/price", body, origin=False)[0], 403)
+        self.assertEqual(self.request("POST", "/hydraweave/api/energy/price", body, csrf=False)[0], 403)
+        self.assertEqual(self.request("POST", "/hydraweave/api/energy/price", body)[0], 200)
+        self.assertEqual(self.request("GET", "/hydraweave/api/energy/price")[0], 405)       # no GET of a write name
+        status, raw = self.request("GET", "/hydraweave/api/energy?range=7d")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(raw)["schema"], "hyperloom/ui-energy-v1")
-        self.assertEqual(self.request("GET", "/hyperloom/api/thermals?range=year")[0], 400)
+        self.assertEqual(json.loads(raw)["schema"], "hydraweave/ui-energy-v1")
+        self.assertEqual(self.request("GET", "/hydraweave/api/thermals?range=year")[0], 400)
         for name in ("energy.js", "energy.css", "thermals.js"):
             self.assertEqual(self.request("GET", "/pages/" + name)[0], 200, name)
 

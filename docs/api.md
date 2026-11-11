@@ -1,6 +1,6 @@
-# Hyperloom portal API
+# Hydraweave portal API
 
-The portal (`hyperloom ui`) serves the web UI and a JSON API on `http://127.0.0.1:18700/hyperloom/api/`. It only
+The portal (`hydraweave ui`) serves the web UI and a JSON API on `http://127.0.0.1:18700/hydraweave/api/`. It only
 listens on loopback. This page documents the API, with the command line that does the same thing next to each call.
 The shapes of the examples are exact; their values are illustrative (a test fixture), and long fields are trimmed.
 
@@ -46,8 +46,8 @@ single query and preserves GPU-name whitespace. Deploy keeps its original queue-
 |---|---|
 | Listener | `127.0.0.1` only. `Host` must be `127.0.0.1:<port>` or `localhost:<port>`. |
 | Reads | `GET` (and `HEAD`). No body, no token. |
-| Everything else | `POST` with `Content-Type: application/json`, a JSON object body, `Origin: http://<the Host>`, and the header `X-Hyperloom-CSRF: <token>`. |
-| CSRF token | Random per portal start, embedded in the page: `<meta name="hyperloom-csrf" content="...">` of `GET /`. A script reads it from there. |
+| Everything else | `POST` with `Content-Type: application/json`, a JSON object body, `Origin: http://<the Host>`, and the header `X-Hydraweave-CSRF: <token>`. |
+| CSRF token | Random per portal start, embedded in the page: `<meta name="hydraweave-csrf" content="...">` of `GET /`. A script reads it from there. |
 | Body size | 64 KiB; 1 MiB for `recipes/save`, `recipes/check` and `recipes/save-layer` (they carry recipe text, at most 256 KiB). |
 | JSON | Strict: duplicate keys, `NaN`/`Infinity` and non-objects are refused (400). |
 | Audit | Every core mutation, recipe write and job is appended to `audit.jsonl` next to the cluster configuration. Recipe and layer text is recorded as its size and sha256, not copied. Feature POST audit policy is listed per route. |
@@ -56,8 +56,8 @@ A script, with `curl` (PowerShell users: `curl.exe`):
 
 ```sh
 PORTAL=http://127.0.0.1:18700
-TOKEN=$(curl -s $PORTAL/ | sed -n 's/.*name="hyperloom-csrf" content="\([^"]*\)".*/\1/p')
-post() { curl -s -X POST "$PORTAL/hyperloom/api/$1" -H "Origin: $PORTAL" -H "X-Hyperloom-CSRF: $TOKEN" \
+TOKEN=$(curl -s $PORTAL/ | sed -n 's/.*name="hydraweave-csrf" content="\([^"]*\)".*/\1/p')
+post() { curl -s -X POST "$PORTAL/hydraweave/api/$1" -H "Origin: $PORTAL" -H "X-Hydraweave-CSRF: $TOKEN" \
               -H 'Content-Type: application/json' -d "$2"; }
 post recipes/validate '{"recipe": "qwen3.8-flash-next.lab"}'
 ```
@@ -77,10 +77,10 @@ Recipe sources, all listed by `GET recipes`:
 
 | source | where | writable |
 |---|---|---|
-| `builtin` | the vendored strix-stream example recipes, `hyperloom/recipes/examples/` (source commit and hashes in `hyperloom/recipes/builtin.json`) | no |
+| `builtin` | the vendored strix-stream example recipes, `hydraweave/recipes/examples/` (source commit and hashes in `hydraweave/recipes/builtin.json`) | no |
 | `pending` | built-in recipes that wait for something (their `blocker`); they never launch and `up --recipe auto` never picks them | no |
 | `configured` | the cluster configuration's `pc.recipe_dirs` (absolute directories) | no |
-| `user` | `<config dir>/recipes/` (next to the cluster configuration in use) | yes: the only directory the API and `hyperloom recipe save` write |
+| `user` | `<config dir>/recipes/` (next to the cluster configuration in use) | yes: the only directory the API and `hydraweave recipe save` write |
 
 Layers are in `<config dir>/recipes/layers/`, disk receipts in `<config dir>/run/receipts/`, saved hardware
 observations in `<config dir>/run/facts/`. The API names these files by **name only**; it never takes a path.
@@ -96,7 +96,7 @@ silently wins, and `pick` and `up --recipe auto` refuse them the same way.
 
 ### One code path
 
-Every recipe request **is** a `hyperloom recipe ...` command line. The portal checks the JSON arguments, builds the
+Every recipe request **is** a `hydraweave recipe ...` command line. The portal checks the JSON arguments, builds the
 command line, runs it (a child process, or the same parser and function in process for the cheap reads), and answers
 with what the command printed. Recipe evaluation answers preserve the CLI results and refusals, word for word.
 Synchronous launch preflight uses the fixed public error below and keeps the detailed reason in the local audit.
@@ -105,10 +105,10 @@ Every recipe answer has this shape:
 
 ```json
 {
-  "schema": "hyperloom/recipes-<operation>-v1",
+  "schema": "hydraweave/recipes-<operation>-v1",
   "server_time": 1792877018.27,
   "operation": "validate",
-  "cli": "hyperloom recipe validate qwen3.8-flash-next.lab --config <config>/cluster.json",
+  "cli": "hydraweave recipe validate qwen3.8-flash-next.lab --config <config>/cluster.json",
   "exit_code": 0,
   "ok": true,
   "result": { "...": "the command's JSON output" },
@@ -121,7 +121,7 @@ Every recipe answer has this shape:
 | `cli` | The equivalent command line. Field edits (see `edits`) appear as `--recipe-overrides edits.json`, with the file's text in `cli_files`. |
 | `exit_code` | The command's: `0` ok; `1` refused (the reason is in `error`, sometimes with a `result`); `2` bad arguments; `3` unknown recipe id; `4` conflict (the file changed since it was read, or the id/name is taken). |
 | `result` | The command's standard output (JSON). |
-| `error` | The command's message (standard error, without the `hyperloom:` prefix). |
+| `error` | The command's message (standard error, without the `hydraweave:` prefix). |
 | `stopped` | Present when the portal stopped the command: `deadline`, `output overflow` or `client gone`. |
 
 HTTP status: `200` for exit codes 0 and 1 (a refusal is a valid answer: read `ok`), `400` for 2, `404` for 3, `409`
@@ -136,28 +136,28 @@ hardware refuses the recipe in `result.hardware`.
 
 | API | CLI | what |
 |---|---|---|
-| `GET recipes` | `hyperloom recipe list [--model M]` | the catalog, models and the deployment profiles serving each, layers, receipts, saved facts |
-| `GET recipes/<id>` | `hyperloom recipe show ID` | one recipe: text, structure, every settable field with its type, range and default |
-| `POST recipes/ready` | `hyperloom recipe ready ID [P] [--facts F]` | what is still missing before `up` can run the recipe on the profile, step by step, each with the next command (offline) |
-| `POST recipes/export` | `hyperloom recipe export ID [--layer NAME]...` | the recipe and those user layers as one data-only bundle |
-| `POST recipes/import` | `hyperloom recipe import - [--id ID] [--replace SHA256]` | write a bundle's recipe and layers into the user directories (checked first; audited) |
-| `GET recipes/matrix` | `hyperloom recipe matrix` | every recipe by model x hardware class, with its status, headline figures and their sources, and the command that runs it |
-| `POST recipes/validate` | `hyperloom recipe validate ID [PROFILE]` | schema and layers; with a profile also the hardware match and the `up` decision |
-| `POST recipes/explain` | `hyperloom recipe explain ID [PROFILE]` | each field's value, layer and origin; with a profile the decision, a simulated request and what-ifs |
-| `POST recipes/check` | `hyperloom recipe validate - [PROFILE] < draft.toml` | a draft's text, nothing written |
-| `POST recipes/diff` | `hyperloom recipe diff A B` | field-level differences of two effective recipes |
-| `POST recipes/select` | `hyperloom recipe select MODEL [--profile P]` | the recipe `up --recipe auto` would run for a model on each profile serving it, every candidate's result |
-| `POST recipes/pick` | `hyperloom recipe pick PROFILE` | the same for one profile (the CLI's `--dir` is CLI-only) |
-| `POST recipes/plan` | `hyperloom recipe plan ID PROFILE` | launch eligibility and the placement preview (vramplan), on a snapshot of the inputs |
-| `POST recipes/save` | `hyperloom recipe save ID --from FILE` / `--base ID --base-sha256 S --set ...` | write a user recipe |
-| `POST recipes/delete` | `hyperloom recipe delete ID --sha256 S` | remove a user recipe |
-| `POST recipes/save-layer` | `hyperloom recipe save-layer NAME --recipe ID --set ...` / `--from FILE` | write an overrides layer or a tuning profile |
-| `POST recipes/delete-layer` | `hyperloom recipe delete-layer NAME --sha256 S` | remove a layer |
-| `POST recipes/save-receipt` | `hyperloom recipe save-receipt NAME --from FILE` | store a node disk-read receipt |
-| `POST recipes/probe` | `hyperloom recipe probe PROFILE [--disks] [--descriptors] [--evidence N=R] [--out F]` | audited job (exclusive slot, profile resources): the hardware facts; the flags read model files or store evidence |
-| `POST recipes/deploy` | `hyperloom recipe deploy DIGEST [--stop P ...]` | audited job (exclusive slot, resource hold on `*`): stop the reviewed profiles and launch exactly a planned snapshot |
-| `GET recipes/active` | `hyperloom recipe active [P]` | what each running profile was launched with, as launched |
-| `GET recipes/routes` | `hyperloom recipe routes [P]` | per-route and per-request routing of the running recipe (RTX vs nodes) |
+| `GET recipes` | `hydraweave recipe list [--model M]` | the catalog, models and the deployment profiles serving each, layers, receipts, saved facts |
+| `GET recipes/<id>` | `hydraweave recipe show ID` | one recipe: text, structure, every settable field with its type, range and default |
+| `POST recipes/ready` | `hydraweave recipe ready ID [P] [--facts F]` | what is still missing before `up` can run the recipe on the profile, step by step, each with the next command (offline) |
+| `POST recipes/export` | `hydraweave recipe export ID [--layer NAME]...` | the recipe and those user layers as one data-only bundle |
+| `POST recipes/import` | `hydraweave recipe import - [--id ID] [--replace SHA256]` | write a bundle's recipe and layers into the user directories (checked first; audited) |
+| `GET recipes/matrix` | `hydraweave recipe matrix` | every recipe by model x hardware class, with its status, headline figures and their sources, and the command that runs it |
+| `POST recipes/validate` | `hydraweave recipe validate ID [PROFILE]` | schema and layers; with a profile also the hardware match and the `up` decision |
+| `POST recipes/explain` | `hydraweave recipe explain ID [PROFILE]` | each field's value, layer and origin; with a profile the decision, a simulated request and what-ifs |
+| `POST recipes/check` | `hydraweave recipe validate - [PROFILE] < draft.toml` | a draft's text, nothing written |
+| `POST recipes/diff` | `hydraweave recipe diff A B` | field-level differences of two effective recipes |
+| `POST recipes/select` | `hydraweave recipe select MODEL [--profile P]` | the recipe `up --recipe auto` would run for a model on each profile serving it, every candidate's result |
+| `POST recipes/pick` | `hydraweave recipe pick PROFILE` | the same for one profile (the CLI's `--dir` is CLI-only) |
+| `POST recipes/plan` | `hydraweave recipe plan ID PROFILE` | launch eligibility and the placement preview (vramplan), on a snapshot of the inputs |
+| `POST recipes/save` | `hydraweave recipe save ID --from FILE` / `--base ID --base-sha256 S --set ...` | write a user recipe |
+| `POST recipes/delete` | `hydraweave recipe delete ID --sha256 S` | remove a user recipe |
+| `POST recipes/save-layer` | `hydraweave recipe save-layer NAME --recipe ID --set ...` / `--from FILE` | write an overrides layer or a tuning profile |
+| `POST recipes/delete-layer` | `hydraweave recipe delete-layer NAME --sha256 S` | remove a layer |
+| `POST recipes/save-receipt` | `hydraweave recipe save-receipt NAME --from FILE` | store a node disk-read receipt |
+| `POST recipes/probe` | `hydraweave recipe probe PROFILE [--disks] [--descriptors] [--evidence N=R] [--out F]` | audited job (exclusive slot, profile resources): the hardware facts; the flags read model files or store evidence |
+| `POST recipes/deploy` | `hydraweave recipe deploy DIGEST [--stop P ...]` | audited job (exclusive slot, resource hold on `*`): stop the reviewed profiles and launch exactly a planned snapshot |
+| `GET recipes/active` | `hydraweave recipe active [P]` | what each running profile was launched with, as launched |
+| `GET recipes/routes` | `hydraweave recipe routes [P]` | per-route and per-request routing of the running recipe (RTX vs nodes) |
 
 Launch preflight is synchronous for `POST recipes/deploy` and `POST up` with `recipe` or `recipe_inputs`, on
 legacy and placement routes alike. Refusals detected by preflight return **HTTP 400** with exactly
@@ -189,12 +189,12 @@ Common arguments of the evaluation calls (they map to the CLI's layer options):
 #### GET recipes
 
 ```sh
-hyperloom recipe list --model qwen3.8-flash-next
+hydraweave recipe list --model qwen3.8-flash-next
 ```
 
 ```json
-{"schema": "hyperloom/recipes-list-v1", "operation": "list", "exit_code": 0, "ok": true,
- "cli": "hyperloom recipe list --model qwen3.8-flash-next --config <config>/cluster.json",
+{"schema": "hydraweave/recipes-list-v1", "operation": "list", "exit_code": 0, "ok": true,
+ "cli": "hydraweave recipe list --model qwen3.8-flash-next --config <config>/cluster.json",
  "result": {
   "recipes": [{
     "id": "qwen3.8-flash-next.lab", "name": "qwen3.8-flash-next-lab", "model": "qwen3.8-flash-next",
@@ -221,7 +221,7 @@ quality cost, from **enabled** routes only.
 #### GET recipes/<id>
 
 ```sh
-hyperloom recipe show qwen3.8-flash-next.lab
+hydraweave recipe show qwen3.8-flash-next.lab
 ```
 
 `result` = the list row plus `text` (the file), `structure` (match, limits, pins, routes) and `fields`:
@@ -237,21 +237,21 @@ hyperloom recipe show qwen3.8-flash-next.lab
 #### POST recipes/validate, explain, check
 
 ```sh
-hyperloom recipe validate qwen3.8-flash-next.lab --recipe-set routes.prefill_rtx.execute=tp
+hydraweave recipe validate qwen3.8-flash-next.lab --recipe-set routes.prefill_rtx.execute=tp
 ```
 
 ```json
 POST recipes/validate {"recipe": "qwen3.8-flash-next.lab", "set": ["routes.prefill_rtx.execute=tp"]}
 -> 200 {"exit_code": 1, "ok": false, "result": null,
         "error": "\"routes.prefill_rtx.execute\": not a settable path (§6.2)",
-        "cli": "hyperloom recipe validate qwen3.8-flash-next.lab --recipe-set routes.prefill_rtx.execute=tp --config ..."}
+        "cli": "hydraweave recipe validate qwen3.8-flash-next.lab --recipe-set routes.prefill_rtx.execute=tp --config ..."}
 ```
 
 With a deployment profile the hardware is probed (or a saved observation is used) and the answer says whether the
 recipe matches, each route's availability, and what `up` would decide:
 
 ```sh
-hyperloom recipe explain deepseek-v4.1-flash.lab ds41-pair --prompt-tokens 9000 --link-down pc-nodes
+hydraweave recipe explain deepseek-v4.1-flash.lab ds41-pair --prompt-tokens 9000 --link-down pc-nodes
 ```
 
 ```json
@@ -266,12 +266,12 @@ route placed `local`/`offload` or why not, the RTX service start or why not) and
 `link_down` (link ids), `free_ram` (`HOST=GIB`).
 
 `POST recipes/check {"text": "<TOML or JSON>", "mode": "validate" | "explain", "profile": ...}` checks a draft; it is
-`hyperloom recipe validate - < draft.toml`.
+`hydraweave recipe validate - < draft.toml`.
 
 #### POST recipes/select and pick
 
 ```sh
-hyperloom recipe select deepseek-v4.1-flash --profile ds41-rtx
+hydraweave recipe select deepseek-v4.1-flash --profile ds41-rtx
 ```
 
 ```json
@@ -289,7 +289,7 @@ still lists every candidate with its reason.
 #### POST recipes/plan
 
 ```sh
-hyperloom recipe plan deepseek-v4.1-flash.lab ds41-rtx
+hydraweave recipe plan deepseek-v4.1-flash.lab ds41-rtx
 ```
 
 ```json
@@ -317,7 +317,7 @@ Snapshots that no running launch references are removed after 24 hours.
 #### POST recipes/deploy (job)
 
 ```sh
-hyperloom recipe deploy 055e5fe5...d8cbd --stop qwen-replicas
+hydraweave recipe deploy 055e5fe5...d8cbd --stop qwen-replicas
 ```
 
 ```json
@@ -345,8 +345,8 @@ stops only the profile it names. A job that has finished is not cancelled (409, 
 #### POST up with a recipe (job)
 
 ```sh
-hyperloom up --recipe qwen3.8-flash-next.lab          # the profile is the one serving the recipe's model
-hyperloom up ds41-rtx --recipe deepseek-v4.1-flash.lab --recipe-set limits.host_free_ram_floor_gib=12
+hydraweave up --recipe qwen3.8-flash-next.lab          # the profile is the one serving the recipe's model
+hydraweave up ds41-rtx --recipe deepseek-v4.1-flash.lab --recipe-set limits.host_free_ram_floor_gib=12
 ```
 
 ```json
@@ -370,10 +370,10 @@ needs its router on rank 0, while recipes need the local router).
 #### POST recipes/save, delete
 
 ```sh
-hyperloom recipe save qwen3.8-flash-next.mine --from mine.toml
-hyperloom recipe save qwen3.8-flash-next.fast --base qwen3.8-flash-next.lab --base-sha256 a8e96c23... \
+hydraweave recipe save qwen3.8-flash-next.mine --from mine.toml
+hydraweave recipe save qwen3.8-flash-next.fast --base qwen3.8-flash-next.lab --base-sha256 a8e96c23... \
     --set routes.prefill_rtx.when.prompt_tokens_min=2048
-hyperloom recipe delete qwen3.8-flash-next.mine --sha256 <sha256 of the file>
+hydraweave recipe delete qwen3.8-flash-next.mine --sha256 <sha256 of the file>
 ```
 
 ```json
@@ -404,9 +404,9 @@ Rules (CLI and API alike, one lock across processes):
 #### POST recipes/save-layer, delete-layer, save-receipt
 
 ```sh
-hyperloom recipe save-layer qwen-floor --recipe qwen3.8-flash-next.lab --set limits.host_free_ram_floor_gib=6
-hyperloom recipe save-layer tuned --from tuned-profile.toml
-hyperloom recipe save-receipt halo1-disk --from receipt.json
+hydraweave recipe save-layer qwen-floor --recipe qwen3.8-flash-next.lab --set limits.host_free_ram_floor_gib=6
+hydraweave recipe save-layer tuned --from tuned-profile.toml
+hydraweave recipe save-receipt halo1-disk --from receipt.json
 ```
 
 ```json
@@ -424,8 +424,8 @@ the portal builds keep the `strix-stream/*` ids.
 #### POST recipes/probe (job)
 
 ```sh
-hyperloom recipe probe ds41-rtx --descriptors
-hyperloom recipe probe ds41-pair --evidence halo-1=halo1-disk
+hydraweave recipe probe ds41-rtx --descriptors
+hydraweave recipe probe ds41-pair --evidence halo-1=halo1-disk
 ```
 
 ```json
@@ -441,7 +441,7 @@ disk cache or evidence. `descriptors` reads the model file's header; `disks` mea
 #### GET recipes/active
 
 ```sh
-hyperloom recipe active ds41-rtx
+hydraweave recipe active ds41-rtx
 ```
 
 ```json
@@ -462,7 +462,7 @@ launched; `now` says `unchanged`, `changed since the launch` or `deleted since t
 #### GET recipes/routes
 
 ```sh
-hyperloom recipe routes ds41-rtx
+hydraweave recipe routes ds41-rtx
 ```
 
 ```json
@@ -534,12 +534,12 @@ writes that job's marker too.
 
 ## GET results
 
-Returns a standard `hyperloom/ui-results-v1` document with `published`, `live` and `why`.
+Returns a standard `hydraweave/ui-results-v1` document with `published`, `live` and `why`.
 Optional `?model=<id>` filters both collections by exact model id; ids must match
 `[A-Za-z0-9._-]{1,128}` (invalid or unknown query arguments return 400). An unknown valid id
 returns empty collections. The package file path is fixed and cannot be supplied by a client.
 
-`published` is the hand-transcribed `hyperloom/results-v1` package document: `source`
+`published` is the hand-transcribed `hydraweave/results-v1` package document: `source`
 (repo, ref, file, retrieved) and `models` (id, name, quant, generic hardware, status, rows).
 Each row carries mode, hardware, prompt, concurrency, metric, best, nullable typical, unit,
 date, build, note and the source README section. Best may also be null when only a typical
@@ -571,7 +571,7 @@ telemetry storage. The normal API redaction applies to the whole document.
 
 ### Launch progress
 
-`GET launch` returns `hyperloom/ui-launch-v1` with `launches`: the latest retained `up` or
+`GET launch` returns `hydraweave/ui-launch-v1` with `launches`: the latest retained `up` or
 `recipes/deploy` job for each known profile, including finished jobs. Jobs are retained by this portal process
 (the last 100 jobs, with running jobs never evicted). A deploy whose target has not yet been recorded cannot
 appear under a profile yet.
@@ -611,7 +611,7 @@ estimate is shown as such and does not mean the engine is ready.
 ## Route documentation convention
 
 Every API route has exactly one table row whose first cell is `METHOD path`, relative to
-`/hyperloom/api/`, without query strings or body examples. A registered GET prefix is written
+`/hydraweave/api/`, without query strings or body examples. A registered GET prefix is written
 `prefix/<id>`; the suffix may be a series name, export name or other handler-specific identifier.
 `tests/test_api_docs.py` loads the real feature modules and compares both directions, reporting missing,
 stale and duplicate entries. It suppresses only the planner's optional on-disk capability probe; no API
@@ -635,13 +635,13 @@ no shared hold. Each table names the deadline and actual resource policy.
 
 ## Feature routes
 
-The sections follow `hyperloom.web.features.MODULES`. Source links point at handlers and validators;
+The sections follow `hydraweave.web.features.MODULES`. Source links point at handlers and validators;
 longer format/CLI documentation is linked where available. Missing observations generally return null
 with `why`, rather than invented zeroes.
 
 ### overview
 
-[Source](../hyperloom/web/features/overview.py).
+[Source](../hydraweave/web/features/overview.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -649,7 +649,7 @@ with `why`, rather than invented zeroes.
 
 ### results
 
-[Source](../hyperloom/web/features/results.py); [document fields and counting basis](#get-results).
+[Source](../hydraweave/web/features/results.py); [document fields and counting basis](#get-results).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -657,13 +657,13 @@ with `why`, rather than invented zeroes.
 
 ### sessioncache
 
-[Source](../hyperloom/web/features/sessioncache.py). Read-only A1; no management actions.
+[Source](../hydraweave/web/features/sessioncache.py). Read-only A1; no management actions.
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
 | `GET sessioncache` | Retained session cache per running profile | `profile?` id matching `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` | Sync, store only; no audit | 400 invalid/unknown query |
 
-The `hyperloom/ui-sessioncache-v1` document contains `profiles` (null when the store is unavailable),
+The `hydraweave/ui-sessioncache-v1` document contains `profiles` (null when the store is unavailable),
 `why` and `stale_after_s`. Each profile has `profile, engine, supported, why, as_of, stats, sessions, coverage, sources`.
 `supported` is true after both queries succeed, false for absent/disabled routes, and null for collection failures.
 Stats: `ram_bytes, ram_budget_bytes, entries, entry_limit, evictions, hits, misses, refusals, why`; sums across
@@ -702,7 +702,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### launch
 
-[Source](../hyperloom/web/features/launch.py); [phases and ETA](#launch-progress).
+[Source](../hydraweave/web/features/launch.py); [phases and ETA](#launch-progress).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -711,7 +711,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### machines
 
-[Source and threshold validator](../hyperloom/web/features/machines.py).
+[Source and threshold validator](../hydraweave/web/features/machines.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -721,7 +721,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### history
 
-[Source](../hyperloom/web/features/history.py); [telemetry export](prometheus.md).
+[Source](../hydraweave/web/features/history.py); [telemetry export](prometheus.md).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -730,7 +730,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### observe
 
-[Handlers and bounds](../hyperloom/web/features/observe.py). Filter strings match
+[Handlers and bounds](../hydraweave/web/features/observe.py). Filter strings match
 `[A-Za-z0-9._:/@+-]{1,128}` (the @ character is allowed).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
@@ -746,7 +746,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### ledger
 
-[Handlers and validators](../hyperloom/web/features/ledger.py). Ledger ranges are `3600`, `86400`
+[Handlers and validators](../hydraweave/web/features/ledger.py). Ledger ranges are `3600`, `86400`
 (default), `604800`, `2592000` or `all`; intervals cover whole UTC hours.
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
@@ -763,7 +763,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### endpoints
 
-[Handlers and validators](../hyperloom/web/features/endpoints.py).
+[Handlers and validators](../hydraweave/web/features/endpoints.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -775,7 +775,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### usb4
 
-[Source](../hyperloom/web/features/usb4.py).
+[Source](../hydraweave/web/features/usb4.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -784,7 +784,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### energy
 
-[Handlers and validators](../hyperloom/web/features/energy.py). Energy is sensor-based estimation.
+[Handlers and validators](../hydraweave/web/features/energy.py). Energy is sensor-based estimation.
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -797,7 +797,7 @@ is absent from the supplied docs and is therefore omitted from the page.
 
 ### health
 
-[Rules and validators](../hyperloom/web/features/health.py). Rule-specific parameter names and numeric
+[Rules and validators](../hydraweave/web/features/health.py). Rule-specific parameter names and numeric
 bounds are returned by `GET health/rules` and enforced against that rule's definition.
 `gpu-hot` accepts `warn_c`/`crit_c` 40..120 °C; `gpu-low-clock` accepts `busy_percent` 1..100
 and `min_clock_mhz` 50..5000; `disk-full` accepts `percent`/`critical_percent` 50..100;
@@ -813,7 +813,7 @@ and `min_clock_mhz` 50..5000; `disk-full` accepts `percent`/`critical_percent` 5
 
 ### alerts
 
-[Handlers and URL validation](../hyperloom/web/features/alerts.py). URLs are stored separately; audit uses
+[Handlers and URL validation](../hydraweave/web/features/alerts.py). URLs are stored separately; audit uses
 masked URLs. HTTPS or numeric-loopback HTTP only, URL ≤2048 characters, no whitespace, credentials or fragment.
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
@@ -825,7 +825,7 @@ masked URLs. HTTPS or numeric-loopback HTTP only, URL ≤2048 characters, no whi
 
 ### events
 
-[Source and confirmation rules](../hyperloom/web/features/events.py).
+[Source and confirmation rules](../hydraweave/web/features/events.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -834,7 +834,7 @@ masked URLs. HTTPS or numeric-loopback HTTP only, URL ≤2048 characters, no whi
 
 ### bench
 
-[Portal handlers](../hyperloom/web/features/bench.py), [job validators](../hyperloom/bench/),
+[Portal handlers](../hydraweave/web/features/bench.py), [job validators](../hydraweave/bench/),
 [exactness and fidelity](replica-fidelity.md).
 Run ids are 16 lowercase hex characters. Kinds are `decode`, `prefill`, `ab`, `quality`, `tools` and `demo`.
 Common job arguments (except A/B): required `target` = `{profile: id}` or `{target: id}` from the listing;
@@ -872,7 +872,7 @@ A/B claims the union of both arms. Shared 409/503 admission rules above apply to
 
 ### planner
 
-[Handlers and validators](../hyperloom/web/features/planner.py), [placement](placement-core.md),
+[Handlers and validators](../hydraweave/web/features/planner.py), [placement](placement-core.md),
 [solver snapshots and layers](placement-solver.md).
 Planner ids match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; recipe ids follow the recipe-reference rules above.
 Saved facts names cannot be Windows device names. POSTs share the recipe runner (2 running + 4 waiting):
@@ -894,7 +894,7 @@ still checks settable paths, value types, layer names and snapshot applicability
 
 ### turns
 
-[Source](../hyperloom/web/features/turns.py); [lab operation](non-lab-mode.md).
+[Source](../hydraweave/web/features/turns.py); [lab operation](non-lab-mode.md).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -903,7 +903,7 @@ still checks settable paths, value types, layer names and snapshot applicability
 
 ### library
 
-[Handlers](../hyperloom/web/features/library.py), [root and verification rules](../hyperloom/downloads.py),
+[Handlers](../hydraweave/web/features/library.py), [root and verification rules](../hydraweave/downloads.py),
 [model manifests and node jobs](model-downloads.md).
 String arguments are nonempty, at most 1024 characters. Machine/job ids match
 `[A-Za-z0-9][A-Za-z0-9_.-]{0,79}`; unknown machines return 404.
@@ -920,7 +920,7 @@ control-machine lab verification needs the RTX ledger guard. Those failures are 
 
 ### logsearch
 
-[Handlers and search limits](../hyperloom/web/features/logsearch.py).
+[Handlers and search limits](../hydraweave/web/features/logsearch.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|
@@ -933,7 +933,7 @@ in a deadline-limited worker process. Literal and regex text are never used as c
 
 ### ops
 
-[Handlers and validators](../hyperloom/web/features/ops.py); [configuration schema](SPEC.md).
+[Handlers and validators](../hydraweave/web/features/ops.py); [configuration schema](SPEC.md).
 Machine edits use `op` add/edit/remove/move; `id` identifies an existing machine for edit/remove/move;
 `machine` is the complete schema-valid entry for add/edit (serialized size ≤16384 characters);
 `index` is an integer 0..machine-count for add or 0..machine-count−1 for move.
@@ -963,7 +963,7 @@ remaining; this is a start threshold, not a completion guarantee. Its hold stays
 
 ### integrations
 
-[Handlers, export allow-list and MQTT validator](../hyperloom/web/features/integrations.py),
+[Handlers, export allow-list and MQTT validator](../hydraweave/web/features/integrations.py),
 [Prometheus integration](prometheus.md).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
@@ -984,7 +984,7 @@ MQTT passwords require a username; omitting password leaves it unchanged, `clear
 
 ### prefs
 
-[Defaults, choices and validators](../hyperloom/web/features/prefs.py).
+[Defaults, choices and validators](../hydraweave/web/features/prefs.py).
 
 | API | Returns / does | Arguments | Execution / audit | Notable refusals |
 |---|---|---|---|---|

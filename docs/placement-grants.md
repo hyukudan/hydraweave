@@ -4,7 +4,7 @@ continue using `pc.cuda.reservation` and their existing device binding.
 `pc.cuda.grants` is an array with one entry per UUID. Each entry requires `uuid`, `vram_cap_gib`, `approval`,
 `window`, and `gate` (the existing absolute executable plus arguments syntax). Duplicate UUIDs, including case
 variants, are invalid. A window has UTC `starts_at` and `expires_at` timestamps (`YYYY-MM-DDTHH:MM:SSZ`) and
-`kind` (`PC-BIG` or `device`). These are ledger window boundaries supplied by the operator; Hyperloom does not open
+`kind` (`PC-BIG` or `device`). These are ledger window boundaries supplied by the operator; Hydraweave does not open
 or extend them. Admission requires more than 60 seconds remaining. Supervision will execute each gate under its
 device lock; passive planning does not execute gates.
 

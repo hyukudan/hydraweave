@@ -1,6 +1,6 @@
 # Operator-selected placement rows
 
-`hyperloom solve RECIPE --route ROUTE --bundle NAME` runs the packaged `ts-recipe solve` on cached CPU inputs.
+`hydraweave solve RECIPE --route ROUTE --bundle NAME` runs the packaged `ts-recipe solve` on cached CPU inputs.
 `NAME` names a local `run/solver-inputs/NAME.json` containing `probe`, `inputs`, and optional `desc`, `context`, and
 `identity` and `measurement_keys`. The inputs use Tierstream's solver input schema; each configuration supplies its exact cached components.
 JSON document references are relative to the bundle. This command never acquires descriptors or measurements.
@@ -14,9 +14,9 @@ changed cached measurements require another solve. Missing measurements remain `
 
 The CLI and web planner display the core's original row order, placement/refusal, predictions, estimates and
 `unpredicted`. Solving saves a local selection snapshot, not a recipe. To save a reviewed row, use
-`hyperloom solve --selection DIGEST --pick ROW --save-layer NAME`, or the planner's explicit Pick and save button.
+`hydraweave solve --selection DIGEST --pick ROW --save-layer NAME`, or the planner's explicit Pick and save button.
 The bridge calls `ts-recipe solve --pick ROW --emit-overrides FILE` (placement/v1-f1, fcdc54e API). Tierstream applies
-the emitted overrides and verifies semantic placement equality before emitting them. Hyperloom checks that the
+the emitted overrides and verifies semantic placement equality before emitting them. Hydraweave checks that the
 recipe, layers, configuration, JSON inputs, cached components and content metadata are still current and the fresh
 solver document is unchanged, then saves those exact LF bytes. It does not recreate quotas or compare placement
 hashes after quota materialization. Exact arena and FILE unit counts, context, sequences and plain/spec rows belong

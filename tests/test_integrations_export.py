@@ -10,11 +10,11 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import metrics_export
-from hyperloom.adapters import prom
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features
-from hyperloom.web.features import history, integrations
+from hydraweave import metrics_export
+from hydraweave.adapters import prom
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features
+from hydraweave.web.features import history, integrations
 
 from tests.test_metrics_export import ROUTER, fake_fetch, healthy, labels
 
@@ -24,7 +24,7 @@ NOW = 1_800_000_000.0
 
 class StoreExportTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix="hyperloom store ")
+        directory = tempfile.TemporaryDirectory(prefix="hydraweave store ")
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "telemetry.sqlite3"
         self.store = Store(self.path, clock=lambda: NOW)
@@ -46,13 +46,13 @@ class StoreExportTests(unittest.TestCase):
         self.store.record([("node_gpu_busy_percent", {"machine": "halo-2", "device": "card0"}, 70)], ts=NOW - 16)
         self.store.record([("node_up", {"machine": "halo-1"}, 1), ("other_series", {"machine": "halo-1"}, 3)], ts=NOW - 2)
         text, samples = self.collect()
-        self.assertEqual(samples[("hyperloom_node_gpu_busy_percent", labels(machine="halo-1", device="card0"))], 55)
-        self.assertNotIn(("hyperloom_node_gpu_busy_percent", labels(machine="halo-2", device="card0")), samples)  # stale
-        self.assertEqual(samples[("hyperloom_node_up", labels(machine="halo-1"))], 1)
-        self.assertFalse(any(key[0] == "hyperloom_other_series" for key in samples))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="telemetry"))], 1)
-        self.assertIn("# TYPE hyperloom_node_gpu_busy_percent gauge", text)
-        self.assertIn("node_gpu_busy_percent (%) from the hyperloom telemetry store", text)
+        self.assertEqual(samples[("hydraweave_node_gpu_busy_percent", labels(machine="halo-1", device="card0"))], 55)
+        self.assertNotIn(("hydraweave_node_gpu_busy_percent", labels(machine="halo-2", device="card0")), samples)  # stale
+        self.assertEqual(samples[("hydraweave_node_up", labels(machine="halo-1"))], 1)
+        self.assertFalse(any(key[0] == "hydraweave_other_series" for key in samples))
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="telemetry"))], 1)
+        self.assertIn("# TYPE hydraweave_node_gpu_busy_percent gauge", text)
+        self.assertIn("node_gpu_busy_percent (%) from the hydraweave telemetry store", text)
 
     def test_counter_deltas_are_not_exported(self):
         # A stored delta does not record the time it spans, so no rate (and no counter) is derived from it; a
@@ -63,20 +63,20 @@ class StoreExportTests(unittest.TestCase):
         self.store.record([("node_net_rx_bytes", rx, 1000)], ts=NOW - 7)
         self.store.record([("node_net_rx_bytes", rx, 5000), ("node_net_rx_bytes_per_second", rx, 800.0)], ts=NOW - 2)
         _, samples = self.collect()
-        self.assertFalse(any(key[0].startswith("hyperloom_node_net_rx_bytes") and key[0].endswith(("bytes", "_total"))
+        self.assertFalse(any(key[0].startswith("hydraweave_node_net_rx_bytes") and key[0].endswith(("bytes", "_total"))
                              for key in samples))
-        self.assertEqual(samples[("hyperloom_node_net_rx_bytes_per_second", labels(**rx))], 800.0)
+        self.assertEqual(samples[("hydraweave_node_net_rx_bytes_per_second", labels(**rx))], 800.0)
 
     def test_owned_name_spaces_are_never_taken_by_passthrough(self):
         # Store series (fresh or stale), ledger, findings and the router/engine families own their name spaces,
         # whatever a scrape contains, so a passed-through family can never take one of their names.
         out = metrics_export.Exposition()
-        for name in ("hyperloom_node_gpu_clock_mhz", "hyperloom_usb4_link_gbps", "hyperloom_ledger_x", "hyperloom_finding"):
+        for name in ("hydraweave_node_gpu_clock_mhz", "hydraweave_usb4_link_gbps", "hydraweave_ledger_x", "hydraweave_finding"):
             self.assertFalse(out.passthrough_instance(name, "gauge", [(name, {"caller": "a"}, 1)], "x"))
-        self.assertFalse(out.passthrough_instance("hyperloom_node_gpu_clock_mhz", "gauge",
-                                                  [("hyperloom_node_gpu_clock_mhz", {"caller": "a"}, 1)], "x"))
-        self.assertFalse(out.passthrough_instance("hyperloom_engine_waiting", "gauge",          # a hyperloom family
-                                                  [("hyperloom_engine_waiting", {"caller": "a"}, 1)], "x"))
+        self.assertFalse(out.passthrough_instance("hydraweave_node_gpu_clock_mhz", "gauge",
+                                                  [("hydraweave_node_gpu_clock_mhz", {"caller": "a"}, 1)], "x"))
+        self.assertFalse(out.passthrough_instance("hydraweave_engine_waiting", "gauge",          # a hydraweave family
+                                                  [("hydraweave_engine_waiting", {"caller": "a"}, 1)], "x"))
 
     def test_unsupported_schema_is_source_down(self):
         other = self.path.parent / "other.sqlite3"
@@ -85,31 +85,31 @@ class StoreExportTests(unittest.TestCase):
         db.commit()
         db.close()
         samples = prom.parse(metrics_export.collect({}, fake_fetch({}), telemetry=other, launches={}, families={}))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="telemetry",
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="telemetry",
                                                                 reason="telemetry store has an unsupported schema"))], 0)
 
     def test_series_without_a_descriptor_are_left_out(self):
         self.store.record([("node_mystery", {"machine": "halo-1"}, 5, "delta")], ts=NOW)
         self.store.execute("DELETE FROM metrics WHERE name='node_mystery'")
         _, samples = self.collect()
-        self.assertFalse(any(key[0] == "hyperloom_node_mystery" for key in samples))
+        self.assertFalse(any(key[0] == "hydraweave_node_mystery" for key in samples))
 
     def test_long_label_values_reject_the_series(self):
         self.store.describe("node_load1", "gauge", interval=5)
         self.store.record([("node_load1", {"machine": "x" * 129}, 1), ("node_load1", {"machine": "halo-1"}, 2)], ts=NOW)
         _, samples = self.collect()
-        self.assertEqual([key for key in samples if key[0] == "hyperloom_node_load1"],
-                         [("hyperloom_node_load1", labels(machine="halo-1"))])
+        self.assertEqual([key for key in samples if key[0] == "hydraweave_node_load1"],
+                         [("hydraweave_node_load1", labels(machine="halo-1"))])
 
     def test_missing_and_unreadable_store_mark_the_source_down(self):
         missing = Path(self.path.parent / "absent.sqlite3")
         samples = prom.parse(metrics_export.collect({}, fake_fetch({}), telemetry=missing, launches={}, families={}))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="telemetry", reason=metrics_export.STORE_MISSING))], 0)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="telemetry", reason=metrics_export.STORE_MISSING))], 0)
         self.assertFalse(missing.exists())                       # never created
         broken = self.path.parent / "broken.sqlite3"
         broken.write_bytes(b"not a database" * 100)
         samples = prom.parse(metrics_export.collect({}, fake_fetch({}), telemetry=broken, launches={}, families={}))
-        key = [k for k in samples if k[0] == "hyperloom_source_up" and dict(k[1])["source"] == "telemetry"]
+        key = [k for k in samples if k[0] == "hydraweave_source_up" and dict(k[1])["source"] == "telemetry"]
         self.assertEqual(samples[key[0]], 0)
         self.assertIn("unreadable", dict(key[0][1])["reason"])
 
@@ -125,9 +125,9 @@ class StoreExportTests(unittest.TestCase):
             db.execute("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c").fetchall()
         db.close()
         text, samples = self.collect(deadline_s=0)
-        key = [k for k in samples if k[0] == "hyperloom_source_up" and dict(k[1])["source"] == "telemetry"][0]
+        key = [k for k in samples if k[0] == "hydraweave_source_up" and dict(k[1])["source"] == "telemetry"][0]
         self.assertEqual(samples[key], 0)
-        self.assertNotIn("hyperloom_node_load1", text)
+        self.assertNotIn("hydraweave_node_load1", text)
 
     def test_ledger_totals(self):
         self.store.ensure_table("CREATE TABLE IF NOT EXISTS ledger (hour INTEGER NOT NULL, model TEXT NOT NULL, "
@@ -140,16 +140,16 @@ class StoreExportTests(unittest.TestCase):
                                  row) for row in rows])
         text, samples = self.collect()
         one = dict(model="m", machine="halo-1", profile="qwen")
-        self.assertEqual(samples[("hyperloom_ledger_tokens_total", labels(kind="generated", **one))], 25)
-        self.assertEqual(samples[("hyperloom_ledger_tokens_total", labels(kind="prompt", **one))], 7)
-        self.assertIn("# TYPE hyperloom_ledger_tokens_total counter", text)
+        self.assertEqual(samples[("hydraweave_ledger_tokens_total", labels(kind="generated", **one))], 25)
+        self.assertEqual(samples[("hydraweave_ledger_tokens_total", labels(kind="prompt", **one))], 7)
+        self.assertIn("# TYPE hydraweave_ledger_tokens_total counter", text)
 
     def finding(self, key, **value):
         self.store.put("health/state", key, value)
 
     def test_findings_standing_fresh_and_counted(self):
         _, samples = self.collect()
-        self.assertFalse(any(key[0] == "hyperloom_finding" for key in samples))       # health not present
+        self.assertFalse(any(key[0] == "hydraweave_finding" for key in samples))       # health not present
         self.assertFalse(any(dict(key[1]).get("source") == "health" for key in samples))
         self.store.put("health/meta", "meta", {"evaluated_at": NOW - 5})
         self.finding("a", rule="gpu_hot", severity="critical", state="firing", machine="halo-1", subject="card0")
@@ -160,13 +160,13 @@ class StoreExportTests(unittest.TestCase):
         self.finding("f", rule="odd", severity="fatal", state="firing")
         _, samples = self.collect()
         found = {dict(key[1])["rule"] + "/" + dict(key[1]).get("machine", "") + "/" + dict(key[1])["severity"]: value
-                 for key, value in samples.items() if key[0] == "hyperloom_finding"}
+                 for key, value in samples.items() if key[0] == "hydraweave_finding"}
         self.assertEqual(found, {"gpu_hot/halo-1/critical": 1, "gpu_hot/halo-2/warning": 1, "disk_full/halo-1/warning": 2})
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="health"))], 1)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="health"))], 1)
         self.store.put("health/meta", "meta", {"evaluated_at": NOW - 600})
         _, samples = self.collect()
-        self.assertFalse(any(key[0] == "hyperloom_finding" for key in samples))
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="health", reason="health evaluation stale"))], 0)
+        self.assertFalse(any(key[0] == "hydraweave_finding" for key in samples))
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="health", reason="health evaluation stale"))], 0)
 
 
 ROUTER_METRICS = """# HELP tensormeld_router_waiting Waiting.
@@ -225,39 +225,39 @@ class PassthroughTests(unittest.TestCase):
         text = metrics_export.collect({"qwen": ROUTER}, fake_fetch(documents), telemetry=None, launches={}, families={})
         samples = prom.parse(text)
         base = dict(profile="qwen", route="r1", caller="ops")
-        self.assertEqual(samples[("hyperloom_tensormeld_router_ttft_seconds_bucket", labels(le="+Inf", **base))], 4)
-        self.assertEqual(samples[("hyperloom_tensormeld_router_ttft_seconds_count", labels(**base))], 4)
+        self.assertEqual(samples[("hydraweave_tensormeld_router_ttft_seconds_bucket", labels(le="+Inf", **base))], 4)
+        self.assertEqual(samples[("hydraweave_tensormeld_router_ttft_seconds_count", labels(**base))], 4)
         # Buckets ascending by le, then sum and count, under one TYPE line.
         lines = [line for line in text.splitlines() if "route=\"r1\"" in line]
         self.assertEqual([line.split(',le="')[1].split('"')[0] if ',le="' in line else line.split("{")[0] for line in lines],
-                         ["0.1", "1", "+Inf", "hyperloom_tensormeld_router_ttft_seconds_sum",
-                          "hyperloom_tensormeld_router_ttft_seconds_count"])
-        self.assertEqual(text.count("# TYPE hyperloom_tensormeld_router_ttft_seconds histogram"), 1)
+                         ["0.1", "1", "+Inf", "hydraweave_tensormeld_router_ttft_seconds_sum",
+                          "hydraweave_tensormeld_router_ttft_seconds_count"])
+        self.assertEqual(text.count("# TYPE hydraweave_tensormeld_router_ttft_seconds histogram"), 1)
         # Invalid (non-monotonic, +Inf != count) and incomplete (no sum) instances are left out whole.
         self.assertFalse(any(dict(key[1]).get("route") in ("r2", "r3", "r4") for key in samples))
         # An upstream profile label is kept as exported_profile; a collision with an existing one drops the instance.
-        kept = [dict(key[1]) for key in samples if key[0] == "hyperloom_tensormeld_router_ttft_seconds_count"
+        kept = [dict(key[1]) for key in samples if key[0] == "hydraweave_tensormeld_router_ttft_seconds_count"
                 and "exported_profile" in dict(key[1])]
         self.assertEqual(kept, [{"exported_profile": "x", "profile": "qwen"}])
-        self.assertEqual(samples[("hyperloom_tensormeld_router_caller_requests_total", labels(profile="qwen", caller="ops"))], 9)
-        self.assertNotIn(("hyperloom_tensormeld_router_requests_total", labels(profile="qwen")), samples)
-        self.assertNotIn("hyperloom_tensormeld_router_waiting", text)
+        self.assertEqual(samples[("hydraweave_tensormeld_router_caller_requests_total", labels(profile="qwen", caller="ops"))], 9)
+        self.assertNotIn(("hydraweave_tensormeld_router_requests_total", labels(profile="qwen")), samples)
+        self.assertNotIn("hydraweave_tensormeld_router_waiting", text)
         engine = dict(profile="qwen", replica="halo-1", machine="halo-1")
-        self.assertEqual(samples[("hyperloom_strix_ttft_seconds_bucket", labels(le="0.5", **engine))], 2)
-        self.assertEqual(samples[("hyperloom_source_up", labels(source="router_metrics", profile="qwen"))], 1)
+        self.assertEqual(samples[("hydraweave_strix_ttft_seconds_bucket", labels(le="0.5", **engine))], 2)
+        self.assertEqual(samples[("hydraweave_source_up", labels(source="router_metrics", profile="qwen"))], 1)
 
     def test_sample_names_belong_to_one_family(self):
         out = metrics_export.Exposition()
-        out.add("hyperloom_x_count", "gauge", {}, 1)
-        rows = [("hyperloom_x_bucket", {"le": "+Inf"}, 1), ("hyperloom_x_sum", {}, 1), ("hyperloom_x_count", {}, 1)]
-        self.assertFalse(out.passthrough_instance("hyperloom_x", "histogram", rows, "x"))
-        self.assertTrue(out.passthrough_instance("hyperloom_y", "histogram",
+        out.add("hydraweave_x_count", "gauge", {}, 1)
+        rows = [("hydraweave_x_bucket", {"le": "+Inf"}, 1), ("hydraweave_x_sum", {}, 1), ("hydraweave_x_count", {}, 1)]
+        self.assertFalse(out.passthrough_instance("hydraweave_x", "histogram", rows, "x"))
+        self.assertTrue(out.passthrough_instance("hydraweave_y", "histogram",
                                                  [(n.replace("_x", "_y"), l, v) for n, l, v in rows], "y"))
-        self.assertFalse(out.passthrough_instance("hyperloom_y", "histogram",
+        self.assertFalse(out.passthrough_instance("hydraweave_y", "histogram",
                                                   [(n.replace("_x", "_y"), l, v) for n, l, v in rows], "y"))
-        out.add("hyperloom_y", "gauge", {}, 5)       # a hyperloom family can never join a passed-through one
-        self.assertEqual(prom.parse(out.text())[("hyperloom_x_count", ())], 1)
-        self.assertNotIn(("hyperloom_y", ()), prom.parse(out.text()))
+        out.add("hydraweave_y", "gauge", {}, 5)       # a hydraweave family can never join a passed-through one
+        self.assertEqual(prom.parse(out.text())[("hydraweave_x_count", ())], 1)
+        self.assertNotIn(("hydraweave_y", ()), prom.parse(out.text()))
 
     def test_budget_omits_whole_instances(self):
         lines = ["# TYPE big histogram"]
@@ -267,8 +267,8 @@ class PassthroughTests(unittest.TestCase):
         copied = metrics_export.passthrough(out, "\n".join(lines) + "\n", {"profile": "p"}, "engine")
         self.assertLessEqual(copied, metrics_export.PASSTHROUGH_LIMIT)
         self.assertEqual(copied % 3, 0)
-        counts = {dict(key[1])["i"] for key in prom.parse(out.text()) if key[0] == "hyperloom_big_count"}
-        buckets = {dict(key[1])["i"] for key in prom.parse(out.text()) if key[0] == "hyperloom_big_bucket"}
+        counts = {dict(key[1])["i"] for key in prom.parse(out.text()) if key[0] == "hydraweave_big_count"}
+        buckets = {dict(key[1])["i"] for key in prom.parse(out.text()) if key[0] == "hydraweave_big_bucket"}
         self.assertEqual(counts, buckets)
 
 
@@ -280,7 +280,7 @@ class FakeAPI:
         self.clock = lambda: NOW
 
     def document(self, name, **fields):
-        return {"schema": f"hyperloom/ui-{name}-v1", **fields}
+        return {"schema": f"hydraweave/ui-{name}-v1", **fields}
 
     def read(self, name, query):
         if name.startswith("history/"):
@@ -324,7 +324,7 @@ class CSVExportTests(unittest.TestCase):
         self.assertNotIn("secret-target", result["csv"])
         shared = self.export("devices", share="1")
         self.assertEqual(shared["csv"].split("\r\n")[0], "Machine,OS,Health")
-        self.assertEqual((shared["filename"], shared["share"]), ("hyperloom-devices-share.csv", True))
+        self.assertEqual((shared["filename"], shared["share"]), ("hydraweave-devices-share.csv", True))
 
     def test_header_cells_are_escaped(self):
         self.assertEqual(integrations.to_csv([["k", "=label"]], [{"k": " -1x"}]), "'=label\r\n' -1x\r\n")

@@ -1,8 +1,8 @@
-# hyperloom
+# Hydraweave
 
 **One loom for unlike machines: a Windows workstation with a big discrete GPU and a set of AMD Strix Halo mini PCs, woven into one inference cluster.**
 
-hyperloom is the integration and control layer that turns three separate projects into one installable system: [TensorMeld](https://github.com/hyukudan/tensormeld) (router, planner, benchmarks), the [Strix Halo engine](https://github.com/hyukudan/strix-halo-engine-lab) (HIP serving apps and a CUDA prefill service) and [strix-trellis](https://github.com/hyukudan/strix-trellis) (trellis-quantized dense kernels). Each component is pinned by commit and driven only through the interfaces it already has: command-line flags, config files, stdout events and its HTTP endpoints. hyperloom adds what was missing between them: pinned builds, one config file, safe start and stop on every machine, a router you can place anywhere, and one view of devices, links, statistics and logs.
+Hydraweave is the integration and control layer that turns three separate projects into one installable system: [TensorMeld](https://github.com/hyukudan/tensormeld) (router, planner, benchmarks), the [Strix Halo engine](https://github.com/hyukudan/strix-halo-engine-lab) (HIP serving apps and a CUDA prefill service) and [strix-trellis](https://github.com/hyukudan/strix-trellis) (trellis-quantized dense kernels). Each component is pinned by commit and driven only through the interfaces it already has: command-line flags, config files, stdout events and its HTTP endpoints. Hydraweave adds what was missing between them: pinned builds, one config file, safe start and stop on every machine, a router you can place anywhere, and one view of devices, links, statistics and logs.
 
 > [!IMPORTANT]
 > **Status (2026-10-25 evening):** Phases 1a and 2 accepted on hardware; portal start/stop smoke-tested, with crash-cleanup acceptance open. RTX build, standalone exactness and capped placement validated; pair + RTX placement remains pending. See the [current overview](../README.md#current-status) and [acceptance records](acceptance-2.md).
@@ -31,7 +31,7 @@ flowchart LR
     client(["Client<br/>OpenAI / Anthropic API"])
 
     subgraph ctl["Control machine (where you run the CLI)"]
-        cli["hyperloom / hloom CLI<br/>+ local portal"]
+        cli["hydraweave / hloom CLI<br/>+ local portal"]
         cfg[("cluster.json<br/>one versioned config")]
     end
 
@@ -44,12 +44,12 @@ flowchart LR
     end
 
     subgraph na["halo-1 (Strix Halo, Linux)"]
-        hna["hyperloom-node<br/>supervisor"]
+        hna["hydraweave-node<br/>supervisor"]
         ea["engine<br/>rank 0 or replica"]
     end
 
     subgraph nb["halo-2 (Strix Halo, Linux)"]
-        hnb["hyperloom-node<br/>supervisor"]
+        hnb["hydraweave-node<br/>supervisor"]
         eb["engine<br/>rank 1 or replica"]
     end
 
@@ -69,35 +69,37 @@ flowchart LR
 - **The CLI runs wherever the operator is.** Typically that is the Windows workstation; the same stdlib Python also runs on Linux.
 - **The router runs where you say at launch:** on the CLI's machine by default, or on any linked machine.
 - **Nodes and devices are linked explicitly** (flags or a plan file) and must be reachable; nothing joins the cluster on its own.
-- **Every GPU process on a node is started by `hyperloom-node supervise`**, inside a GPU lease, and is stopped by it too.
+- **Every GPU process on a node is started by `hydraweave-node supervise`**, inside a GPU lease, and is stopped by it too.
 
-Everything in the boxes comes from pinned components. hyperloom itself contains no inference code, no kernels and no numerics.
+Everything in the boxes comes from pinned components. Hydraweave itself contains no inference code, no kernels and no numerics.
 
 ## Quick start
 
 > [!NOTE]
-> The Phase 1a CLI and Phase 2 pair have [passed hardware acceptance](acceptance-2.md). Optional RTX placement through the full deployment remains pending. Plan files (`--plan`) and `--allow-partial` are specified but not implemented. `hloom` is a short alias for `hyperloom` everywhere.
+> The Phase 1a CLI and Phase 2 pair have [passed hardware acceptance](acceptance-2.md). Optional RTX placement through the full deployment remains pending. Plan files (`--plan`) and `--allow-partial` are specified but not implemented. `hloom` is a short alias for `hydraweave` everywhere.
 
 **1. Install on the control machine** (Windows, Python ≥ 3.11, git, OpenSSH client). The full from-scratch guide, including release archives, Linux, node prerequisites, upgrades and rollback, is [docs/install.md](../docs/install.md):
 
+Set `REPOSITORY_URL` to this repository’s current clone URL; the hosting repository has not been renamed.
+
 ```powershell
-git clone --recurse-submodules https://github.com/hyukudan/hyperloom.git
-cd hyperloom
-.\windows\install.ps1            # one venv, TensorMeld + hyperloom, Start-menu shortcut
+git clone --recurse-submodules $env:REPOSITORY_URL hydraweave
+cd hydraweave
+.\windows\install.ps1            # one venv, TensorMeld + hydraweave, Start-menu shortcut
 hloom --help
 ```
 
-`install.ps1` resolves one interpreter, creates a venv under `%LOCALAPPDATA%\hyperloom\venv` and installs TensorMeld from the pinned submodule. It has no other dependencies and supports `-WhatIf`.
+`install.ps1` resolves one interpreter, creates a venv under `%LOCALAPPDATA%\hydraweave\venv` and installs TensorMeld from the pinned submodule. It has no other dependencies and supports `-WhatIf`.
 
-**2. Describe the cluster** in `%APPDATA%\hyperloom\cluster.json` (`~/.config/hyperloom/cluster.json` on Linux). It holds machines, asset paths with their expected size and sha256, and profiles; it **never holds secrets**, only key-file paths. A complete example is [`examples/cluster.example.json`](../examples/cluster.example.json); the shape, abridged:
+**2. Describe the cluster** in `%APPDATA%\hydraweave\cluster.json` (`~/.config/hydraweave/cluster.json` on Linux). It holds machines, asset paths with their expected size and sha256, and profiles; it **never holds secrets**, only key-file paths. A complete example is [`examples/cluster.example.json`](../examples/cluster.example.json); the shape, abridged:
 
 ```jsonc
-{ "schema": "hyperloom/cluster-v1",
+{ "schema": "hydraweave/cluster-v1",
   "machines": [
     { "id": "workstation", "os": "windows", "access": "local",
-      "http_address": "127.0.0.1", "install_root": "C:/hyperloom" },
+      "http_address": "127.0.0.1", "install_root": "C:/hydraweave" },
     { "id": "halo-1", "os": "linux", "access": "ssh", "http_address": "192.0.2.10",
-      "ssh_target": "halo-1", "install_root": "/opt/hyperloom", "lab_mode": true,
+      "ssh_target": "halo-1", "install_root": "/opt/hydraweave", "lab_mode": true,
       "devices": [ { "id": "gpu", "type": "amd" } ] },
     { "id": "halo-2", … } ],
   "assets":   { "halo-1": { "model": { "path": "…", "bytes": 0, "sha256": "…" }, … }, … },
@@ -107,7 +109,7 @@ hloom --help
 ```
 
 ```powershell
-hloom config validate "$env:APPDATA\hyperloom\cluster.json"   # strict schema check, unknown keys rejected
+hloom config validate "$env:APPDATA\hydraweave\cluster.json"   # strict schema check, unknown keys rejected
 hloom render qwen-replicas     # router JSON + exact argv/env per process, checked by TensorMeld's own parser
 hloom router start             # Phase 0: the rendered router as a local child (Job Object), then status / stop
 ```
@@ -119,7 +121,7 @@ hloom doctor halo-1
 hloom doctor halo-2
 ```
 
-The first contact with a machine pins its ssh host key: hyperloom shows the full SHA-256 fingerprint and you confirm it against the machine itself.
+The first contact with a machine pins its ssh host key: Hydraweave shows the full SHA-256 fingerprint and you confirm it against the machine itself.
 
 **4. Install the pinned engine on the nodes, then bring a profile up**, choosing where the router runs and what to link:
 
@@ -133,7 +135,7 @@ hloom up qwen-replicas --node halo-1 --node halo-2
 # DeepSeek pair, router on halo-1, RTX prefill on the workstation
 hloom up ds41-rtx --router halo-1 --node halo-1 --node halo-2 --device workstation:rtx-pro
 
-# Planned: the same choices from a file (schema hyperloom/launch-v1)
+# Planned: the same choices from a file (schema hydraweave/launch-v1)
 # hloom up --plan my-launch.json
 
 hloom status qwen-replicas
@@ -141,13 +143,13 @@ hloom logs qwen-replicas router --tail 200
 hloom down qwen-replicas
 ```
 
-**How linking works.** hyperloom links the machines and devices that are both **declared** (by `--node`, `--device` or the plan file) and **reachable** (added, host key pinned, doctor passing). If a declared machine or device is unreachable, `up` fails **before** any GPU lease is taken and names what is missing. A planned `--allow-partial` will relax this only for profiles that define a degraded form, such as one Qwen replica instead of two. With `--router <machine>`, the router listens on that machine's private address with a key file, because TensorMeld requires one for any non-loopback listen.
+**How linking works.** Hydraweave links the machines and devices that are both **declared** (by `--node`, `--device` or the plan file) and **reachable** (added, host key pinned, doctor passing). If a declared machine or device is unreachable, `up` fails **before** any GPU lease is taken and names what is missing. A planned `--allow-partial` will relax this only for profiles that define a degraded form, such as one Qwen replica instead of two. With `--router <machine>`, the router listens on that machine's private address with a key file, because TensorMeld requires one for any non-loopback listen.
 
 ## How it works
 
 ### A request through the cluster
 
-Intended full request path for DeepSeek V4.1 Flash with the RTX prefill service (Phase 3a; end-to-end Hyperloom acceptance pending). A short prompt skips the dashed branch and is prefilled on the pair itself.
+Intended full request path for DeepSeek V4.1 Flash with the RTX prefill service (Phase 3a; end-to-end Hydraweave acceptance pending). A short prompt skips the dashed branch and is prefilled on the pair itself.
 
 ```mermaid
 sequenceDiagram
@@ -196,8 +198,8 @@ flowchart LR
     subgraph now["MVP: add by address"]
         a1["operator enters<br/>address + ssh target"] --> a2["ssh-keyscan:<br/>fingerprint shown"]
         a2 --> a3{"operator confirms<br/>on the machine"}
-        a3 -- yes --> a4["key pinned in<br/>hyperloom's own known_hosts"]
-        a4 --> a5["bootstrap hyperloom-node,<br/>doctor + gpu + probe"]
+        a3 -- yes --> a4["key pinned in<br/>hydraweave's own known_hosts"]
+        a4 --> a5["bootstrap hydraweave-node,<br/>doctor + gpu + probe"]
         a5 --> a6["machine listed<br/>in Devices"]
     end
     subgraph later["Phase 4: discover and pair"]
@@ -207,17 +209,17 @@ flowchart LR
     end
 ```
 
-- **Today's path is ssh with the operator's keys.** Nothing listens on a worker. Every later ssh call is pinned to the recorded key (`StrictHostKeyChecking=yes` against hyperloom's own `known_hosts`), so a changed key is a hard failure.
-- **Inventory** comes from `tensormeld probe` (OS, RAM, NVIDIA devices) and `hyperloom-node doctor` / `gpu` (CPU, AMD memory from sysfs, ROCm version, kernel, USB4 stream driver and layout). These are passive reads that do not initialize the GPU.
+- **Today's path is ssh with the operator's keys.** Nothing listens on a worker. Every later ssh call is pinned to the recorded key (`StrictHostKeyChecking=yes` against Hydraweave's own `known_hosts`), so a changed key is a hard failure.
+- **Inventory** comes from `tensormeld probe` (OS, RAM, NVIDIA devices) and `hydraweave-node doctor` / `gpu` (CPU, AMD memory from sysfs, ROCm version, kernel, USB4 stream driver and layout). These are passive reads that do not initialize the GPU.
 - **Discovery never grants anything.** A machine that announces itself is listed as "discovered, not paired" and cannot run work until the operator pairs it explicitly.
 
 ### GPU leases
 
-On the nodes, a GPU process only starts inside a **lease**, which is exactly one turn of the node's GPU queue (or a pair turn holding both nodes). The lease has a hard deadline; `hyperloom-node supervise` is its single foreground owner.
+On the nodes, a GPU process only starts inside a **lease**, which is exactly one turn of the node's GPU queue (or a pair turn holding both nodes). The lease has a hard deadline; `hydraweave-node supervise` is its single foreground owner.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Queued: hyperloom up
+    [*] --> Queued: hydraweave up
     Queued --> Cancelled: stop while queued
     Queued --> Acquired: GPU turn granted
     Acquired --> Aborted: post-acquire check fails<br/>(doctor-lite, layout)
@@ -234,9 +236,9 @@ stateDiagram-v2
     Cancelled --> [*]: nothing started
 ```
 
-- **Deadline.** The default is the single-turn cap (20 min) minus a 60 s drain margin. A longer lease needs an explicit approval (`--approval-ref "<ref>" --approval-lease <s> --approval-end <time>`) that names the owner, maximum duration and end time; it is logged and shown in the portal, and refused once the approval has expired. hyperloom never writes approvals itself.
+- **Deadline.** The default is the single-turn cap (20 min) minus a 60 s drain margin. A longer lease needs an explicit approval (`--approval-ref "<ref>" --approval-lease <s> --approval-end <time>`) that names the owner, maximum duration and end time; it is logged and shown in the portal, and refused once the approval has expired. Hydraweave never writes approvals itself.
 - **Checks after acquiring, not before.** Pair profiles re-check that both nodes are in the production USB4 layout once the turn is held, and abort with nothing started otherwise.
-- **No orphans.** Engines run in their own process groups under `supervise`. Partial starts (rank 1 up, rank 0 failing) are cleaned up on both nodes. `supervise` does not depend on the controller's ssh session: if the CLI dies, the lease runs to its deadline and `hyperloom status` reattaches.
+- **No orphans.** Engines run in their own process groups under `supervise`. Partial starts (rank 1 up, rank 0 failing) are cleaned up on both nodes. `supervise` does not depend on the controller's ssh session: if the CLI dies, the lease runs to its deadline and `hydraweave status` reattaches.
 - **Labels** are `hl-<profile>-<short id>`, from a namespace that provably maps to no layout change on the node side.
 
 ### Builds and releases
@@ -267,19 +269,19 @@ The full design, with all seven screens in light, dark and narrow layouts, is in
 
 Pinned in [`versions.lock`](../versions.lock) and as git submodules under `third_party/` (read-only here). Pin changes are ordinary reviewed commits.
 
-| Component | Pin | License | What hyperloom uses |
+| Component | Pin | License | What Hydraweave uses |
 |---|---|---|---|
-| [TensorMeld](https://github.com/hyukudan/tensormeld) | `7165e98` (0.2.0a2) on the nodes; `409003a` for the local router (see SPEC 1.1) | MIT | `serve-replicas` router (`replica-router-v1`: OpenAI/Anthropic relay with SSE, replica balancing, prefill placement, `/api/status`, `/metrics`); `probe` and `link-probe` for inventory and links; `plan-hetero` for placement proposals; `bench-protocol` for client-side benchmarks. Its config parser validates every router config hyperloom renders. |
+| [TensorMeld](https://github.com/hyukudan/tensormeld) | `7165e98` (0.2.0a2) on the nodes; `409003a` for the local router (see SPEC 1.1) | MIT | `serve-replicas` router (`replica-router-v1`: OpenAI/Anthropic relay with SSE, replica balancing, prefill placement, `/api/status`, `/metrics`); `probe` and `link-probe` for inventory and links; `plan-hetero` for placement proposals; `bench-protocol` for client-side benchmarks. Its config parser validates every router config Hydraweave renders. |
 | [Strix Halo engine](https://github.com/hyukudan/strix-halo-engine-lab) | `70ec42b9` | Apache-2.0 | `strix-hip-decode-token --http-serve` (Qwen replicas), `strix-deepseek41-serve` (DeepSeek pair over USB4, `READY` / `STOPPED` events, `/admin/drain`, state import), `strix-cuda-ds41-prefill-service` (RTX prefill). The pin moves to the merge commit once it lands on the engine's `main`. |
 | [strix-trellis](https://github.com/hyukudan/strix-trellis) | `5acf090` (0.3.0) | Apache-2.0 | static library + C header linked into the DeepSeek engine build: trellis-quantized dense layers (shared expert and output head). |
 
-Not managed by hyperloom, only checked read-only: the kernel and USB4 stream driver, ROCm / CUDA / MSVC toolchains, ssh keys, model downloads and conversions. Gaps in a component are filed as requests in that component's repository, never patched here.
+Not managed by Hydraweave, only checked read-only: the kernel and USB4 stream driver, ROCm / CUDA / MSVC toolchains, ssh keys, model downloads and conversions. Gaps in a component are filed as requests in that component's repository, never patched here.
 
 ## Performance
 
-hyperloom adds no inference code, so its target is to **reproduce** these numbers, not to beat them: Phase 1a and Phase 2 each gate on token-identical output against the same binary launched without hyperloom, plus interleaved throughput rounds.
+Hydraweave adds no inference code, so its target is to **reproduce** these numbers, not to beat them: Phase 1a and Phase 2 each gate on token-identical output against the same binary launched without Hydraweave, plus interleaved throughput rounds.
 
-The historical component results below were **measured** using their own tooling. They are not current Hyperloom deployment benchmarks. For the newer measured integration results, see [the overview](../README.md#measured-integration-results), [Phase 2 acceptance](acceptance-2.md) and [the updated DeepSeek adapter check](adapters.md#hardware-check-ds41-pair-w5-2026-10-24). Each historical row gives its date, conditions and source.
+The historical component results below were **measured** using their own tooling. They are not current Hydraweave deployment benchmarks. For the newer measured integration results, see [the overview](../README.md#measured-integration-results), [Phase 2 acceptance](acceptance-2.md) and [the updated DeepSeek adapter check](adapters.md#hardware-check-ds41-pair-w5-2026-10-24). Each historical row gives its date, conditions and source.
 
 **Hardware.** Two Strix Halo nodes (Ryzen AI Max+ 395, Radeon 8060S `gfx1151`, 128 GB unified memory each) joined by two direct USB4 cables (40 Gb/s and 20 Gb/s); one workstation with an RTX PRO 6000 (96 GB) reaching the nodes over 1 GbE.
 
@@ -309,7 +311,7 @@ Experts from the published Q2 GGUF; dense layers trellis mix-B over a 6.5-bit ov
 | DSpark speculative decode, 1 stream, 24 prompts × 256 tokens | 46.4 tok/s (EN 37.5 / ES 39.3 / code 62.3) | 2026-10-22 | P17.1 build, DSpark on | engine heterogeneous decode report |
 | USB4 link, 4 streams, both directions | ~37 Gb/s per direction | 2026-10-22 | common time window across all streams (the sum of per-stream rates is 39.75 Gb/s) | USB4 driver ceiling report |
 
-### Workstation + pair (experimental; not yet hyperloom profiles)
+### Workstation + pair (experimental; not yet Hydraweave profiles)
 
 | Measurement | Value | Date | Conditions | Source |
 |---|---|---|---|---|
@@ -320,7 +322,7 @@ Experts from the published Q2 GGUF; dense layers trellis mix-B over a 6.5-bit ov
 
 | Phase | Scope | Status |
 |---|---|---|
-| **0** | Skeleton, no GPU: submodules and `versions.lock`, `cluster-v1` config, renders validated by TensorMeld's parser, router/engine adapters with fixtures from real outputs, ssh transport with host-key pinning, `hyperloom-node doctor` / `gpu`, Windows install and router child in a Job Object | **done** (read-only doctor run on real nodes) |
+| **0** | Skeleton, no GPU: submodules and `versions.lock`, `cluster-v1` config, renders validated by TensorMeld's parser, router/engine adapters with fixtures from real outputs, ssh transport with host-key pinning, `hydraweave-node doctor` / `gpu`, Windows install and router child in a Job Object | **done** (read-only doctor run on real nodes) |
 | **1a** | Qwen replicas, deployment, leases, router placement and token regression | [Accepted on hardware](acceptance-1a.md) |
 | **1b** | Thin local portal: Devices, Engines, Live stats, Logs, Settings | Implemented; hardware start/stop smoke test passed, portal-exit cleanup check open |
 | **2** | DeepSeek pair, builds, asset/layout checks and launch equivalence | [Accepted on hardware](acceptance-2.md); [updated adapter checked](adapters.md#hardware-check-ds41-pair-w5-2026-10-24) |
@@ -336,9 +338,9 @@ CI (`.github/workflows/ci.yml`) needs no repository secrets: it fetches only the
 ## Security
 
 - **Local control plane.** The portal listens on `127.0.0.1` only and accepts only a matching `Host` (no DNS rebinding). GET is read-only; every mutation is a JSON `POST` with a per-launch CSRF header and a matching `Origin`; there are no CORS headers. Negative tests cover each rule.
-- **Pinned ssh.** Machines are reached with the operator's keys and a host key pinned at first contact in hyperloom's own `known_hosts`, with a minimal ssh config so ambient settings cannot weaken the check. Remote calls are fixed verbs from an allow-list, with arguments as bounded JSON on stdin; there is no free-form shell.
+- **Pinned ssh.** Machines are reached with the operator's keys and a host key pinned at first contact in Hydraweave's own `known_hosts`, with a minimal ssh config so ambient settings cannot weaken the check. Remote calls are fixed verbs from an allow-list, with arguments as bounded JSON on stdin; there is no free-form shell.
 - **Bounded background reads.** The portal reads each node with one read-only `poll` session per 30 s while one of its pages is open (host, USB4, tool check, doctor, GPU, launch status and logs together), and otherwise only checks a lab node's GPU turn every 30 s. While a GPU turn holds a node, only that check runs, once a minute. The turn check does not depend on the history store.
-- **Secrets stay out of config and command lines.** Keys are generated by hyperloom (32 random bytes), stored with a user-only ACL on the control machine and as `0600` files on the nodes, and redacted from logs and bundles (rules, known limits and follow-ups: [redaction.md](redaction.md)). The one exception today is the CUDA prefill service, which only accepts literal key arguments; it is bound to loopback until the engine accepts key files.
+- **Secrets stay out of config and command lines.** Keys are generated by Hydraweave (32 random bytes), stored with a user-only ACL on the control machine and as `0600` files on the nodes, and redacted from logs and bundles (rules, known limits and follow-ups: [redaction.md](redaction.md)). The one exception today is the CUDA prefill service, which only accepts literal key arguments; it is bound to loopback until the engine accepts key files.
 - **Network.** Engine and router traffic is plain HTTP on a private LAN, a documented, accepted risk. Generation endpoints need a key; `/health`, `/metrics` and `/api/status` are unauthenticated and meant for the trusted LAN only.
 - **Safe on shared machines.** No root, no kernel, driver or layout changes, no writes outside a dedicated, marked install root, GPU work only inside leases, and CUDA work only on the RTX PRO, pinned by UUID.
 - **Repository hygiene.** A test scans every product-owned file and file name for addresses, host names, user names and secrets.

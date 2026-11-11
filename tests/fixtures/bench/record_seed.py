@@ -11,7 +11,7 @@ def seed(store, now):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from fake_server import FakeServer
     import responders
-    from hyperloom.bench import ab, client, decode, demo, prefill, quality, runs, targets, tools
+    from hydraweave.bench import ab, client, decode, demo, prefill, quality, runs, targets, tools
 
     store.put(targets.PREFS_NAMESPACE, targets.PREFS_KEY, {"targets": [
         {"id": "halo-2-server", "label": "halo-2 server", "scheme": "http", "host": "halo-2", "port": 18080,
@@ -74,7 +74,7 @@ def seed(store, now):
 
 
 def demo_prompts():
-    from hyperloom.bench import data
+    from hydraweave.bench import data
     items = data("prompts.json")["sets"]["prose"]
     return [items[i % len(items)] for i in range(6)]
 
@@ -87,8 +87,8 @@ if __name__ == "__main__":
     import json
     import time
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from hyperloom.telemetry.store import Store
-    from hyperloom.bench import store as bench_store
+    from hydraweave.telemetry.store import Store
+    from hydraweave.bench import store as bench_store
     memory = Store(":memory:")
     now = time.time()
     seed(memory, now)

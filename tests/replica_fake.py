@@ -5,7 +5,7 @@ import threading
 import time
 from unittest import mock
 
-from hyperloom.recipes import content_cache
+from hydraweave.recipes import content_cache
 
 
 def startup_args(model):

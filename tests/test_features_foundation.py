@@ -9,10 +9,10 @@ import time
 import unittest
 from unittest import mock
 
-from hyperloom import admission, cliext, telemetry
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features, server
-from hyperloom.web.api import API, APIError, JobFailed
+from hydraweave import admission, cliext, telemetry
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features, server
+from hydraweave.web.api import API, APIError, JobFailed
 
 
 class Clock:
@@ -160,7 +160,7 @@ class APIDispatchTests(unittest.TestCase):
         self.addCleanup(self.api.admission_db.close)
 
     def test_token_data_explanations_and_series_links_survive_redaction(self):
-        from hyperloom.web.api import redact
+        from hydraweave.web.api import redact
         document = {"generated_tokens": {"delta": None, "unobserved_s": 3.0, "uncertain": False, "stale": True},
                     "why": {"computed_tokens": "not reported by this engine build", "x": "token=abc123"},
                     "series": {"engine_generated_tokens": "history/engine_generated_tokens?profile=qwen"},
@@ -179,7 +179,7 @@ class APIDispatchTests(unittest.TestCase):
 
     def test_get_documents_are_redacted_and_errors_mapped(self):
         document = self.api.read("demo", {"x": "1"})
-        self.assertEqual((document["schema"], document["value"], document["token"]), ("hyperloom/ui-demo-v1", "1", "[redacted]"))
+        self.assertEqual((document["schema"], document["value"], document["token"]), ("hydraweave/ui-demo-v1", "1", "[redacted]"))
         self.assertEqual(self.api.read("demo/a/b", {}), {"rest": "a/b"})
         with self.assertRaises(APIError) as caught:
             self.api.read("missing", {})
@@ -421,12 +421,12 @@ class APIDispatchTests(unittest.TestCase):
         self.wait(bench["id"])
 
     def test_concurrent_holds_wait_for_the_renewal_thread(self):
-        from hyperloom.web import api as api_module
+        from hydraweave.web import api as api_module
         started, release = threading.Event(), threading.Event()
         real_start = api_module.threading.Thread.start
 
         def slow_failing_start(thread):
-            if thread.name == "hyperloom-admission":
+            if thread.name == "hydraweave-admission":
                 started.set()
                 release.wait(5)
                 raise RuntimeError("no thread")
@@ -456,7 +456,7 @@ class APIDispatchTests(unittest.TestCase):
 
     def test_an_unreadable_cancellation_state_never_breaks_a_stop_or_the_renewals(self):
         import sqlite3
-        from hyperloom.web.api import JobContext
+        from hydraweave.web.api import JobContext
         context = JobContext(30, self.api.admission_db, "hold-id")
         with mock.patch.object(self.api.admission_db, "cancelled", side_effect=sqlite3.OperationalError("locked")):
             self.assertFalse(context.cancelled())
@@ -467,7 +467,7 @@ class APIDispatchTests(unittest.TestCase):
         self.assertEqual(self.api._holds, {})
 
     def test_a_worker_that_cannot_start_releases_everything(self):
-        from hyperloom.web import api as api_module
+        from hydraweave.web import api as api_module
         with mock.patch.object(api_module.threading.Thread, "start", side_effect=RuntimeError("no thread")):
             for action, arguments in (("demo/bench", {"on": ["halo-1"]}), ("down", {"profile": "qwen"})):
                 with self.assertRaises(APIError) as caught:      # the renewal thread itself cannot start
@@ -498,7 +498,7 @@ class APIDispatchTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), f"job {job['id']} has already succeeded")
 
     def test_abandoned_portal_jobs_are_cancelled(self):
-        from hyperloom.web import api as api_module
+        from hydraweave.web import api as api_module
         with mock.patch.object(api_module, "OWNER_LEASE_S", 0.3):
             job = self.api.mutate("demo/bench", {"on": ["halo-2"]})
             self.assertEqual(self.api.renew_jobs({"jobs": [job["id"], "gone"]}),
@@ -523,7 +523,7 @@ class APIDispatchTests(unittest.TestCase):
         failed = self.wait(self.api.mutate("demo/leak", {})["id"])
         self.assertNotIn("hunter2", json.dumps(failed))
         self.assertNotIn("abc", failed["error"])
-        from hyperloom.web.api import redact
+        from hydraweave.web.api import redact
         kept = redact({"prompt_tokens": 5, "tokens": 12, "token_ids": [1, 2, 3], "tokens_by_kind": {"cached": 4},
                        "a_token_ids": "gz:b64:H4sIAAAA", "tokenizer_id": "qwen3-bpe-151k", "token_count": 3,
                        "token": "s3cret", "api_key": 7, "csrf_token": 9, "tokens_note": "Bearer zz", "access_token": 12345,
@@ -590,7 +590,7 @@ class PortalAssetTests(unittest.TestCase):
         data = json.dumps(body).encode()
         connection.request("POST", path, body=data, headers={
             "Host": f"127.0.0.1:{self.port}", "Origin": f"http://127.0.0.1:{self.port}",
-            "X-Hyperloom-CSRF": self.server.csrf_token, "Content-Type": "application/json",
+            "X-Hydraweave-CSRF": self.server.csrf_token, "Content-Type": "application/json",
             "Content-Length": str(len(data))})
         response = connection.getresponse()
         return response.status, json.loads(response.read())
@@ -598,7 +598,7 @@ class PortalAssetTests(unittest.TestCase):
     def test_pages_are_served_by_exact_name_and_injected_before_app_js(self):
         status, kind, body = self.get("/pages/demo.js")
         self.assertEqual((status, kind), (200, "text/javascript; charset=utf-8"))
-        self.assertEqual(self.get("/hyperloom/assets/icon.svg")[:2], (200, "image/svg+xml"))
+        self.assertEqual(self.get("/hydraweave/assets/icon.svg")[:2], (200, "image/svg+xml"))
         for path in ("/pages/index.html", "/pages/../app.js", "/pages/unlisted.js", "/pages/manifest.json",
                      "/pages/demo.js:stream", "/pages/demo.js::$DATA", "/pages/demo.js%5c",  "/pages/%2e%2e/app.js", "/pages/sub/demo.js",
                      "/pages/Demo.js", "/pages/", "/other/demo.js"):
@@ -634,16 +634,16 @@ class PortalAssetTests(unittest.TestCase):
             self.assertEqual(self.get("/pages/demo.js")[0], 404)
 
     def test_job_renewal_route(self):
-        status, body = self.post("/hyperloom/api/jobs/renew", {"jobs": []})
+        status, body = self.post("/hydraweave/api/jobs/renew", {"jobs": []})
         self.assertEqual((status, body), (200, {"renewed": [], "not_running": []}))
 
     def test_feature_posts_and_jobs_need_post(self):
-        self.assertEqual(self.get("/hyperloom/api/demo/echo")[0], 405)
-        self.assertEqual(self.get("/hyperloom/api/demo/job")[0], 405)
-        self.assertEqual(self.post("/hyperloom/api/demo/echo", {"a": 1}), (200, {"echo": {"a": 1}}))
-        status, job = self.post("/hyperloom/api/demo/job", {})
+        self.assertEqual(self.get("/hydraweave/api/demo/echo")[0], 405)
+        self.assertEqual(self.get("/hydraweave/api/demo/job")[0], 405)
+        self.assertEqual(self.post("/hydraweave/api/demo/echo", {"a": 1}), (200, {"echo": {"a": 1}}))
+        status, job = self.post("/hydraweave/api/demo/job", {})
         self.assertEqual((status, job["action"]), (202, "demo/job"))
-        self.assertEqual(self.post("/hyperloom/api/demo/none", {})[0], 404)
+        self.assertEqual(self.post("/hydraweave/api/demo/none", {})[0], 404)
 
 
 
@@ -704,12 +704,12 @@ class CLIExtensionTests(unittest.TestCase):
         module = mock.Mock(add=add)
         clash = mock.Mock(add=lambda commands: commands.add_parser("config"))
         broken = mock.Mock(add=lambda commands: (commands.add_parser("half"), 1 / 0))
-        parser = argparse.ArgumentParser(prog="hyperloom")
+        parser = argparse.ArgumentParser(prog="hydraweave")
         commands = parser.add_subparsers(dest="command")
         commands.add_parser("config")
         with mock.patch.object(cliext, "MODULES", ("one", "two", "three")), \
-                mock.patch.dict(sys.modules, {"hyperloom.cliext.one": module, "hyperloom.cliext.two": clash,
-                                              "hyperloom.cliext.three": broken}), \
+                mock.patch.dict(sys.modules, {"hydraweave.cliext.one": module, "hydraweave.cliext.two": clash,
+                                              "hydraweave.cliext.three": broken}), \
                 mock.patch("builtins.__import__", side_effect=lambda name, *a, **kw: sys.modules[name]):
             import contextlib
             import io
@@ -723,7 +723,7 @@ class CLIExtensionTests(unittest.TestCase):
 
 class HistoryFeatureTests(unittest.TestCase):
     def setUp(self):
-        from hyperloom.web.features import history
+        from hydraweave.web.features import history
         self.history = history
         self.clock = Clock()
         self.api = mock.Mock()
@@ -731,7 +731,7 @@ class HistoryFeatureTests(unittest.TestCase):
         self.api.telemetry = Store(":memory:", clock=self.clock)
         self.addCleanup(self.api.telemetry.close)
         self.api.sampler = None
-        self.api.document = lambda name, **fields: {"schema": f"hyperloom/ui-{name}-v1", **fields}
+        self.api.document = lambda name, **fields: {"schema": f"hydraweave/ui-{name}-v1", **fields}
 
     def test_series_query_filters_and_validates(self):
         for i in range(5):
@@ -768,7 +768,7 @@ class CLIAdmissionTests(unittest.TestCase):
     def test_cli_deploys_respect_benchmark_holds_and_stops_cancel_them(self):
         import contextlib
         import io
-        from hyperloom import cli, config
+        from hydraweave import cli, config
         from tests.test_config import example
         db = admission.Admission(":memory:")
         self.addCleanup(db.close)
@@ -777,13 +777,13 @@ class CLIAdmissionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, \
                 mock.patch.object(admission, "for_config", lambda *a, **kw: db), \
                 mock.patch.object(cli, "_cluster", return_value=config.parse(example())), \
-                mock.patch("hyperloom.orchestrate._state_path", return_value=Path(temporary) / "up.json"), \
+                mock.patch("hydraweave.orchestrate._state_path", return_value=Path(temporary) / "up.json"), \
                 contextlib.redirect_stderr(err):
             self.assertEqual(cli.main(["up", "qwen-replicas"]), 1)
             self.assertIn("benchmark or demo holds", err.getvalue())
             fake = mock.Mock()
             fake.down.return_value = {"stopped": True}
-            with mock.patch.object(cli, "_module", side_effect=lambda name: __import__(name, fromlist=["x"]) if name == "hyperloom.admission" else fake),                     contextlib.redirect_stdout(io.StringIO()):
+            with mock.patch.object(cli, "_module", side_effect=lambda name: __import__(name, fromlist=["x"]) if name == "hydraweave.admission" else fake),                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["down", "qwen-replicas"]), 0)
         self.assertIn("cli down", db.cancelled(bench))
         self.assertEqual([h["kind"] for h in db.holds()], ["bench"])     # the stop released its hold
@@ -791,7 +791,7 @@ class CLIAdmissionTests(unittest.TestCase):
     def test_cli_holds_live_next_to_the_selected_configuration(self):
         import contextlib
         import io
-        from hyperloom import cli
+        from hydraweave import cli
         seen = []
         db = admission.Admission(":memory:")
         self.addCleanup(db.close)
@@ -803,7 +803,7 @@ class CLIAdmissionTests(unittest.TestCase):
         fake.down.return_value = {}
         with mock.patch.object(admission, "for_config", for_config), \
                 mock.patch.object(cli, "_cluster", side_effect=ValueError("no config")), \
-                mock.patch.object(cli, "_module", side_effect=lambda name: __import__(name, fromlist=["x"]) if name == "hyperloom.admission" else fake), \
+                mock.patch.object(cli, "_module", side_effect=lambda name: __import__(name, fromlist=["x"]) if name == "hydraweave.admission" else fake), \
                 contextlib.redirect_stdout(io.StringIO()):
             with contextlib.redirect_stderr(io.StringIO()):
                 cli.main(["install", "qwen-replicas", "--config", "elsewhere/cluster.json"])

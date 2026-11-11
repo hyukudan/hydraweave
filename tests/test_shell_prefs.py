@@ -11,12 +11,12 @@ import threading
 import unittest
 from unittest import mock
 
-from hyperloom import telemetry
-from hyperloom.cliext import prefs as prefs_cli
-from hyperloom.telemetry.store import Store
-from hyperloom.web import features, server
-from hyperloom.web.api import API, APIError
-from hyperloom.web.features import prefs
+from hydraweave import telemetry
+from hydraweave.cliext import prefs as prefs_cli
+from hydraweave.telemetry.store import Store
+from hydraweave.web import features, server
+from hydraweave.web.api import API, APIError
+from hydraweave.web.features import prefs
 
 
 class Clock:
@@ -144,7 +144,7 @@ class PrefsFeatureTests(unittest.TestCase):
 
     def test_get_without_store_shows_defaults_and_creates_nothing(self):
         document = self.api.read("prefs", {})
-        self.assertEqual(document["schema"], "hyperloom/ui-prefs-v1")
+        self.assertEqual(document["schema"], "hydraweave/ui-prefs-v1")
         self.assertEqual(document["values"], prefs.DEFAULTS)
         self.assertIn("not open", document["why"]["values"])
         self.assertIn("utc_offset_s", document["local_zone"])
@@ -202,40 +202,40 @@ class PrefsHTTPTests(unittest.TestCase):
             connection.close()
 
     def post(self, data, **headers):
-        base = {"Origin": f"http://{self.host}:{self.port}", "X-Hyperloom-CSRF": self.server.csrf_token,
+        base = {"Origin": f"http://{self.host}:{self.port}", "X-Hydraweave-CSRF": self.server.csrf_token,
                 "Content-Type": "application/json", "Content-Length": str(len(data))}
         base.update({k.replace("_", "-"): v for k, v in headers.items()})
-        return self.call("POST", "/hyperloom/api/prefs/save", data, {k: v for k, v in base.items() if v is not None})
+        return self.call("POST", "/hydraweave/api/prefs/save", data, {k: v for k, v in base.items() if v is not None})
 
     def test_portal_rules_hold_for_prefs(self):
         good = json.dumps({"density": "compact"}).encode()
-        self.assertEqual(self.call("GET", "/hyperloom/api/prefs/save")[0], 405)
-        self.assertEqual(self.call("GET", "/hyperloom/api/prefs", headers={"Host": f"{self.host}:{self.port + 1}"})[0], 403)
+        self.assertEqual(self.call("GET", "/hydraweave/api/prefs/save")[0], 405)
+        self.assertEqual(self.call("GET", "/hydraweave/api/prefs", headers={"Host": f"{self.host}:{self.port + 1}"})[0], 403)
         self.assertEqual(self.post(good, Origin=f"http://{self.host}:{self.port + 1}")[0], 403)
-        self.assertEqual(self.post(good, X_Hyperloom_CSRF="wrong")[0], 403)
-        self.assertEqual(self.post(good, X_Hyperloom_CSRF=None)[0], 403)
+        self.assertEqual(self.post(good, X_Hydraweave_CSRF="wrong")[0], 403)
+        self.assertEqual(self.post(good, X_Hydraweave_CSRF=None)[0], 403)
         self.assertEqual(self.post(good, Content_Type="text/plain")[0], 415)
         self.assertEqual(self.post(b'{"density": "compact", "density": "compact"}')[0], 400)
         self.assertEqual(self.post(b'{"refresh_s": NaN}')[0], 400)
         self.assertEqual(self.post(b"[]")[0], 400)
         self.assertFalse((Path(self.dir.name) / "telemetry.sqlite3").exists(), "refused requests wrote nothing")
-        status, body = self.call("GET", "/hyperloom/api/prefs")
+        status, body = self.call("GET", "/hydraweave/api/prefs")
         self.assertEqual(status, 200)
         self.assertFalse((Path(self.dir.name) / "telemetry.sqlite3").exists(), "a GET never creates the store")
         status, body = self.post(good)
         self.assertEqual(status, 200, body)
         self.assertEqual(json.loads(body)["values"]["density"], "compact")
-        self.assertEqual(json.loads(self.call("GET", "/hyperloom/api/prefs")[1])["values"]["density"], "compact")
+        self.assertEqual(json.loads(self.call("GET", "/hydraweave/api/prefs")[1])["values"]["density"], "compact")
 
 
 class PrefsCLITests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        patcher = mock.patch("hyperloom.cli.config_path", return_value=Path(self.dir.name) / "cluster.json")
+        patcher = mock.patch("hydraweave.cli.config_path", return_value=Path(self.dir.name) / "cluster.json")
         patcher.start()
         self.addCleanup(patcher.stop)
-        parser = argparse.ArgumentParser(prog="hyperloom")
+        parser = argparse.ArgumentParser(prog="hydraweave")
         prefs_cli.add(parser.add_subparsers(dest="command"))
         self.parser = parser
 
@@ -264,7 +264,7 @@ class PrefsCLITests(unittest.TestCase):
                     ["theme=dark", "theme=light"]):
             code, _, err = self.run_cli("prefs", "set", *bad)
             self.assertEqual(code, 2, bad)
-            self.assertIn("hyperloom prefs:", err)
+            self.assertIn("hydraweave prefs:", err)
         self.assertEqual(json.loads(self.run_cli("prefs", "show")[1])["values"]["timezone"], "UTC")
 
 
