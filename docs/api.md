@@ -49,6 +49,10 @@ form read; they do not restart a model. GET documents do not run Git, contact a 
 | Route | Arguments | Result and effect |
 |---|---|---|
 | `GET setup` | None | First-run state, controller, configured router, node roles, cached observations and next steps. |
+| `GET discovery` | None | Cached LAN nodes, adoption state and mutual USB4 pair suggestions. Discovery runs in the server background. |
+| `GET discovery/plan` | Optional `machine`, `profile` (together) | Exact pinned engine recipe, model requirements, model roots and blockers; no node calls. |
+| `POST discovery/adopt` | `id`, `code` | Verify the node console code, merge its machine entry and save a private agent token. Codes/tokens are not audited. Starts provisioning assigned profiles as a visible job. |
+| `POST discovery/provision` | `machine`, optional `profile` | Background job: use existing bundles/builds and verified resumable downloads; activate for a stopped profile; never start inference. |
 | `POST setup/initialize` | `{}` | Create a controller-only workspace only when its configuration does not exist. Audited. |
 | `POST setup/router/validate` | `machine`, optional `port`, `version` | Preview router placement and preset constraints; no write. |
 | `POST setup/router/save` | `version`, `machine`, optional `port` | Save placement for the next launch; refuse stale forms or saved/running launches. Audited. |

@@ -109,6 +109,9 @@ Keep the unpacked directory: the install is editable, and the node tool is copie
 There is no Linux installer: `sha256sum -c` checks the archive as a whole, but nothing checks the unpacked
 files against `RELEASE.json` (the Windows installer does). Unpack into an empty directory and do not edit it.
 
+Linux workers on the same LAN can instead announce themselves and be adopted from the portal with a console
+pairing code: see [Node discovery](node-discovery.md). The manual steps below remain the reference.
+
 ## 4. Describe the cluster
 
 The configuration lives in `%APPDATA%\hydraweave\cluster.json` (Linux: `~/.config/hydraweave/cluster.json`).
