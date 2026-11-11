@@ -35,26 +35,35 @@
       dialog.addEventListener("input", gate);
       dialog.addEventListener("keydown", event => {
         if (event.key === "Enter" && current?.danger && event.target.tagName !== "TEXTAREA") event.preventDefault();
+        if (event.key !== "Tab") return;
+        const fields = [...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href],summary,[tabindex="0"]')].filter(el => el.getClientRects().length);
+        const first = fields[0], last = fields.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       });
       dialog.addEventListener("submit", async event => {
         event.preventDefault();
         if (!current || document.getElementById("ops-dialog-confirm").disabled) return;
+        const operation = current;
         const error = document.getElementById("ops-dialog-error"), button = document.getElementById("ops-dialog-confirm");
-        error.textContent = ""; button.disabled = true;
+        error.textContent = ""; operation.submitting = true; button.disabled = true;
         try {
-          const keep = await current.submit(dialog.querySelector("form"));
-          if (keep !== true) { dialog.close(); H().refresh(); }
-        } catch (failure) { error.textContent = failure.message; }
-        finally { if (dialog.open) { button.disabled = false; gate(); } }
+          const keep = await operation.submit(dialog.querySelector("form"));
+          if (keep !== true) {
+            await H().refresh({afterWrite: true});
+            if (current === operation) dialog.close();
+          }
+        } catch (failure) { if (current === operation) error.textContent = failure.message; else H().announce(failure.message); }
+        finally { operation.submitting = false; if (dialog.open && current === operation) gate(); }
       });
       return dialog;
     }
     function gate() {
       const field = document.getElementById("ops-confirm-id"), button = document.getElementById("ops-dialog-confirm");
       if (!button || !current) return;
-      const blocked = current.expect != null && field?.value !== current.expect;
+      const blocked = current.submitting || (current.expect != null && field?.value !== current.expect);
       button.disabled = blocked;
-      button.title = blocked ? `Type ${current.expect} to confirm` : "";
+      button.title = current.submitting ? "Saving…" : blocked ? `Type ${current.expect} to confirm` : "";
     }
     function open({title, body, confirm = "Confirm", danger = false, expect = null, submit}) {
       const dialog = element();
@@ -64,7 +73,7 @@
       dialog.innerHTML = `<form class="ops-form" novalidate><div class="row between"><h2 id="ops-dialog-title">${esc(title)}</h2><button type="button" class="btn" data-ops-close aria-label="Close dialog">Close</button></div>${body}${typed}<p class="field-error" id="ops-dialog-error" aria-live="polite"></p><div class="row dialog-actions"><button type="button" class="btn" data-ops-close>Cancel</button><button type="submit" class="btn ${danger ? "dan" : "pri"}" id="ops-dialog-confirm">${esc(confirm)}</button></div></form>`;
       dialog.showModal();
       gate();
-      (dialog.querySelector("input:not([type=checkbox]),textarea,select") || document.getElementById("ops-dialog-confirm"))?.focus();
+      (dialog.querySelector("input:not([type=checkbox]):not(:disabled),textarea:not(:disabled),select:not(:disabled)") || document.getElementById("ops-dialog-confirm"))?.focus();
     }
     addEventListener("hashchange", () => { const dialog = document.getElementById("ops-dialog"); if (dialog?.open) dialog.close(); });
     const kv = entries => `<dl class="ops-kv">${entries.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;

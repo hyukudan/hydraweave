@@ -16,6 +16,12 @@ NODE = {"name": "AMD Radeon 8060S", "memory_gib": 120.0, "host_ram_gib": 125.0, 
 
 def cluster_document():
     obj = rtx_example()
+    # Launch-oriented fixtures declare the existing lab manager and peer routes;
+    # the render-only rtx_example intentionally does not prepare a launch host.
+    workers = [m for m in obj["machines"] if m["access"] == "ssh" and m["os"] == "linux"]
+    for machine in workers:
+        machine["lab_dir"] = "/opt/lab"
+        machine["peer_ssh"] = {peer["id"]: peer["id"] for peer in workers if peer is not machine}
     obj["profiles"]["mm"] = {"preset": "minimax-pair", "rank0": "halo-1", "rank1": "halo-2", "port": 18601,
                              "release_id": "0" * 12}
     return obj

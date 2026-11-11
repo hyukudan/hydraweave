@@ -640,7 +640,9 @@ def nodes_update(cluster, profile, machine=None, force=False):
     for mid in mids:
         client = _client(cluster.machines[mid])
         # A machine without the node tool has no lease records either (leases run through it): nothing to check.
-        if not force and not _absent(client):
+        # Only this tool's leases matter: a pre-rename hyperloom-node answers another protocol for another root.
+        current = getattr(client, "has_tool", None)
+        if not force and not _absent(client) and (current is None or current(legacy=False)):
             live = [row for row in _call(client, "status", {"root": cluster.machines[mid].install_root}).get("leases", [])
                     if row.get("state") not in ("stopped", "failed", "aborted", "cancelled", "canceled", "finished")]
             if live:
@@ -715,7 +717,30 @@ def check_launch(cluster, profile, router="local", nodes=None, *, diagnostics=No
             # The router reads the route state hydraweave writes on this machine every second.
             raise ValueError("--recipe runs the router locally (it reads the route state written here): use --router local")
     check_selection(cluster, mids, router, settings.get("prefill_service"), devices, vram_cap_gib)
+    if not recipe:
+        check_lease_workers(cluster, mids, engine)
     return settings, kind, defaults, engine, name, pair, diagnostics, mids
+
+
+def check_lease_workers(cluster, mids, engine):
+    """Passive prerequisites for engines started through the bounded lab-lease path.
+
+    This checks declared configuration only. The existing lab manager and scripts
+    live on the workers; neither this function nor a portal GET installs or probes
+    them. A recipe that uses RTX-only placement does not start these node leases.
+    """
+    nonlab = [mid for mid in mids if not cluster.machines[mid].lab_mode]
+    if nonlab:
+        alternative = ("For a dedicated non-lab Qwen service, use 'hydraweave service install/start' "
+                       "and configure its router separately." if "service-unit" in engine.capabilities else
+                       "This paired engine is supported through lab leases only.")
+        raise OrchestrationError("Start profile uses bounded GPU leases; lab_mode is false on "
+                                 + ", ".join(nonlab) + ". Configure the existing lab turn manager and lab_dir. "
+                                 + alternative)
+    for mid in mids:
+        _lab(cluster, mid)
+    if engine.topology == "pair":
+        _peer(cluster, mids[0], mids[1])
 
 
 def check_selection(cluster, mids, router, service, devices=None, vram_cap_gib=None):
@@ -746,6 +771,18 @@ def check_selection(cluster, mids, router, service, devices=None, vram_cap_gib=N
     return declared
 
 
+def router_listen(cluster, router):
+    """Use the configured port on the selected host, including explicit host overrides."""
+    from .config import listen
+    configured = cluster.router.get("listen", cluster.pc.get("router_listen", "127.0.0.1:18600"))
+    endpoint = listen(configured, "router.listen")
+    if router == "local":
+        host = endpoint["address"] if cluster.router.get("machine", "local") == "local" else "127.0.0.1"
+    else:
+        host = cluster.machines[router].http_address
+    return f"[{host}]:{endpoint['port']}" if ":" in host else f"{host}:{endpoint['port']}"
+
+
 def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s=1140, approval=None, queue_timeout_s=3600,
        diagnostics=None, vram_cap_gib=None, recipe=None, cancelled=None, admitted_selection=None):
     validate_command(deadline_s, approval, queue_timeout_s)
@@ -764,6 +801,9 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                 **({"admitted_selection": admitted_selection} if admitted_selection is not None else {}))
         if not launch.service_start:
             service = None  # every prefill stays on the nodes (the why is recorded); no PRO lease, no start
+    # Recipe placement above can be entirely local. Every path that actually
+    # starts remote engine leases needs the declared lab manager before any I/O.
+    check_lease_workers(cluster, mids, engine)
     declared = check_selection(cluster, mids, router, service, devices, vram_cap_gib)
     path = _state_path(profile)
     lock = procs.InstanceLock(path.with_suffix(".lock")).acquire()
@@ -836,15 +876,14 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                 keys.append(str(key))
                 local_values[str(key)] = secrets.ensure(_secret_name(profile, "prefill"))
                 selected.router["replica_api_key_files"][service["machine"]] = str(key)
-            selected.router["listen"] = cluster.pc.get("router_listen", "127.0.0.1:18600")
+            selected.router["listen"] = router_listen(cluster, router)
         else:
             machine = cluster.machines[router]
             for mid in node_values:
                 selected.router["replica_api_key_files"][mid] = _put(
                     clients[router], machine, _secret_name(profile, mid), node_values[mid])
             selected.router["api_key_file"] = _put(clients[router], machine, router_key, secrets.ensure(router_key))
-            host = machine.http_address
-            selected.router["listen"] = f"[{host}]:18600" if ":" in host else f"{host}:18600"
+            selected.router["listen"] = router_listen(cluster, router)
         # Diagnostic runs are labelled non-production everywhere they are recorded (state, leases, status).
         processes = render.render_processes(selected, profile, **(
             {"diagnostics": diagnostics, "run": state["token"][:12]} if diagnostics else {}))

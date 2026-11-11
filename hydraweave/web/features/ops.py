@@ -16,10 +16,12 @@ jobs ops/nodes-update {profile, machine?}  ops/shutdown {machine, confirm}  ops/
 
 GET documents use the shared core snapshot and cached node checks (they never start a fresh status round); the
 authoritative checks (saved launches, the node's own lease records, running jobs) run inside the jobs and the
-configuration save, right before acting, and an unknown state refuses. Preferences live in the telemetry store's
+configuration save, right before acting. Unknown node state permits only adding new peer aliases without changing
+existing aliases or any other machine field. Preferences live in the telemetry store's
 document table (namespace ``ops``). The shutdown helper (an executable) is set only from the command line.
 """
 
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -251,7 +253,7 @@ def profiles_using(cluster, mid):
 def core_job_running(api):
     with api._job_lock:
         active = api._active
-        return api._jobs[active]["action"] if active and active in api._jobs else None
+        return ((api._jobs.get(active) or {}).get("action") or "starting") if active else None
 
 
 def bench_holds(api, resources):
@@ -308,6 +310,10 @@ def row_state_unknown(rows):
     return any(row.get("state") is None and (row.get("why") or {}).get("state") for row in rows)
 
 
+class _NodeLeaseUnreadable(str):
+    """Only the node's lease read failed; controller jobs and saved launches were checked first."""
+
+
 def occupancy(api, cluster, mid, inside_job=False):
     """(reason, unknown): the authoritative in-use check run right before acting.
 
@@ -349,7 +355,7 @@ def occupancy(api, cluster, mid, inside_job=False):
             if not isinstance(leases, list) or any(not isinstance(row, dict) or "state" not in row for row in leases):
                 raise ValueError("the reply carries no lease list")
         except Exception as exc:
-            return f"the node's lease records are unreadable ({str(exc)[:200]})", True
+            return _NodeLeaseUnreadable(f"the node's lease records are unreadable ({str(exc)[:200]})"), True
         live = [row for row in leases if row.get("state") not in FINAL_LEASE_STATES]
         if live:
             return f"lease {live[0].get('lease') or live[0].get('label') or '?'} is live on {mid}", False
@@ -894,6 +900,39 @@ def frozen_violation(old_row, new_row, op):
     return ("these fields are frozen: " + ", ".join(changed)) if changed else None
 
 
+def peer_alias_addition(old_row, new_row, op):
+    """A strictly additive route edit, preserving every other machine field and every existing alias.
+
+    A new node cannot report leases before its install root exists. Letting its controller configuration name
+    a newly added peer breaks that setup cycle without assuming the node is idle or changing SSH trust.
+    """
+    if (not isinstance(old_row, dict) or not isinstance(new_row, dict) or op != "edit"
+            or old_row.get("os") != "linux" or old_row.get("access") != "ssh"):
+        return False
+    old, new = old_row.get("peer_ssh", {}), new_row.get("peer_ssh", {})
+    return (isinstance(old, dict) and isinstance(new, dict) and set(old) < set(new)
+            and all(new.get(key) == value for key, value in old.items())
+            and {key: value for key, value in old_row.items() if key != "peer_ssh"}
+                == {key: value for key, value in new_row.items() if key != "peer_ssh"})
+
+
+def _peer_profile_locks(api, cluster, mid, locks):
+    """Hold the same locks as up/down while appending routes, including the router's profiles."""
+    from hydraweave import procs
+    names = set(profiles_using(cluster, mid))
+    if cluster.router.get("machine") == mid:
+        names.update(cluster.profiles)
+    for name in sorted(names):
+        path = Path(api.orchestrate._state_path(name))
+        try:
+            lock = procs.InstanceLock(path.with_suffix(".lock")).acquire()
+        except procs.ProcessError as exc:
+            raise PermissionError("a launch is changing " + name + "; retry after it finishes") from exc
+        locks.callback(lock.close)
+        if path.exists() or path.is_symlink():
+            raise PermissionError("stop profile " + name + " before adding peer aliases")
+
+
 EDIT_KEYS = ("op", "id", "machine", "index")
 
 
@@ -906,7 +945,8 @@ def _edit(arguments, extra=()):
 
 def check_edit(api, arguments, raw=None, fresh=True):
     """(new_raw, cluster) after the frozen-identity rule and the full schema. fresh=False (validation only) uses the
-    snapshot's occupancy; the save uses the authoritative check and refuses on unknown state."""
+    snapshot's occupancy; the save uses the authoritative check. Unknown node state permits only new peer aliases,
+    preserving all existing aliases and every other field. Unknown controller state still refuses."""
     if raw is None:
         raw, _ = _read_config(api)
     new_raw = apply_edit(raw, arguments)
@@ -914,7 +954,9 @@ def check_edit(api, arguments, raw=None, fresh=True):
     if op in ("edit", "remove"):
         mid = arguments["id"]
         old_row = next(row for row in raw["machines"] if row.get("id") == mid)
-        violation = frozen_violation(old_row, arguments.get("machine") or {}, op)
+        new_row = arguments.get("machine") or {}
+        addition = peer_alias_addition(old_row, new_row, op)
+        violation = frozen_violation(old_row, new_row, op)
         if violation:
             try:
                 current = config_module.parse(raw)
@@ -923,8 +965,16 @@ def check_edit(api, arguments, raw=None, fresh=True):
                                       "removals are refused until it does (edit other fields or the file by hand)") from None
             if fresh:
                 reason, unknown = occupancy(api, current, mid)
+                if addition and isinstance(reason, _NodeLeaseUnreadable):
+                    reason = None
             else:
-                reason, unknown = snapshot_occupancy(api, mid), False
+                job = core_job_running(api)
+                reason = ("another job is running (" + job + ")") if job else snapshot_occupancy(api, mid)
+                unknown = False
+                entry = (pref(api, NAMESPACE, "node_tool", {}) or {}).get(mid) or {}
+                if (reason is None and current.machines[mid].access == "ssh" and not addition
+                        and (not entry or entry.get("error"))):
+                    reason, unknown = "the node's lease state has not been checked", True
             if reason:
                 hint = (" (an unreadable state keeps the identity frozen; edit the configuration file by hand if the "
                         "machine is known to be idle)") if unknown else ""
@@ -941,7 +991,10 @@ def check_edit(api, arguments, raw=None, fresh=True):
 def validate_config(api, arguments):
     _edit(arguments, ("version",))
     try:
-        check_edit(api, arguments, fresh=False)
+        raw, version = _read_config(api)
+        if "version" in arguments and arguments["version"] != version:
+            raise PermissionError("the configuration changed since it was read; reload and review")
+        check_edit(api, arguments, raw, fresh=False)
     except (ValueError, PermissionError, LookupError) as exc:
         return {"valid": False, "error": str(exc).strip("'\"")}
     return {"valid": True, "error": None}
@@ -1024,12 +1077,27 @@ def save_config_any(api, arguments):
     except PermissionError as exc:
         raise PermissionError(str(exc)) from None
     try:
-        with _write_lock, ConfigLock(api.config_path):
+        with _write_lock, ConfigLock(api.config_path), ExitStack() as locks:
             raw, version = _read_config(api)
             if "version" in arguments and arguments["version"] != version:
                 raise PermissionError("the configuration changed since it was read; reload and review")
+            old_row = next((row for row in raw.get("machines", []) if row.get("id") == arguments.get("id")), {})
+            addition = peer_alias_addition(old_row, arguments.get("machine") or {}, arguments["op"])
+            if addition:
+                from hydraweave.recipes import service
+                locks.enter_context(service.configured(api.config_path))
+                _peer_profile_locks(api, config_module.parse(raw), target, locks)
             new_raw, cluster = check_edit(api, arguments, raw, fresh=True)
-            new_version = write_config(api.config_path, new_raw)
+            # The lease read can take time. A job reservation or manual config edit during that read must not
+            # turn the narrow bootstrap exception into a concurrent runtime or stale configuration change.
+            with api._job_lock:
+                if api._active:
+                    action = (api._jobs.get(api._active) or {}).get("action") or "starting"
+                    raise PermissionError("another job is running (" + action + ")")
+                _, last_version = _read_config(api)
+                if last_version != version:
+                    raise PermissionError("the configuration changed since it was read; reload and review")
+                new_version = write_config(api.config_path, new_raw)
         from hydraweave import nodegate
         nodegate.prepare(api.config_path, list(cluster.machines))     # a new machine's node-gate lock file
     finally:
@@ -1077,16 +1145,18 @@ def config_document(api, query):
     pinned = _pinned(api, cluster)
     known = pref(api, NAMESPACE, "node_tool", {}) or {}
     rows = []
+    job = core_job_running(api)
     for index, row in enumerate(raw.get("machines") or []):
         mid = row.get("id")
         entry = known.get(mid) or {}
         item = {"index": index, "id": mid, "entry": row, "extras": extras.get(mid) or {}, "frozen": None,
                 "profiles": profiles_using(cluster, mid), "assets": sorted((raw.get("assets") or {}).get(mid, {})),
                 "router": (raw.get("router") or {}).get("machine") == mid, "pinned": pinned.get(mid),
-                "reachable": None if not entry else entry.get("error") is None}
+                "reachable": None if not entry else entry.get("error") is None, "add_peer_aliases": False}
         if cluster is not None and mid in cluster.machines:
-            item["frozen"] = snapshot_occupancy(api, mid)
+            item["frozen"] = ("another job is running (" + job + ")") if job else snapshot_occupancy(api, mid)
             access = cluster.machines[mid].access
+            item["add_peer_aliases"] = item["frozen"] is None and access == "ssh" and cluster.machines[mid].os == "linux"
             if item["frozen"] is None and access not in ("ssh", "local"):
                 item["frozen"] = f"{access} access: the machine's lease state cannot be read"
             if item["frozen"] is None and access == "ssh":
@@ -1101,7 +1171,8 @@ def config_document(api, query):
     return api.document("ops-config", machines=rows, version=version, path=str(api.config_path), why=why,
                         frozen_fields=[*FROZEN_FIELDS, "devices (ids/uuids)"],
                         rule="a machine used by a saved launch, a live lease or a running job keeps its identity "
-                             "(checked again when saving; an unreadable state refuses); edits are validated, "
+                             "(checked again when saving); unknown node state permits only adding peer aliases "
+                             "without changing existing aliases or any other machine field; edits are validated, "
                              "version-checked and written atomically")
 
 

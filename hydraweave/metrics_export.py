@@ -2,7 +2,8 @@
 
 Only values the pinned adapters parse are exported; unavailable values are
 omitted, never written as zero. Each source reports hydraweave_source_up and its
-scrape duration. The listener is loopback-only: LAN exposure is a later phase.
+scrape duration. The listener is loopback by default; --listen may choose another interface
+(0.0.0.0 for a Prometheus server elsewhere), with a warning that it has no authentication.
 
 Besides the router and engine documents, a scrape reads the portal's telemetry
 store read-only (never creating it): the latest fresh sample of every node and
@@ -13,12 +14,10 @@ from their own /metrics when the components export them.
 
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import ipaddress
 import json
 import math
 from pathlib import Path
 import re
-import socket
 import sqlite3
 import threading
 import time
@@ -27,7 +26,8 @@ from urllib.request import ProxyHandler, build_opener
 
 from . import __version__, secrets
 from .adapters import AdapterError, engine, prom, router
-from .config import listen as parse_listen
+from . import bind
+import sys
 from .paths import repo_root
 
 
@@ -875,16 +875,20 @@ class MetricsServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, listen=DEFAULT_LISTEN, *, collector=collect, max_concurrent=MAX_CONCURRENT_SCRAPES):
-        endpoint = parse_listen(listen, "metrics listen")
-        if not ipaddress.ip_address(endpoint["address"]).is_loopback:
-            raise ValueError("metrics listen must be a loopback address; LAN exposure is a later phase")
-        if ":" in endpoint["address"]:
-            self.address_family = socket.AF_INET6
+        endpoint = bind.listen(listen, "metrics listen")
+        self.listen_address = endpoint["address"]
+        self.lan = not bind.is_loopback(endpoint["address"])
+        self.address_family = bind.family(endpoint["address"])
         self.collector = collector
         self.scrapes = threading.BoundedSemaphore(max_concurrent)
         super().__init__((endpoint["address"], endpoint["port"]), Handler)
         host = f"[{endpoint['address']}]" if ":" in endpoint["address"] else endpoint["address"]
         self.allowed_hosts = {f"{host}:{self.server_port}", f"localhost:{self.server_port}"}
+
+    def host_allowed(self, header):
+        if header in self.allowed_hosts:
+            return True
+        return self.lan and bind.host_allowed(header, self.listen_address, self.server_port)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -916,7 +920,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         hosts = self.headers.get_all("Host", [])
-        if len(hosts) != 1 or hosts[0] not in self.server.allowed_hosts:
+        if len(hosts) != 1 or not self.server.host_allowed(hosts[0]):
             self._send(403, "Host is not allowed\n")
         elif urlsplit(self.path).path != "/metrics":
             self._send(404, "not found\n")
@@ -940,6 +944,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(listen=DEFAULT_LISTEN, profile=None, config_path=None):
     with MetricsServer(listen, collector=lambda: collect(profile=profile, config_path=config_path)) as server:
+        if server.lan:
+            print(bind.LAN_WARNING.format(what="the Hydraweave metrics exporter",
+                                          listen=bind.url_host(server.listen_address, server.server_port)),
+                  file=sys.stderr, flush=True)
         print(f"Hydraweave metrics: http://{sorted(server.allowed_hosts)[0]}/metrics", flush=True)
         try:
             server.serve_forever(poll_interval=.2)

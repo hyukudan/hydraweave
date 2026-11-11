@@ -3,11 +3,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const source = fs.readFileSync("hydraweave/web/static/app.js", "utf8");
-const poll = source.slice(source.indexOf("  async function refresh()"), source.indexOf("  function fetchDocument("));
+const poll = source.slice(source.indexOf("  async function refresh("), source.indexOf("  function fetchDocument("));
 const gate = source.match(/  const mutationReason = .*;/)[0];
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function harness() {
-  const state = {generation: 0, job: {job: "abc", action: "up", state: "succeeded"},
+  const state = {generation: 0, job: {job: "abc", action: "up", arguments: {profile: "qwen"}, state: "succeeded"},
     fresh: false, docs: {"launch/abc": {old: true}}, fetched: {}, errors: {}, warnings: new Set()};
   let scenario = "missing", jobs = [], activeId = null, calls = [];
   const context = {state, AbortController, setTimeout, clearTimeout, Date, console,
@@ -97,8 +97,17 @@ function harness() {
     vm.runInContext(source.slice(source.indexOf("  function renderJob()"), source.indexOf("  async function request(")) +
       "\nrenderJob();", running.context);
     assert.equal(panel.hidden, false);
-    assert.ok(panel.innerHTML.includes('data-action="cancel"'));
+    assert.ok(panel.innerHTML.includes('data-action="cancel-job"'));
+    assert.ok(panel.innerHTML.includes("Cancel start"));
     assert.ok(panel.innerHTML.includes('data-action="stop"'));
+    // Source downloads cancel their own job; they have no inference profile to stop.
+    running.state.job = {id: "component-job", action: "components/download", state: "running",
+      arguments: {component: "engine"}};
+    vm.runInContext("renderJob();", running.context);
+    assert.ok(panel.innerHTML.includes('data-action="cancel-job"'));
+    assert.ok(panel.innerHTML.includes("Cancel job"));
+    assert.ok(!panel.innerHTML.includes("Cancel start"));
+    assert.ok(!panel.innerHTML.includes('data-action="stop"'));
   }
   // A timeline promise that never settles must not delay authoritative polling either.
   const hanging = harness(); hanging.mode("hanging"); hanging.jobs([hanging.state.job]);

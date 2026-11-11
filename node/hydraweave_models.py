@@ -2,8 +2,9 @@
 
 Verbs (node extension contract: VERBS and run(verb, payload) -> dict):
 
-- ``models``: read-only inventory of model roots (units, sizes, file counts, newest mtime, manifest status).
-  Bounded by a deadline, directory entries, depth, units, manifest bytes and the reply size; it creates nothing.
+- ``models``: read-only inventory of model roots (units, sizes, file counts, newest mtime, manifest status, and
+  ``format``/``quant`` from file names, small ``config.json`` files and GGUF headers). Bounded by a deadline,
+  directory entries, depth, units, manifest bytes, config and header reads and the reply size; it creates nothing.
 - ``model-verify`` / ``copy-job`` / ``copy-cancel``: verification is not part of this release (it has no design
   that runs inside a lease or a GPU turn yet); the three verbs answer so before anything is read or written, and
   no background process exists behind them.
@@ -25,6 +26,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
+import struct
 import sys
 import threading
 import time
@@ -208,6 +210,7 @@ class Budget:
         self.deadline, self.entries, self.manifest_bytes = deadline, 0, 0
         self.tick = tick            # a verification's stop/guard check, serviced while it scans and parses
         self.snapshots = {}         # manifest path -> (sha256, size) of the exact bytes that were parsed
+        self.config_reads = self.header_reads = 0
 
     def check(self):
         if self.tick is not None:
@@ -353,6 +356,29 @@ class Tree:
             raise ValueError("file exceeds the read limit: " + path)
         return data
 
+    def head(self, path, count):
+        """The first ``count`` bytes (at most) of a regular file below the root (no link followed on the way)."""
+        parts = path.split("/")
+        if self.fd is None:
+            reader = self.open(path)
+            try:
+                return reader.read_at(0)[:count]
+            finally:
+                reader.close()
+        directory = open_dir_chain(self.fd, parts[:-1])
+        try:
+            fd = os.open(parts[-1], os.O_RDONLY | NOFOLLOW | NONBLOCK, dir_fd=directory)
+        finally:
+            os.close(directory)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError("not a regular file: " + path)
+            data = os.pread(fd, count, 0)
+            drop_cache(fd, 0, len(data))
+            return data
+        finally:
+            os.close(fd)
+
     def lstat(self, name):
         if self.fd is not None:
             return os.stat(name, dir_fd=self.fd, follow_symlinks=False)
@@ -469,6 +495,164 @@ def unit_entries(tree, name, files, manifests, index, budget):
     return entries, invalid, repeated
 
 
+# --- unit classification (format and quantization; names, small configs and GGUF headers only) ---------------
+
+CONFIG_NAMES = ("config.json", "quantization_config.json")
+CONFIG_READ_MAX = 256 * 1024
+CONFIG_READS = 64                    # per scan
+CONFIG_PER_UNIT = 4
+HEADER_BYTES = 64 * 1024
+HEADER_READS = 16                    # per scan, only for GGUF files whose name carries no quantization
+QUANTS_MAX = 8
+GGUF_QUANT = re.compile(r"(?<![A-Za-z0-9])(I?Q[0-9](?:_[A-Za-z0-9]{1,3}){0,3})(?![A-Za-z0-9])")
+QUANT_WORD = re.compile(r"(?<![A-Za-z0-9])(mxfp4|nvfp4|bf16|fp16|f16|fp32|f32|fp8|int8|int4|w4a8|w8a8|w4a16|w8a16)"
+                        r"(?![A-Za-z0-9])", re.IGNORECASE)
+BPW = re.compile(r"(?<![0-9.])([0-9]{1,2}(?:\.[0-9]{1,3})?)bpw(?![A-Za-z0-9])", re.IGNORECASE)
+# llama.cpp general.file_type values (LLAMA_FTYPE_*).
+GGUF_FILE_TYPES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1", 10: "Q2_K",
+                   11: "Q3_K_S", 12: "Q3_K_M", 13: "Q3_K_L", 14: "Q4_K_S", 15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M",
+                   18: "Q6_K", 19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S", 22: "IQ3_XS", 23: "IQ3_XXS", 24: "IQ1_S",
+                   25: "IQ4_NL", 26: "IQ3_S", 27: "IQ3_M", 28: "IQ2_S", 29: "IQ2_M", 30: "IQ4_XS", 31: "IQ1_M",
+                   32: "BF16", 36: "TQ1_0", 37: "TQ2_0", 38: "MXFP4"}
+GGUF_SCALARS = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+DTYPES = {"bfloat16": "BF16", "float16": "FP16", "float32": "FP32"}
+
+
+def name_quants(name, exl3=False):
+    """Quantization tokens in a file or directory name (model extension dropped), in order."""
+    stem = name.rsplit(".", 1)[0] if name.lower().endswith(MODEL_SUFFIXES) else name
+    found = [(m.start(), m[1].upper()) for m in GGUF_QUANT.finditer(stem)]
+    found += [(m.start(), m[1].upper()) for m in QUANT_WORD.finditer(stem)]
+    found += [(m.start(), ("exl3 " if exl3 else "") + m[1] + "bpw") for m in BPW.finditer(stem)]
+    return [token for _, token in sorted(found)]
+
+
+def gguf_file_type(head):
+    """general.file_type of a GGUF header (v2+) as its llama.cpp name, or None (not within these bytes)."""
+    try:
+        if head[:4] != b"GGUF" or struct.unpack_from("<I", head, 4)[0] < 2:
+            return None
+        count, offset = struct.unpack_from("<Q", head, 16)[0], 24
+        for _ in range(min(count, 4096)):
+            length = struct.unpack_from("<Q", head, offset)[0]
+            key = head[offset + 8:offset + 8 + length]
+            offset += 8 + length
+            kind = struct.unpack_from("<I", head, offset)[0]
+            offset += 4
+            if key == b"general.file_type" and kind in (4, 5):
+                value = struct.unpack_from("<I", head, offset)[0]
+                return GGUF_FILE_TYPES.get(value, "file type " + str(value))
+            if kind in GGUF_SCALARS:
+                offset += GGUF_SCALARS[kind]
+            elif kind == 8:
+                offset += 8 + struct.unpack_from("<Q", head, offset)[0]
+            elif kind == 9:
+                inner, items = struct.unpack_from("<IQ", head, offset)
+                offset += 12
+                if inner in GGUF_SCALARS:
+                    offset += items * GGUF_SCALARS[inner]
+                elif inner == 8:
+                    for _ in range(items):
+                        if offset >= len(head):
+                            return None
+                        offset += 8 + struct.unpack_from("<Q", head, offset)[0]
+                else:
+                    return None
+            else:
+                return None
+            if offset >= len(head):
+                return None
+    except struct.error:
+        return None
+    return None
+
+
+def config_quant(data):
+    """(format hint, quantization) of a parsed config.json / quantization_config.json; a bare dtype comes back as
+    ``dtype:<name>`` (used only when nothing else names a quantization)."""
+    if not isinstance(data, dict):
+        return None, None
+    qc = data.get("quantization_config", data if "quant_method" in data else None)
+    dtype = data.get("torch_dtype", data.get("dtype"))
+    dtype = "dtype:" + DTYPES[dtype] if isinstance(dtype, str) and dtype in DTYPES else None
+    if not isinstance(qc, dict) or not qc.get("quant_method"):
+        return None, dtype
+    method = str(qc["quant_method"]).lower()[:32]
+    bits = qc.get("bits")
+    bits = bits if type(bits) in (int, float) and 0 < bits < 64 else None
+    if method in ("exl3", "exl2"):
+        return method, method + (" %gbpw" % bits if bits is not None else "")
+    named = {"fp8": "FP8", "mxfp4": "MXFP4", "nvfp4": "NVFP4", "bitsandbytes": "bnb"}.get(method, method.upper())
+    return None, named + (" %g-bit" % bits if bits is not None and named in ("GPTQ", "AWQ", "bnb") else "")
+
+
+def _config_reads(tree, files, budget):
+    """Parsed small config files of a unit (top level and one directory down), bounded per unit and per scan."""
+    found = []
+    for path in sorted(files):
+        parts = path.split("/")
+        if parts[-1] not in CONFIG_NAMES or len(parts) > 3 or files[path][0] > CONFIG_READ_MAX:
+            continue
+        if len(found) >= CONFIG_PER_UNIT or budget.config_reads >= CONFIG_READS:
+            break
+        budget.check()
+        budget.config_reads += 1
+        try:
+            found.append(json.loads(tree.read(path, CONFIG_READ_MAX).decode("utf-8")))
+        except (OSError, ValueError, UnicodeError):
+            continue
+    return found
+
+
+def classify(tree, name, kind, files, budget):
+    """{format, quant, quant_source} of one unit: gguf, exl3, safetensors or other; the distinct quantizations
+    (comma-separated, at most 8) from configs, model file names, GGUF headers or the unit name. Reads only small
+    config files and the first 64 KiB of GGUF files whose name carries no quantization."""
+    paths = sorted(files, key=lambda path: (path.count("/"), path)) if files else [name] if kind == "file" else []
+    lowered = [path.lower() for path in paths]
+    ggufs = [path for path, low in zip(paths, lowered) if low.endswith(".gguf")]
+    tensors = [path for path, low in zip(paths, lowered) if low.endswith(".safetensors")]
+    models = [path for path, low in zip(paths, lowered) if low.endswith(MODEL_SUFFIXES)]
+    hint, quants, source, dtype = None, [], None, None
+    try:
+        configs = _config_reads(tree, files, budget) if kind == "dir" and files else []
+    except Bound:
+        configs = []
+    for data in configs:
+        found_hint, quant = config_quant(data)
+        hint = hint or found_hint
+        if quant and quant.startswith("dtype:"):
+            dtype = dtype or quant[6:]
+        elif quant:
+            quants.append(quant)
+    source = "config" if quants else None
+    exl3 = hint == "exl3" or "exl3" in name.lower()
+    fmt = "gguf" if ggufs else "exl3" if exl3 and (tensors or not models) else "safetensors" if tensors else "other"
+    if not quants:
+        for path in ggufs if fmt == "gguf" else models:
+            tokens = name_quants(path.rsplit("/", 1)[-1], exl3)
+            if tokens:
+                quants += tokens
+                source = source or "name"
+            elif fmt == "gguf" and files and path in files and budget.header_reads < HEADER_READS:
+                try:
+                    budget.check()
+                    budget.header_reads += 1
+                    value = gguf_file_type(tree.head(path, HEADER_BYTES))
+                except (Bound, OSError, ValueError):
+                    value = None
+                if value:
+                    quants.append(value)
+                    source = source or "header"
+    if not quants:
+        quants = name_quants(name, exl3)
+        source = "name" if quants else None
+    if not quants and dtype:
+        quants, source = [dtype], "config"
+    distinct = list(dict.fromkeys(quants))[:QUANTS_MAX]
+    return {"format": fmt, "quant": ", ".join(distinct) if distinct else None, "quant_source": source}
+
+
 def root_listing(tree, budget):
     """Units, sibling manifests (name -> size) and the other-file count at a root's top level, or the bound hit."""
     units, siblings, other, hit = [], {}, 0, None
@@ -545,8 +729,9 @@ def _scan(tree, budget):
             except Bound as exc:
                 unit_hit = str(exc)
         if unit_hit:
-            unit.update(bytes=None, files=None, newest_mtime=None, links=None,
+            unit.update(bytes=None, size_bytes=None, files=None, newest_mtime=None, links=None,
                         manifest={"status": "unknown", "why": "scan bound reached: " + unit_hit})
+            unit.update(classify(tree, name, kind, {}, budget))
             result["truncated"].append(unit_hit)
             result["units"].append(unit)
             continue
@@ -564,6 +749,8 @@ def _scan(tree, budget):
                               "unlisted": len(unlisted), "invalid": invalid, "conflicts": len(conflicts),
                               "repeated": len(repeated),
                               "manifests": covering[:32]})
+        unit["size_bytes"] = unit["bytes"]
+        unit.update(classify(tree, name, kind, files, budget))
         result["units"].append(unit)
     result["truncated"] = sorted(set(result["truncated"]))
     return result

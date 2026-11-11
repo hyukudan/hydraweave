@@ -27,9 +27,10 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tests.portable_fixtures import read_fixture
-ROUTES = ("devices", "topology", "models", "recipes", "engines", "stats", "logs", "settings", "results", "sessioncache")
-TITLES = ("Devices", "Topology & links", "Models & placement", "Recipes & profiles", "Engines", "Live stats", "Logs",
-          "Settings & pairing", "Measured results", "Session cache")
+ROUTES = ("control-center", "devices", "components", "engine-settings", "topology", "models", "recipes", "engines",
+          "stats", "logs", "settings", "results", "sessioncache")
+TITLES = ("Home", "Devices", "Components & updates", "Engine configuration", "Topology & links", "Models & placement",
+          "Recipes & profiles", "Engines", "Live stats", "Logs", "Settings & pairing", "Measured results", "Session cache")
 API = "/hydraweave/api/"
 # A node-only Qwen recipe that fits the fixture's one-node profile (test data, not a lab recipe).
 FIXTURE_RECIPE = """schema = "strix-stream/recipe-v1"
@@ -627,8 +628,18 @@ def keyboard_walkthrough(client, server):
             raise AssertionError("Keyboard cannot reach " + action)
         key(client, " ")
         eventually(lambda: client.evaluate("!!document.querySelector('dialog[open]')"))
+        if action == "add":
+            if not client.evaluate("document.getElementById('ops-dialog')?.open && "
+                                   "document.activeElement.id === 'cc-node-id' && "
+                                   "!!document.getElementById('cc-node-address') && "
+                                   "!!document.getElementById('cc-node-ssh')"):
+                raise AssertionError("Add by address did not open the labelled node editor")
+            client.call("Input.insertText", text="keyboard-node-draft")
         # Let at least one ordinary two-second poll render behind the dialog.
         client.evaluate("new Promise(resolve => setTimeout(resolve, 2200))")
+        if action == "add" and not client.evaluate(
+                "document.getElementById('cc-node-id').value === 'keyboard-node-draft'"):
+            raise AssertionError("Polling erased the unsubmitted node draft")
         named = client.evaluate("""(() => {
           const d = document.querySelector('dialog[open]');
           return !!(d.getAttribute('aria-label') ||

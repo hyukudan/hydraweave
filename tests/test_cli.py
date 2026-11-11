@@ -250,7 +250,7 @@ class StopWithoutAdmissionTests(unittest.TestCase):
         patcher = patch.object(cli, "_module", side_effect=lambda name: modules.get(name) or real(name))
         patcher.start()
         self.addCleanup(patcher.stop)
-        cluster = patch.object(cli, "_cluster", return_value=SimpleNamespace(machines={}, profiles={}))
+        cluster = patch.object(cli, "_cluster", return_value=SimpleNamespace(machines={}, profiles={}, router={}))
         cluster.start()
         self.addCleanup(cluster.stop)
         preflight = patch("hydraweave.recipes.preflight.cli")

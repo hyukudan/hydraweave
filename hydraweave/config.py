@@ -29,6 +29,23 @@ class Machine:
     devices: list[dict]
     lab_dir: str | None = None
     peer_ssh: dict[str, str] = field(default_factory=dict)
+    # True: this ssh machine is the controller's own host, so its node tool runs as a local child (no ssh to
+    # itself); False: always ssh; None: detected (hydraweave.remote.is_self).
+    local: bool | None = None
+    # Directories holding this machine's models (absolute, at most 16); None: the key is absent (model_roots_of).
+    model_roots: tuple[str, ...] | None = None
+
+
+MAX_MODEL_ROOTS = 16
+
+
+def model_roots_of(machine):
+    """A machine's configured model directories: its ``model_roots``, else ``<lab_dir>/models`` when it has one."""
+    roots = getattr(machine, "model_roots", None)
+    if roots is not None:
+        return list(roots)
+    lab = getattr(machine, "lab_dir", None)
+    return [str(PurePosixPath(lab) / "models")] if lab else []
 
 
 @dataclass(frozen=True)
@@ -240,7 +257,8 @@ def parse(obj: dict) -> Cluster:
     local_count = device_count = 0
     for m in rows:
         record(m, "machine", ("id", "os", "access", "http_address", "install_root"),
-               ("ssh_target", "ssh_port", "lab_mode", "devices", "lab_dir", "peer_ssh"))
+               ("ssh_target", "ssh_port", "lab_mode", "devices", "lab_dir", "peer_ssh", "local",
+                                                                 "model_roots"))
         mid = identifier(m["id"], "machine.id")
         if mid in machines:
             raise ConfigError("duplicate machine id")
@@ -279,6 +297,19 @@ def parse(obj: dict) -> Cluster:
             absolute(lab, "machine.lab_dir", "linux")
             if ".." in PurePosixPath(lab).parts or "\\" in lab:
                 raise ConfigError("machine.lab_dir: expected absolute POSIX path without '..'")
+        model_roots = None
+        if "model_roots" in m:
+            values = m["model_roots"]
+            if not isinstance(values, list) or len(values) > MAX_MODEL_ROOTS:
+                raise ConfigError("machine.model_roots: expected a list of at most 16 absolute directories")
+            for index, value in enumerate(values):
+                absolute(value, f"machine.model_roots[{index}]", m["os"])
+                path = (PureWindowsPath if m["os"] == "windows" else PurePosixPath)(value)
+                if ".." in path.parts or (m["os"] == "linux" and "\\" in value):
+                    raise ConfigError(f"machine.model_roots[{index}]: expected an absolute path without '..'")
+            if len(set(values)) != len(values):
+                raise ConfigError("machine.model_roots: duplicate directory")
+            model_roots = tuple(values)
         peers = m.get("peer_ssh", {})
         record(peers, "machine.peer_ssh", optional=peers if isinstance(peers, dict) else ())
         for peer, alias in peers.items():
@@ -290,7 +321,10 @@ def parse(obj: dict) -> Cluster:
         machines[mid] = Machine(mid, m["os"], m["access"], address(m["http_address"], "http_address"),
                                 target, integer(m.get("ssh_port", 22), "ssh_port", 1, 65535),
                                 absolute(m["install_root"], "install_root", m["os"]),
-                                boolean(m.get("lab_mode", True), "lab_mode"), devices, lab, peers)
+                                boolean(m.get("lab_mode", True), "lab_mode"), devices, lab, peers,
+                                None if m.get("local") is None else boolean(m["local"], "local"), model_roots)
+        if machines[mid].local and (m["access"] != "ssh" or m["os"] != "linux"):
+            raise ConfigError("machine.local: only a linux ssh machine can be marked as this controller's host")
     for machine in machines.values():
         if any(peer not in machines for peer in machine.peer_ssh):
             raise ConfigError("machine.peer_ssh: unknown machine id")
@@ -379,11 +413,15 @@ def parse(obj: dict) -> Cluster:
                 raise ConfigError(f"pc.recipe_dirs[{index}]: expected an absolute path")
     if "recipe_core" in pc and not Path(text(pc["recipe_core"], "pc.recipe_core")).is_absolute():
         raise ConfigError("pc.recipe_core: expected an absolute path")
-    for key in ("router_listen", "ui_listen"):
-        if key in pc:
-            endpoint = listen(pc[key], f"pc.{key}")
-            if key == "ui_listen" and endpoint["address"] != "127.0.0.1":
-                raise ConfigError("UI must listen on 127.0.0.1")
+    if "router_listen" in pc:
+        listen(pc["router_listen"], "pc.router_listen")
+    if "ui_listen" in pc:
+        # Any interface may serve the portal (0.0.0.0 for a headless node); the portal warns that it has no login.
+        from . import bind
+        try:
+            bind.listen(text(pc["ui_listen"], "pc.ui_listen"), "pc.ui_listen")
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from None
     if "cuda" in pc:
         cuda = record(pc["cuda"], "pc.cuda", optional=("pro_uuid", "reservation", "grants", "host_grant"))
         if "pro_uuid" in cuda:

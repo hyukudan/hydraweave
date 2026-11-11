@@ -443,7 +443,8 @@ class JobTests(unittest.TestCase):
         self.assertTrue(options.digest)
         self.assertIn("recipe-inputs", options.recipe)                       # the snapshot, not the user file
         plain = self.wait(self.api.mutate("up", {"profile": "ds41-pair"}))
-        self.assertIn("later phase", plain["error"])                         # the replica gate stays for plain up
+        self.assertEqual(plain["state"], "succeeded", plain["error"])
+        self.assertEqual(self.orch.up.call_args.args[1], "ds41-pair")        # the pair adapter also serves plain up
         with self.assertRaises(APIError):
             self.api.mutate("up", {"recipe": "ds-user", "recipe_overrides": ["../x.json"]})
         # Recipe references and snapshot digests from the client are ids, never paths (nothing is opened).

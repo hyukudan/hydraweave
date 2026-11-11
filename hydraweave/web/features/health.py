@@ -94,12 +94,36 @@ def owner_of(api):
 def acquire(store, owner, now):
     """Take or renew the evaluator lease; the generation when held, else None."""
     prepare(store)
+    _expire_dead_owner(store, owner)
     store.execute(
         "INSERT INTO health_lease(name, owner, generation, until) VALUES ('evaluator', ?, 1, ?) "
         "ON CONFLICT(name) DO UPDATE SET generation=CASE WHEN health_lease.owner=excluded.owner "
         "THEN health_lease.generation ELSE health_lease.generation + 1 END, owner=excluded.owner, until=excluded.until "
         "WHERE health_lease.owner=excluded.owner OR health_lease.until < ?", (owner, now + LEASE_TTL, now))
     return held(store, owner, now)
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)      # POSIX only: signal 0 tests existence (on Windows os.kill would end the process)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True          # exists, owned by another user
+    return True
+
+
+def _expire_dead_owner(store, owner):
+    """A restarted portal takes over at once from its own dead predecessor instead of waiting out LEASE_TTL (the
+    store belongs to this controller, so an owner's pid is a process of this host)."""
+    if os.name != "posix":
+        return
+    rows = store.execute("SELECT owner FROM health_lease WHERE name='evaluator'")
+    if not rows or rows[0][0] == owner:
+        return
+    head = str(rows[0][0]).split("-", 1)[0]
+    if head.isdigit() and int(head) != os.getpid() and not _pid_alive(int(head)):
+        store.execute("UPDATE health_lease SET until=0 WHERE name='evaluator' AND owner=?", (rows[0][0],))
 
 
 def held(store, owner, now):
@@ -493,14 +517,41 @@ def _disk(ctx, p):
     return out
 
 
+def _paused(ctx, machine):
+    """The GPU turn that pauses this machine's node reads (lab rule: a turn holder is not disturbed), or None.
+    While paused, an old failed reading is not evidence: the turn check answers, and the other sources wait by design."""
+    try:
+        from hydraweave import pollbudget
+        held = pollbudget.for_api(ctx.api).turn(machine)
+    except Exception:  # noqa: BLE001 - no budget in this process: nothing is paused
+        return None
+    return held[0] if held else None
+
+
 def _unreachable(ctx, p):
     typed = ctx.states("node_up", {0, 1})
-    if typed is None:
+    if typed is None and not any(_paused(ctx, m) for m in (ctx.machines() or {})):
         return None
+    typed = typed or []
     codes = {id(row): code for row, code in typed}
-    return [Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
-                f"{machine} does not answer the node tool", machine)
-            for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items())]
+    out = []
+    for (machine,), row in sorted(_keyed([row for row, _ in typed], "machine").items()):
+        holder = _paused(ctx, machine)
+        if holder is not None:
+            # The turn check itself reads this node (its node tool answers), so it is reachable; its other reads wait.
+            out.append(Obs(machine, False, "critical", f"{machine}: node tool answers its turn check; other reads "
+                           f"paused while GPU turn {holder} runs", machine))
+            continue
+        out.append(Obs(machine, None if codes[id(row)] is None else codes[id(row)] == 0, "critical",
+                       f"{machine} does not answer the node tool", machine))
+    # A paused machine with no recent node_up row (its host reads wait for the turn) still clears an old finding.
+    seen = {o.subject for o in out}
+    for machine in sorted(ctx.machines() or {}):
+        holder = None if machine in seen else _paused(ctx, machine)
+        if holder is not None:
+            out.append(Obs(machine, False, "critical", f"{machine}: node tool answers its turn check; other reads "
+                           f"paused while GPU turn {holder} runs", machine))
+    return out
 
 
 _first_seen = {}
@@ -535,6 +586,8 @@ def _collector_stale(ctx, p):
 
 
 def _source_obs(ctx, subject, machine, text, last_ok, attempted, interval):
+    if machine is not None and _paused(ctx, machine) is not None:
+        return Obs(subject, False, "warning", f"{text}: paused while a GPU turn holds {machine}", machine)
     if last_ok is not None and ctx.now - last_ok <= 3 * interval:
         return Obs(subject, False, "warning", f"{text} current", machine)
     if attempted is not None and ctx.now - attempted <= 3 * interval:

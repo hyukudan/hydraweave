@@ -1,4 +1,4 @@
-"""Loopback-only HTTP transport for the portal."""
+"""HTTP transport for the portal: loopback by default, any interface with --listen (no login either way)."""
 
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import os
 from ..compat import api_path, getenv, legacy_document
+from .. import bind
 import re
 import secrets
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -71,16 +72,32 @@ class PortalServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64     # feature pages poll several documents at once; the default backlog of 5 refuses bursts
 
-    def __init__(self, port=18700, *, api=None, static_dir=None):
+    def __init__(self, port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
+        self.listen_address = bind.address(listen)
+        self.address_family = bind.family(self.listen_address)
         self.api = api if api is not None else API()
         self.static_dir = Path(static_dir) if static_dir else STATIC_DIR
-        self.csrf_token = secrets.token_urlsafe(32)
-        super().__init__(("127.0.0.1", port), Handler)
-        self.origin = f"http://127.0.0.1:{self.server_port}"
+        self.csrf_token = _token(token_file)
+        super().__init__((self.listen_address, port), Handler)
+        self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
+        self.lan = not bind.is_loopback(self.listen_address)
+
+    def host_allowed(self, header):
+        if header in self.allowed_hosts:
+            return True
+        return self.lan and bind.host_allowed(header, self.listen_address, self.server_port)
 
 
     def server_close(self):
+        # Feature jobs own cancellable local work (including Git downloads). Stop
+        # admission first, then let their finally blocks reap children and stages.
+        # Detached core up/install workers are not feature contexts and keep running.
+        close_features = getattr(self.api, "close_features", None)
+        if close_features is not None:
+            pending = close_features()
+            if isinstance(pending, int) and pending > 0:
+                print(f"Hydraweave: {pending} feature job(s) exceeded the shutdown cleanup deadline", file=sys.stderr)
         # Recipe children (and their whole process trees) never outlive the portal.
         runner = getattr(self.api, "recipes", None)
         if runner is not None:
@@ -126,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _host(self):
         hosts = self.headers.get_all("Host", [])
-        if len(hosts) != 1 or hosts[0] not in self.server.allowed_hosts:
+        if len(hosts) != 1 or not self.server.host_allowed(hosts[0]):
             self._error(403, "Host is not allowed")
             return False
         # Only origin-form requests; never accept a proxy request target.
@@ -342,9 +359,46 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = _method
 
 
-def create_server(port=18700, *, api=None, static_dir=None):
-    """Create a loopback server; port=0 is useful for isolated tests."""
-    return PortalServer(port, api=api, static_dir=static_dir)
+def create_server(port=18700, *, api=None, static_dir=None, listen="127.0.0.1", token_file=None):
+    """Create the portal server (loopback unless `listen` says otherwise); port=0 is useful for isolated tests."""
+    return PortalServer(port, api=api, static_dir=static_dir, listen=listen, token_file=token_file)
+
+
+TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+def _token(path=None):
+    """The CSRF token pages embed. With a file (the portal's runtime directory), the same token survives a portal
+    restart, so pages that stay open keep working; the file is private to this user (0600) and never served."""
+    if path is None:
+        return secrets.token_urlsafe(32)
+    path = Path(path)
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        if TOKEN_RE.fullmatch(value):
+            return value
+    except (OSError, UnicodeError):
+        pass
+    value = secrets.token_urlsafe(32)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(4))
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as stream:
+            stream.write(value)
+        os.replace(temporary, path)
+    except OSError:
+        pass  # an unwritable runtime directory only costs open pages a reload after a restart
+    return value
+
+
+def _configured_listen(api):
+    """pc.ui_listen of the workspace, or None when unset or unreadable (first run has no configuration yet)."""
+    try:
+        value = (api._cluster().pc or {}).get("ui_listen")
+        return bind.listen(value, "pc.ui_listen") if value else None
+    except Exception:  # noqa: BLE001 - the pages report an unreadable configuration; the portal still starts
+        return None
 
 
 def _page_seen(api):
@@ -370,8 +424,23 @@ def start_telemetry(api):
         return reason
 
 
-def serve(port=18700, no_browser=False):
-    with create_server(port) as server:
+def serve(port=None, no_browser=False, config_path=None, listen=None):
+    """Run the portal. `listen`/`port` default to pc.ui_listen of the workspace, then 127.0.0.1:18700."""
+    api = API(config_path) if config_path is not None else API()
+    configured = _configured_listen(api) if listen is None or port is None else None
+    listen = listen if listen is not None else (configured["address"] if configured else "127.0.0.1")
+    port = port if port is not None else (configured["port"] if configured else 18700)
+    from hydraweave import secrets as runtime
+    try:
+        token_file = runtime.runtime_dir() / "portal-csrf"
+    except Exception:  # noqa: BLE001 - no runtime directory: a per-process token, as before
+        token_file = None
+    with create_server(port, api=api, listen=listen, token_file=token_file) as server:
+        lan = getattr(server, "lan", False)
+        if lan:
+            print(bind.LAN_WARNING.format(what="the Hydraweave portal",
+                                          listen=bind.url_host(server.listen_address, server.server_port)),
+                  file=sys.stderr, flush=True)
         # Mutations survive the portal process; test fixtures with patched backends stay in-process.
         server.api.detached = getenv("HYDRAWEAVE_UI_INPROCESS") != "1"
         # Node-gate lock files are made now: answering a request never creates them.
@@ -388,7 +457,9 @@ def serve(port=18700, no_browser=False):
         # Background samplers feed the history store (features' collectors); HYDRAWEAVE_TELEMETRY=0 disables them.
         if getenv("HYDRAWEAVE_TELEMETRY", "1") != "0":
             start_telemetry(server.api)
-        print("Hydraweave portal: " + server.origin, flush=True)
+        print("Hydraweave portal: " + server.origin + (
+            " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if lan else ""),
+            flush=True)
         if not no_browser:
             webbrowser.open(server.origin + "/")
         try:

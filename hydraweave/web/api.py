@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import uuid
+from urllib.parse import quote
 from urllib.request import ProxyHandler, Request, build_opener
 
 from hydraweave import __version__, admission, cli, config, engines, nodegate, nodepoll, orchestrate, pollbudget, redaction, remote, render, secrets
@@ -49,7 +50,7 @@ SCREENS = frozenset(("devices", "topology", "models", "profiles", "stats", "logs
 MUTATIONS = frozenset(("up", "down", "install", "hosts/pin", "doctor", "keys/rotate", "cancel")) | recipe_web.JOBS
 POLL_INTERVAL = 2
 CAPABILITIES = {
-    "up": {"enabled": True, "why": "Qwen replicas; any model with a recipe"},
+    "up": {"enabled": True, "why": "Supported replica and paired profiles; recipe-based launches"},
     "down": {"enabled": True}, "install": {"enabled": True},
     "hosts/pin": {"enabled": True}, "doctor": {"enabled": True},
     "keys/rotate": {"enabled": True, "why": "engine keys; restart required"},
@@ -442,6 +443,7 @@ class API:
         self._counters = {}
         self._recent = {}
         self._features_running = {}     # job id -> JobContext of every running feature job
+        self._features_closing = False  # shutdown closes admission before cancelling existing feature contexts
         self.admission_db = None        # tests inject one; else the configuration's shared database (C11)
         self._holds = {}                # job id -> admission hold id (core, stop and admitted feature jobs)
         self._hold_resources = {}       # job id -> the resources of its hold (a stop without admission uses them)
@@ -798,9 +800,26 @@ class API:
             preset_name = declared.get("preset", name)
             try:
                 family = config.family(preset_name)
+                adapter = engines.release_adapter(preset_name)
             except (OSError, ValueError, KeyError):
                 family = None
+                adapter = None
+            required_router = (declared.get("rank0") if adapter and adapter.bind == "loopback" else
+                               "local" if declared.get("prefill_service") else None)
+            launch_blocker = None
+            if adapter is not None:
+                try:
+                    orchestrate.check_lease_workers(cluster, engines.members(declared, adapter.family), adapter)
+                except (ValueError, RuntimeError, KeyError) as exc:
+                    launch_blocker = str(exc)
             row = {"id": name, "name": name, "preset": preset_name, "family": family,
+                   "topology": adapter.topology if adapter else None,
+                   "launch_blocker": launch_blocker,
+                   "required_router": required_router,
+                   "router_constraint": ("This engine binds loopback; the router must run on rank 0."
+                                         if adapter and adapter.bind == "loopback" else
+                                         "The prefill service requires the router on the controller."
+                                         if declared.get("prefill_service") else None),
                    "configuration": declared, "status": status,
                    "state": status.get("state"), "processes": [], "leases": [],
                    "effective_configuration": None, "nodes": declared.get("nodes") or [declared[k] for k in ("rank0", "rank1") if k in declared],
@@ -918,7 +937,7 @@ class API:
                         "value": declared.get("overrides", {}).get(flag, production), "qualified": rule}, ("production", "value")))
             except (OSError, ValueError, KeyError):
                 row["parameters"] = None
-            row["why"]["parameter_save"] = "configuration save endpoint unavailable in the Phase 1b task contract"
+            row["parameter_editor"] = "#/engine-settings?profile=" + quote(name, safe="")
             _missing(row, ("effective_config", "effective_configuration"), "rendered launch inputs unavailable; needs E-C2 / E-C3 for component provenance")
             rows.append(_missing(row, ("nodes", "devices", "router", "identity", "receipt", "release", "started_at", "parameters")))
         return rows
@@ -1439,6 +1458,9 @@ class API:
 
     def _feature_job(self, action, arguments):
         spec = feature_registry.registry().jobs[action]
+        with self._job_lock:
+            if self._features_closing:
+                raise APIError("the portal is closing; the job was not started", 503)
         validated = None     # the validated arguments: only these are ever rolled back (never the client's own)
         try:
             if spec.validate is not None:
@@ -1460,7 +1482,11 @@ class API:
         jid = uuid.uuid4().hex
         with self._job_lock:
             refusal = None
-            if spec.exclusive and self._active:
+            refusal_status = 409
+            if self._features_closing:
+                refusal = "the portal is closing; the job was not started"
+                refusal_status = 503
+            elif spec.exclusive and self._active:
                 refusal = "another mutating job is running"
             elif spec.admission and self._active:
                 # The slot may be reserved by a job not yet listed (its admission is being decided).
@@ -1471,7 +1497,7 @@ class API:
         if refusal:
             self._rollback(spec, validated)
             self._audit(action, arguments, {"state": "refused", "error": refusal})
-            raise APIError(refusal, 409)
+            raise APIError(refusal, refusal_status)
         hold = None
         try:
             if spec.admission or spec.exclusive:
@@ -1488,13 +1514,16 @@ class API:
             self._audit(action, arguments, {"state": "refused", "error": str(error)})
             raise error from exc
         with self._job_lock:
+            closing = self._features_closing
+            if closing and self._active == jid:
+                self._active = None
             job = {"job": jid, "id": jid, "action": action, "arguments": redact(arguments),
                    "state": "running", "started_at": self.clock(), "finished_at": None,
                    "result": None, "error": None, "progress": "starting",
                    "resources": sorted(resources) if hold else None,
                    "renew": "POST jobs/renew while the page is open" if spec.admission else None}
-            accepted = self._accepted(action, arguments, jid)
-            if accepted is None:
+            accepted = None if closing else self._accepted(action, arguments, jid)
+            if accepted is None and not closing:
                 self._jobs[jid] = job
                 self._features_running[jid] = context
             for old in list(self._jobs):
@@ -1503,6 +1532,14 @@ class API:
                 if self._jobs[old]["state"] != "running":
                     del self._jobs[old]
             response = dict(job)
+        if closing:
+            # A shutdown may race the shared admission call. Release its reservation
+            # without publishing a context or starting work after the portal closed.
+            self._unhold(jid)
+            self._rollback(spec, validated)
+            error = "the portal is closing; the job was not started"
+            self._audit(action, arguments, {"state": "refused", "error": error})
+            raise APIError(error, 503)
         if accepted is not None:
             self._rollback(spec, validated)
             self._unaccept(jid, accepted)
@@ -1514,7 +1551,12 @@ class API:
 
         def run():
             try:
-                result = spec.run(self, arguments, context)
+                if self._features_closing:
+                    context.cancel("portal is closing")
+                    self._rollback(spec, validated)
+                    result = None
+                else:
+                    result = spec.run(self, arguments, context)
                 update = {"state": "cancelled" if context.cancelled() and result is None else "succeeded",
                           "result": redact(result), "error": redact(context.reason) if context.cancelled() else None}
             except JobFailed as exc:
@@ -1541,6 +1583,28 @@ class API:
         self._start_worker(run, "hydraweave-feature-" + jid[:8], jid, job, action, arguments,
                            lambda: self._rollback(spec, validated))
         return response
+
+    def close_features(self, timeout_s=15):
+        """Cancel portal-owned feature jobs and wait a bounded time for their cleanup.
+
+        Core up/install workers are deliberately separate: their detached CLI
+        processes must survive closing the dashboard. Feature workers release their
+        own admission holds only after their resources and children are cleaned up.
+        Return the number of contexts still cleaning up at the deadline.
+        """
+        deadline = time.monotonic() + max(0, timeout_s)
+        with self._job_lock:
+            self._features_closing = True
+            contexts = tuple(self._features_running.values())
+        for context in contexts:
+            context.cancel("portal is closing")
+        while True:
+            with self._job_lock:
+                pending = len(self._features_running)
+            left = deadline - time.monotonic()
+            if not pending or left <= 0:
+                return pending
+            time.sleep(min(left, 0.025))
 
     def _action_log(self):
         try:
@@ -1632,6 +1696,12 @@ class API:
                         arguments["profile"] = profile
             except (ValueError, OSError) as exc:
                 raise APIError(str(exc)) from exc
+        elif action == "up" and "router" not in arguments:
+            # A saved default must reach both the detached CLI and the in-process
+            # path. Explicit choices and immutable recipe inputs retain precedence.
+            selected = self._cluster().router.get("machine", "local")
+            if selected != "local":
+                arguments["router"] = selected
         return arguments
 
     def _recipe_up_profile(self, args):
@@ -1820,11 +1890,7 @@ class API:
                 return service.deploy(parsed.inputs, parsed.stop, orchestrate=self.orchestrate,
                                       approval=commands._approval(parsed), job=parsed.job)
         if self.detached and action in ("up", "down", "install"):
-            if action in ("up", "install"):
-                cluster = self.orchestrate.load_cluster(Path(self.config_path), config)
-                _, kind, _ = self.orchestrate._profile(cluster, args["profile"])
-                if engines.adapter(kind).topology != "replicas":
-                    raise APIError("later phase · only replica profiles are available in Phase 1b")
+            # The CLI performs the same adapter/preflight checks for replicas and pairs.
             return self._run_detached(action, args)
         if action == "cancel":
             profile = args.get("profile")
@@ -1856,8 +1922,6 @@ class API:
         cluster = self.orchestrate.load_cluster(Path(self.config_path), config)
         if action in ("up", "install"):
             _, kind, mids = self.orchestrate._profile(cluster, args["profile"])
-            if engines.adapter(kind).topology != "replicas":
-                raise APIError("later phase · only replica profiles are available in Phase 1b")
         if action == "install":
             release = self.orchestrate.install(cluster, args.get("build_on") or mids[0],
                                                list(engines.adapter(kind).targets), profile=args["profile"])

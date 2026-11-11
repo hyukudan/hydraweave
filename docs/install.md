@@ -132,6 +132,9 @@ Per node, set:
   Hydraweave marks it and writes only inside it (plus `~/.hydraweave-boot` for the node tool).
 - `lab_mode` and `lab_dir`: in the lab, `lab_mode: true` (the default) and the lab directory that holds the turn scripts;
   every GPU process then runs inside a GPU turn. This guide covers lab mode only.
+- `model_roots` (optional): up to 16 absolute directories that hold this machine's models. Without it, a machine
+  with a `lab_dir` uses `<lab_dir>/models`. The model library scans these roots, and extra roots inside them can be
+  saved from the portal.
 - `assets`: per node, each file's path, size in bytes and sha256. Files are never downloaded or converted automatically.
 
 `config validate` rejects unknown keys, non-private addresses and malformed values, and names the field.
@@ -193,6 +196,7 @@ hloom status qwen-replicas
 hloom endpoint qwen-replicas                    # the router address for clients
 hloom down qwen-replicas
 hloom ui                                        # the portal on http://127.0.0.1:18700
+hloom ui --listen 0.0.0.0 --no-browser          # headless machine: the portal on every interface, NO login
 ```
 
 ## 8. Upgrade, roll back, uninstall

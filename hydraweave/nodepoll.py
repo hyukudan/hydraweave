@@ -21,6 +21,7 @@ person starts (doctor, up, down, a job, a logs search) is not a poll and does no
 from .compat import schema as compat_schema
 import hashlib
 import json
+import sys
 import threading
 import time
 
@@ -50,6 +51,7 @@ class NodePoll:
         self._last = {}         # machine -> when its last poll started
         self._busy = set()      # machines with a poll in flight
         self._page = None       # last page activity
+        self._logged = {}       # machine -> the poll error last written to the log (None: answering)
         self._stop = threading.Event()
         self._thread = None
         self.sessions = []      # (machine, started at, keys) of recent polls (bounded; tests and diagnostics)
@@ -202,6 +204,13 @@ class NodePoll:
                 answers, error = {}, f"{type(exc).__name__}: {exc}"[:300]
         finally:
             release()
+        # The portal's log names a node poll that starts or stops failing (once per change, not every cycle).
+        with self._lock:
+            before = self._logged.get(machine.id)
+            self._logged[machine.id] = error
+        if error != before:
+            print(f"hydraweave node poll {machine.id}: " + (f"failing ({', '.join(p['verb'] for p in parts)}): {error}"
+                  if error else "answering again"), file=sys.stderr, flush=True)
         received = self.clock()
         with self._lock:
             store = self._answers.setdefault(machine.id, {})
@@ -227,11 +236,18 @@ class NodePoll:
         self._stop.set()
 
     def _run(self):
+        last = None
         while not self._stop.wait(TICK_S):
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - one bad tick (an unreadable configuration) never ends the reads
-                pass
+                last = None
+            except Exception as exc:  # noqa: BLE001 - one bad tick (an unreadable configuration) never ends the reads
+                text = f"{type(exc).__name__}: {exc}"[:300]
+                if text != last:            # named once per distinct failure: a silent poll looks like offline nodes
+                    import traceback
+                    print("hydraweave node poll: a tick failed: " + text + chr(10)
+                          + "".join(traceback.format_exception(exc))[-1500:], file=sys.stderr, flush=True)
+                last = text
 
 
 class NotRead(remote.RemoteError):

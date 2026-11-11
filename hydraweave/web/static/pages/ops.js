@@ -132,6 +132,10 @@
   }
 
   function openMachine(id) {
+    if (window.HydraweaveNodesUI) {
+      window.HydraweaveNodesUI.open(id).catch(error => H().announce(error.message));
+      return;
+    }
     const current = (doc().machines || []).find(m => m.id === id), version = doc().version;
     UI().open({
       title: current ? `Edit ${id}` : "Add a machine", confirm: current ? "Save" : "Add",
