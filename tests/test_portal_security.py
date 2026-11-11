@@ -12,7 +12,12 @@ import sys
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
+import unittest
+
+try:
+    import pytest
+except ImportError:  # the unittest job; the pytest job runs this module
+    raise unittest.SkipTest("needs pytest")
 
 from hydraweave import bootstrap, cli, node_agent, secrets
 from hydraweave.web import server as portal

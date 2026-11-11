@@ -174,16 +174,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._get()
 
+    def _access_token(self):
+        return getattr(self.server, "access_token", None)  # test doubles may omit it
+
     def _matches_access(self, value):
-        return bool(self.server.access_token) and hmac.compare_digest(
-            value.encode("utf-8"), self.server.access_token.encode("ascii"))
+        return bool(self._access_token()) and hmac.compare_digest(
+            value.encode("utf-8"), self._access_token().encode("ascii"))
 
     def _bearer(self):
         values = self.headers.get_all("Authorization", [])
         return len(values) == 1 and values[0].startswith("Bearer ") and self._matches_access(values[0][7:])
 
     def _authorized(self):
-        if self.server.access_token is None or self._bearer():
+        if self._access_token() is None or self._bearer():
             return True
         try:
             cookie = SimpleCookie()
@@ -195,14 +198,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _login(self, parsed):
         """Exchange the URL credential for a browser-session cookie, then remove it from the URL."""
-        if self.server.access_token is None or parsed.path not in {"/", "/index.html", "/hydraweave/", "/hydraweave/index.html"}:
+        if self._access_token() is None or parsed.path not in {"/", "/index.html", "/hydraweave/", "/hydraweave/index.html"}:
             return False
         values = parse_qs(parsed.query, keep_blank_values=True).get("token")
         if values is None:
             return False
         if len(values) != 1 or not self._matches_access(values[0]):
             raise APIError("invalid portal access token", 401)
-        self._login_cookie = "hydraweave-access=" + self.server.access_token + "; Path=/; HttpOnly; SameSite=Strict"
+        self._login_cookie = "hydraweave-access=" + self._access_token() + "; Path=/; HttpOnly; SameSite=Strict"
         self._login_location = parsed.path
         self._send(303, b"")
         return True
@@ -294,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                 html = html.replace("</head>", meta + "</head>") if "</head>" in html else meta + html
                 from hydraweave import bootstrap
                 security = '<meta name="hydraweave-package-sha256" content="' + bootstrap.package_sha256() + '">'
-                if self.server.access_token and not self._authorized():
+                if self._access_token() and not self._authorized():
                     security += '<meta name="hydraweave-login" content="required">'
                 security += '<script src="/security.js" defer></script>'
                 html = html.replace("</head>", security + "</head>") if "</head>" in html else security + html
@@ -532,8 +535,9 @@ def serve(port=None, no_browser=False, config_path=None, listen=None, no_auth=Fa
         print("Hydraweave portal: " + server.origin + (
             " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if lan else ""),
             flush=True)
-        login_url = server.origin + "/" + ("?token=" + server.access_token if server.access_token else "")
-        if server.access_token:
+        token = getattr(server, "access_token", None)
+        login_url = server.origin + "/" + ("?token=" + token if token else "")
+        if token:
             print("Hydraweave portal login: " + login_url, flush=True)
         if not no_browser:
             webbrowser.open(login_url)
