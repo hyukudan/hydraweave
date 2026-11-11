@@ -1,0 +1,62 @@
+{
+  "engine_sha": "9211b07e13c64ab80ae04fcbfcbeab50fe0cbf04",
+  "port": 18501,
+  "binary": "strix-hip-decode-token",
+  "family": "qwen-replicas",
+  "receipt": "qwen-starter",
+  "assets": [
+    "model"
+  ],
+  "argv": [
+    "{binary}",
+    "{model}",
+    "0",
+    "--context",
+    "12288",
+    "--unqualified-context",
+    "--execution-mode",
+    "eager",
+    "--residency",
+    "register",
+    "--generate",
+    "1",
+    "--http-serve",
+    "--http-port",
+    "{port}",
+    "--http-default-max-tokens",
+    "256",
+    "--http-batch",
+    "1",
+    "--http-bind",
+    "{address}",
+    "--http-api-key-file",
+    "{key_file}"
+  ],
+  "env": {},
+  "receipt_note": "starter: correct but not the tuned speed. Eager non-MTP; public vocabulary token ID 0 seeds startup, with no calibration artifact.",
+  "knobs": {
+    "--http-max-queue": {
+      "min": 0,
+      "max": 4096
+    },
+    "--http-max-connections": {
+      "min": 1,
+      "max": 4096
+    },
+    "--http-default-max-tokens": {
+      "min": 1,
+      "max": 12288
+    },
+    "--http-port": {
+      "min": 1,
+      "max": 65535
+    },
+    "--context": {
+      "min": 12288,
+      "max": 12288,
+      "values": [
+        12288
+      ]
+    }
+  }
+}

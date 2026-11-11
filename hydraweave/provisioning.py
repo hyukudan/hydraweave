@@ -14,7 +14,8 @@ def plan(cluster, mid, profile, inventory=None):
     if mid not in mids:
         raise ValueError("node does not belong to this profile")
     machine = cluster.machines[mid]
-    data = config.preset(orchestrate._recipe_preset(kind))
+    preset_name = settings.get("preset", profile)
+    data = config.preset(orchestrate._recipe_preset(preset_name))
     adapter = engines.adapter(kind)
     versions = engines.lock()
     options = engines.recipe_options(data, kind)
@@ -32,15 +33,18 @@ def plan(cluster, mid, profile, inventory=None):
         if existing:
             models.append({"asset": asset, "existing": existing, "source": source})
             continue
-        if source["status"] != "download" or len(source.get("files", [])) != 1 or source.get("after"):
+        split = source.get("merge") == "gguf-split"
+        if (source["status"] != "download" or source.get("after")
+                or (len(source.get("files", [])) != 1 and not split)):
             blockers.append(f"{asset}: {source.get('why', 'requires a prepared model/conversion; supply its manifest')}")
             continue
         item = source["files"][0]
-        directory = PurePosixPath(machine.install_root).parent / "hydraweave-models" / kind / asset
-        path = str(directory / PurePosixPath(item["file"]).name)
-        manifest = {"path": path, "bytes": item["bytes"], "sha256": item["sha256"]}
+        directory = PurePosixPath(machine.install_root).parent / "hydraweave-models" / preset_name / asset
+        path = str(directory / ("merged.gguf" if split else PurePosixPath(item["file"]).name))
+        pin = source.get("merged", {}) if split else item
+        manifest = {"path": path, **{key: pin[key] for key in ("bytes", "sha256") if key in pin}}
         candidates = []
-        for root_row in (inventory or {}).get("roots", []):
+        for root_row in ([] if split else (inventory or {}).get("roots", [])):
             if root_row.get("path") not in config.model_roots_of(machine):
                 continue
             for unit in root_row.get("units", []):
@@ -51,7 +55,8 @@ def plan(cluster, mid, profile, inventory=None):
             manifest["path"] = candidates[0]
         manifests[asset] = manifest
         models.append({"asset": asset, "existing": manifest if len(candidates) == 1 else None,
-                       "manifest": manifest, "source": source})
+                       "manifest": manifest, "source": source,
+                       "pin": "first-time pin: computed sha256 will be recorded after merge" if split and not pin else "pinned"})
     return {"machine": mid, "profile": profile, "engine": dict(base, components=pins, recipe=recipe),
             "models": models, "manifests": manifests, "model_roots": config.model_roots_of(machine),
             "blockers": blockers, "starts_inference": False}
@@ -117,7 +122,7 @@ def _execute(cluster, path, mid, profile, *, report, cancelled, sources):
         manifest = row.get("existing") or row["manifest"]
         present = client.call("stat-assets", {"paths": [manifest["path"]]})
         facts = present.get("assets", {}).get(manifest["path"], {})
-        if facts.get("bytes") == manifest["bytes"]:
+        if "sha256" in manifest and facts.get("bytes") == manifest["bytes"]:
             verified = client.call("verify-model", {"root": root, "lab_dir": payload["lab_dir"],
                                                      **{k: manifest[k] for k in ("path", "bytes", "sha256")}})
             _wait(client, root, verified["job"], report, cancelled)
@@ -131,12 +136,22 @@ def _execute(cluster, path, mid, profile, *, report, cancelled, sources):
                   "destination": str(PurePosixPath(directory) / PurePosixPath(item["file"]).name)}
                  for item in source["files"]]
         request = {"root": root, "lab_dir": payload["lab_dir"], "files": files}
+        if source.get("merge"):
+            expected = source.get("merged")
+            if expected is None and "sha256" in manifest:
+                expected = {key: manifest[key] for key in ("bytes", "sha256")}
+            request["merge"] = {"kind": source["merge"], "destination": manifest["path"],
+                                "expected": expected}
         check = client.call("download-plan", request)
         if not all(row["ok"] for row in check["disk"]):
             raise ValueError("insufficient disk space for model downloads")
         report(row["asset"] + ": downloading (resuming existing partials)")
         job = client.call("download", dict(request, confirm=check["confirm"]))
-        _wait(client, root, job["job"], report, cancelled)
+        result = _wait(client, root, job["job"], report, cancelled)
+        if source.get("merge"):
+            manifest.update(result["merged"])
+            if not source.get("merged"):
+                report(row["asset"] + ": first-time pin sha256=" + manifest["sha256"])
     existing = client.call("releases", {"root": root}).get("releases", [])
     release_id = None
     for row in existing:

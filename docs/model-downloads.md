@@ -8,20 +8,59 @@ and run them on a node after you confirm the exact plan.
 - `download`: a repository, an **immutable 40-hex revision**, and each file with its size and sha256.
   - The source comes only from a ledger at the pins.
   - Sizes and hashes are the upstream LFS metadata at that revision.
+  - `merge: "gguf-split"` declares an ordered list of GGUF v3 parts. Optional
+    `merged: {"bytes": ..., "sha256": "..."}` pins the resulting file as well.
+  - `after` remains a manual step and blocks automatic provisioning, including when a merge is declared.
 - `unavailable`: the reason, for example a local artifact with no public immutable source.
 
 At engine `9211b07e` (the catalog is refused if `versions.lock` pins another engine commit):
 
 | profile | asset | source |
 |---|---|---|
+| qwen-starter | `model` (the only asset) | the same four public, individually pinned GGUF parts as qwen-replicas; merged natively |
 | qwen-replicas | `model` | `unsloth/Qwen3.8-Flash-Next-GGUF@38bb39ee97821de2c9009abb7e93950eec396e66`, `UD-Q4_K_XL/…-0000{1..4}-of-00004.gguf` (engine `SOURCES_LEDGER.md`; listed there as a candidate, not approved) |
 | qwen-replicas | `sidecar`, `golden`, `calibration_tokens` | unavailable: local artifacts of the qualification |
 | qwen-replicas | `vocab` | unavailable: ships in the engine source (`data/draft-vocab`) |
 | ds41-pair | all | unavailable: no immutable revision of the Q2 GGUF is pinned in any ledger; drafter, overlay and packs are local artifacts |
 
-**Merging split files is documented only.** The Qwen model comes in four split parts, and the engine reads one
-GGUF (engine request R6). The merge needs a tool outside the pinned components, so Hydraweave never runs it. Merge
-the parts yourself into the path configured for the `model` asset. Its manifest bytes and sha256 then check the result.
+**Native split merging.** The node downloads every part using the existing size and SHA-256 checks,
+then merges declared `gguf-split` sources with the stdlib-only GGUF v3 merger. It validates split count,
+zero-based part indices and total tensor count, retains the first part's metadata except `split.*`,
+and recomputes tensor offsets using `general.alignment` (32 by default). Tensor payloads stream in
+1 MiB chunks. Source padding is preserved inside payload extents; new offsets are always aligned.
+The output is written to `<destination>.partial`, hashed, checked against `merged` when supplied,
+fsynced and renamed. Parts are deleted only after successful verification and promotion. Failed
+merges retain their parts; retries reverify retained parts. An interrupted merge can leave a `.partial`
+file: inspect and remove that file before retrying. Disk plans reserve room for both inputs and output.
+
+For a first provisioning without a `merged` pin, the plan says **first-time pin**. The computed
+size and SHA-256 are saved in the node's asset manifest and the digest is printed in progress output.
+This records the deterministic result of already pinned inputs; it is not a previously published
+merged-file pin. To pin future installs independently, copy those values into the source's `merged` object.
+Existing registered manifests still require their own integrity checks.
+
+Local merging is also available, without any hosting operation:
+
+```sh
+hydraweave gguf-merge part-00001.gguf part-00002.gguf -o model.gguf
+```
+
+The command prints the resulting bytes and SHA-256. Supply all parts in split index order.
+
+## Public-only starter
+
+Choose preset `qwen-starter` for **starter: correct but not the tuned speed**. Its only asset is
+the public model above. The binary uses eager execution without MTP, sidecar, golden, vocabulary
+packs or private calibration files. A fixed public vocabulary token ID `0` supplies its positional
+startup seed; HTTP requests supply their own prompts. This seed is not a calibration receipt.
+The starter carries no tuned throughput curves or MTP settings. Use the default router `nodes`
+policy; `auto` requires measurements supplied by the user. The tuned presets retain their optional
+performance levers and qualification artifacts. Hardware performance and token parity against tuned
+receipts have not been measured for the starter.
+
+Provisioning uses the existing node preparation flow after the user chooses this preset. On a fresh
+fake cluster its plan has no source blockers. This does not remove build, disk or runtime prerequisites.
+Hosting the tuned derived assets remains a [user decision](hosting-options.md).
 
 ## Flow
 Once per node, create the directory of the asset's manifest path and mark it as dedicated to Hydraweave downloads

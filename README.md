@@ -12,6 +12,10 @@ Many heads — nodes and GPUs — weaving one inference. Hydraweave places, sche
 
 **Renamed from hyperloom.** Existing imports and the `hyperloom` command remain available; old environment variables and config/state paths are read as fallbacks. See the [migration note](docs/rename.md).
 
+The public-only [Qwen starter](docs/model-downloads.md#public-only-starter) provisions its model from
+pinned public GGUF parts: **starter: correct but not the tuned speed**. Hosting derived artifacts for
+the tuned presets remains a [user decision](docs/hosting-options.md).
+
 **One control plane for AI inference across different machines.** Hydraweave brings a Windows workstation with an NVIDIA GPU and AMD Strix Halo Linux mini-PCs into one explicitly configured cluster. It installs pinned components, manages their lifecycle, starts a router, and gives operators a unified view of nodes, links, logs, and performance.
 
 > [!IMPORTANT]
