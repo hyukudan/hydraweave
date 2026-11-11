@@ -66,7 +66,8 @@ def _write(path, obj):
 
 def _runtime():
     from .paths import runtime_dir
-    return runtime_dir(config=config_path())
+    directory = runtime_dir(config=config_path())
+    return read_path(directory / "router-state.json").parent
 
 
 def _active(directory):

@@ -145,7 +145,7 @@ def test_remove_service_only_removes_agent_and_keeps_other_units(tmp_path):
 
 def test_node_cli_remove_service_does_not_prepare_root():
     with patch.object(node_agent, "remove_service", return_value={"actions": []}) as remove, \
-            patch.object(node_agent, "prepare") as prepare, patch("sys.stdout", io.StringIO()):
+            patch.object(node_agent, "prepare") as prepare, patch("sys.stdout", io.StringIO()),             patch.object(node_agent.sys, "platform", "linux"):
         assert node_agent.main(["remove-service", "--dry-run"]) == 0
     remove.assert_called_once_with(dry_run=True)
     prepare.assert_not_called()

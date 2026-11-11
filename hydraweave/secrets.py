@@ -21,7 +21,15 @@ def _directory():
 
 
 def runtime_dir():
-    return paths.runtime_dir()
+    current = paths.state_dir() / "run"
+    if current.exists():
+        return current
+    from .compat import read_path
+    if os.name == "nt":
+        legacy = read_path(Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "hydraweave/run")
+    else:
+        legacy = read_path(Path.home() / ".config/hydraweave/run")
+    return legacy if legacy.exists() else paths.runtime_dir()
 
 
 def _dpapi(data, decrypt=False):
