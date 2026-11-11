@@ -49,6 +49,8 @@ flowchart LR
 
 The CLI uses a versioned cluster configuration and pinned releases. Machines are added explicitly via SSH with host-key verification; GPU jobs run under supervised leases. The router can run locally or on a linked machine. See [architecture and lifecycle details](docs/README-technical.md#architecture).
 
+Hydraweave reports the installed package version, or a Git describe version when run from a checkout. The Nodes view marks discovered agents whose release differs from the controller; local development suffixes are ignored. See [version and node compatibility](docs/install.md#versions-and-node-compatibility).
+
 ## Getting started
 
 ### Open the control center

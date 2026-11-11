@@ -386,12 +386,24 @@ def _vramplan(args):
 
 
 def _version():
-    from . import __version__
-    try:
-        release = json.loads((repo_root() / "RELEASE.json").read_text(encoding="utf-8"))
-        return f"hydraweave {__version__} ({release['name']}, commit {release['commit'][:12]})"
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
-        return f"hydraweave {__version__} (checkout)"
+    from .version import release_manifest, version_info
+    version, commit = version_info()
+    name = release_manifest().get("name")
+    detail = ", ".join(part for part in (name if isinstance(name, str) else None,
+                                         f"commit {commit}" if commit else None) if part)
+    return f"hydraweave {version} ({detail or 'checkout'})"
+
+
+class _VersionAction(argparse.Action):
+    """--version computed only when asked, so ordinary commands never run git."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings, dest, nargs=0, default=default,
+                         help=help or "show program's version number and exit")
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(_version())
+        parser.exit()
 
 
 def up_command(args, *, orchestrate=None, load_cluster=None):
@@ -454,7 +466,7 @@ def _up_command(args, orchestrate, load_cluster):
 def build_parser(parser_class=argparse.ArgumentParser):
     """The command line; the portal API parses its argv with the same parser (one code path)."""
     parser = parser_class(prog="hydraweave")
-    parser.add_argument("--version", action="version", version=_version())
+    parser.add_argument("--version", action=_VersionAction)
     commands = parser.add_subparsers(dest="command", required=True)
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",

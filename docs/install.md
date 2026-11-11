@@ -35,6 +35,12 @@ Hydraweave never installs or changes any of these, needs no root, and never touc
 
 ## 2. Get Hydraweave
 
+### Versions and node compatibility
+
+`hydraweave --version` reports the installed package version and, when the source checkout is available, its Git commit. A checkout uses `git describe --tags --dirty --always`; an unavailable package and Git version fall back to `0.0.0+unknown`. `pyproject.toml` keeps the static setuptools build version so builds need no additional versioning dependency.
+
+The Nodes view compares an agent's announced version with the controller. A different release is shown as **Out of date**; local and development suffixes do not count as a release difference. An absent version is shown as unknown. `versions.lock` records component pins, and CI warns when those commits differ from the repository's submodule gitlinks. Run `python tools/check_versions_lock.py --strict` to make drift fail locally.
+
 ### From a release archive (recommended)
 
 A release is `hydraweave-<version>-g<commit>.zip` (Windows) or `.tar.gz` (Linux) with a `SHA256SUMS` file.

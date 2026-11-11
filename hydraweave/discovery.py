@@ -68,9 +68,13 @@ class Registry:
                 self.records.pop(row["id"], None)
 
     def rows(self):
+        from . import __version__
+        from .version import version_status
         with self.lock:
             self.records = {key: value for key, value in self.records.items() if value[0] > self.clock()}
-            return [dict(value[1], state="discovered, not adopted") for value in self.records.values()]
+            return [dict(value[1], state="discovered, not adopted",
+                         version_status=version_status(value[1].get("agent_version"), __version__))
+                    for value in self.records.values()]
 
 
 def pairs(rows):

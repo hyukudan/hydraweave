@@ -32,6 +32,8 @@ jobs:
       - name: Fetch the pinned TensorMeld submodule
         shell: bash
         run: bash tools/ci-fetch-tensormeld.sh
+      - name: Check versions.lock against submodule gitlinks
+        run: python tools/check_versions_lock.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: ${{ matrix.python }}

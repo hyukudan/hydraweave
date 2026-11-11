@@ -8,11 +8,14 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from hydraweave.version import package_version
 
 
 def command(kind, stage, output):
     recipe = json.loads((ROOT / "packaging/recipes.json").read_text())[kind]
-    result = ["fpm", "-s", "dir", "-t", kind, "--name", "hydraweave-node", "--version", "0.1.0",
+    result = ["fpm", "-s", "dir", "-t", kind, "--name", "hydraweave-node", "--version", package_version(),
               "--architecture", "all" if kind == "deb" else "noarch", "--license", "Apache-2.0",
               "--description", "Unprivileged Hydraweave node discovery agent", "--prefix", "/",
               "--chdir", str(stage), "--package", str(output)]
