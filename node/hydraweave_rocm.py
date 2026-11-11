@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import re
 
+VERBS = frozenset()  # helper module, no agent verbs
+
 
 def _version(path: Path) -> tuple[tuple[int, ...], str]:
     return tuple(int(part) for part in re.findall(r"\d+", path.name)), str(path)

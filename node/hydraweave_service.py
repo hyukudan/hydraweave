@@ -25,7 +25,8 @@ import hydraweave_lease as lease  # noqa: E402
 VERBS = {"service-install", "service-start", "service-stop", "service-status", "service-remove"}
 # "No deadline": supervise still needs a finite cutoff, so a unit restarts at most once a decade.
 DEADLINE_S = 10 * 365 * 86400
-COPIED = ("hydraweave-node", "hydraweave_lease.py", "hydraweave_service.py", "hydraweave_compat.py")
+COPIED = ("hydraweave-node", "hydraweave_lease.py", "hydraweave_service.py", "hydraweave_compat.py",
+          "hydraweave_rocm.py")
 SAFE_PATH = re.compile(r"/[A-Za-z0-9_./-]*")
 LAB_FILES = ("gpu-turn.sh", "gpu-turn-pair.sh", ".gpu-turn")
 # service-run exit codes. 0: requested stop. 1: engine failure (restarted). 3: readiness timeout and 4: refused

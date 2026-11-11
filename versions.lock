@@ -28,6 +28,6 @@
     "node_python": ">=3.10",
     "rocm": "gfx1151; qualified baseline core 10.1; detect ROCM_PATH, /opt/rocm, then newest rocm-* or core-*",
     "cuda": "13.0 (sm_120), MSVC 19.44 (VS 2022 17.14), CMake >= 3.24, Ninja",
-    "hip_configure": ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_HIP_ARCHITECTURES=gfx1151", "-DSTRIX_ENABLE_HIP_RUNTIME=ON", "-DSTRIX_ENABLE_EXPERIMENTAL_Q4K_A8_RUNTIME=ON"]
+    "hip_configure": ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_HIP_ARCHITECTURES=gfx1151", "-DCMAKE_HIP_COMPILER=/opt/rocm/core-10.1/bin/amdclang++", "-DSTRIX_ENABLE_HIP_RUNTIME=ON", "-DSTRIX_ENABLE_EXPERIMENTAL_Q4K_A8_RUNTIME=ON"]
   }
 }

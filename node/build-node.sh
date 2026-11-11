@@ -29,7 +29,10 @@ export HIPCXX="$ROCM_PATH/bin/amdclang++"
 export HIP_PATH="$ROCM_PATH"
 configure=()
 while IFS= read -r flag; do
-    [[ -z "$flag" ]] || configure+=("$flag")
+    [[ -z "$flag" ]] && continue
+    # The lock pins the qualified compiler path; build with the detected ROCm instead.
+    [[ "$flag" == -DCMAKE_HIP_COMPILER=* ]] && flag="-DCMAKE_HIP_COMPILER=$HIPCXX"
+    configure+=("$flag")
 done <<< "${HYDRAWEAVE_CONFIGURE:-}"
 # Per-family trellis recipe (hydraweave/engines.py): ds41 links the archive through STRIX_DS41_TRELLIS_*
 # (adapter HYDRAWEAVE_TRELLIS_API, v12 unless the preset says otherwise); minimax points STRIX_MINIMAX_TRELLIS_DIR at
