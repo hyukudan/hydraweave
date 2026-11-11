@@ -141,6 +141,11 @@ def _known_hosts():
 
 
 def _client(machine, known_hosts=None):
+    if machine.access == "agent":
+        from .onboarding import Client
+        from .recipes.service import configured_file
+        from .cli import config_path
+        return Client(machine, configured_file() or config_path())
     if machine.access != "ssh":
         raise OrchestrationError(f"{machine.id}: Phase 1a node work requires ssh access")
     return remote.Remote(machine, known_hosts or _known_hosts())

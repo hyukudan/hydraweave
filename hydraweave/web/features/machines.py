@@ -565,7 +565,7 @@ def collect_nodes(api, now):
     state = _state(api)
     cluster = api.cluster()
     targets = loopback_engines(launch_records(api))
-    machines = [m for m in cluster.machines.values() if m.access == "ssh"]
+    machines = [m for m in cluster.machines.values() if m.access in {"ssh", "agent"}]
     answers, threads, skipped = {}, [], {}
 
     def work(machine, release, payload):

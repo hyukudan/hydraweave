@@ -87,9 +87,17 @@
     const remote = (d.nodes || []).filter(n => n.access !== "local");
     if (!remote.length) return `<div class="cc-empty-inline"><strong>Add your first compute node</strong><p>Connect a Strix Halo machine using its address and SSH account. Its engine runs on that node.</p>${action("Add compute node", "add-node", {}, H().mutationReason(), true)}</div>`;
     return `<div class="cc-node-list">${remote.map(n => {
-      const live = observed.find(m => m.id === n.id) || {}, trust = n.trust === "pinned";
-      return `<article class="cc-node"><div><a class="cc-node-name" href="#/machine?id=${encodeURIComponent(n.id)}">${esc(n.id)}</a><div class="hint">${esc(n.http_address || n.address || n.ssh_target || n.access)}</div></div><div>${H().statusPill(live.health || "unknown")}<div class="hint">${trust ? "SSH identity verified" : "Verify SSH identity"}</div></div><div class="cc-node-actions">${trust ? action("Check node", "test-node", {machine:n.id}, H().mutationReason()) : action("Verify host key", "trust-node", {machine:n.id}, H().mutationReason())}${action("Edit", "edit-node", {machine:n.id}, H().mutationReason())}</div></article>`;
+      const live = observed.find(m => m.id === n.id) || {}, trust = ["pinned", "paired"].includes(n.trust);
+      return `<article class="cc-node"><div><a class="cc-node-name" href="#/machine?id=${encodeURIComponent(n.id)}">${esc(n.id)}</a><div class="hint">${esc(n.http_address || n.address || n.ssh_target || n.access)}</div></div><div>${H().statusPill(live.health || "unknown")}<div class="hint">${n.trust === "paired" ? "Agent paired" : trust ? "SSH identity verified" : "Verify SSH identity"}</div></div><div class="cc-node-actions">${trust ? action("Check node", "test-node", {machine:n.id}, H().mutationReason()) : action("Verify host key", "trust-node", {machine:n.id}, H().mutationReason())}${action("Edit", "edit-node", {machine:n.id}, H().mutationReason())}</div></article>`;
     }).join("")}</div>`;
+  }
+  function discovered() {
+    const d = H().state.docs.discovery || {}, rows = d.nodes || [];
+    const pairText = (d.pairs || []).map(p => `<p class="hint">USB4 pair available: ${p.map(esc).join(" + ")}</p>`).join("");
+    return H().card("Discovered on your LAN", `<p>On each worker: <code>curl -fsSL http://&lt;controller&gt;:18700/node/bootstrap.sh | sh</code></p>${d.error ? `<p role="alert">${esc(d.error)}</p>` : ""}${pairText}${rows.map(n => {
+      const profiles = (doc().profiles || []).filter(p => (p.machines || p.nodes || []).includes(n.machine));
+      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)}</p></div>${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
+    }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs. Engines use the existing GPU queue when launched.</p>`);
   }
   function render() {
     const d = doc(), cfg = d.configuration || {}, ready = d.configured === true || cfg.state === "valid";
@@ -101,7 +109,7 @@
     const progress = ready ? `<div class="cc-main-grid">${H().card("Getting ready", steps(), "A guided path from installation to inference")}${H().card("Quick access", `<div class="cc-shortcuts"><a href="#/components"><strong>Components & updates</strong><span>Check versions and prepare downloads</span></a><a href="#/engine-settings"><strong>Engine configuration</strong><span>Profiles, model files and supported options</span></a><a href="#/recipes"><strong>Run a model</strong><span>Choose and deploy an inference recipe</span></a><a href="#/overview"><strong>Live monitoring</strong><span>Node health, memory and throughput</span></a></div>`)}</div>` : "";
     const lifecycle = d.lifecycle || {};
     const next = `<section class="card cc-next" aria-labelledby="cc-next-title"><span class="cc-eyebrow">Keep things moving</span><h2 id="cc-next-title">Next steps</h2><a class="cc-next-link" href="#/turns"><strong>Review GPU turns</strong><span>See holders and waiting tickets <b aria-hidden="true">↗</b></span></a><a class="cc-next-link" href="#/components"><strong>Check components</strong><span>Review versions and node tools <b aria-hidden="true">↗</b></span></a><button type="button" class="cc-next-link" data-page-action="cc-manage-nodes"><strong>Manage nodes</strong><span>Connections and SSH identities <b aria-hidden="true">↓</b></span></button><p class="cc-queue-note">Engines start only inside a GPU ticket queue. Hydraweave reads the queue; it never writes it.</p></section>`;
-    return header + invalid + initial + summary + weave() + `<div class="cc-home-grid">${engineCatalog()}${next}</div>`
+    return header + invalid + initial + summary + weave() + discovered() + `<div class="cc-home-grid">${engineCatalog()}${next}</div>`
       + `<div class="cc-setup-heading" id="cc-node-management" tabindex="-1"><span class="cc-eyebrow">Workspace management</span><h2>Keep your cluster ready.</h2></div>` + controller() + (notice ? `<p class="cc-notice" role="status">${esc(notice)}</p>` : "") + progress
       + (ready ? H().card("Your nodes", nodes() + `<div class="cc-card-footer">${action("Add node", "add-node", {}, H().mutationReason())}${link("All machines", "#/devices")}${link("Topology & links", "#/topology")}</div>`, "Connected explicitly; status comes from each machine") : "")
       + H().card("Where does Hydraweave run?", `<p>The panel runs on <strong>${esc(d.controller?.hostname || "this computer")}</strong>. The request router can run here or on a configured Linux node. The engine's rank 0 is a compute role and does not have to host the panel.</p><p class="hint">${esc(typeof d.recommendation === "string" ? d.recommendation : d.recommendation?.detail || d.recommendation?.note || "For regular use, choose an always-on controller. A laptop can connect to it through an SSH tunnel.")}</p>${lifecycle.note ? `<div class="cc-lifecycle"><strong>${esc(lifecycle.mode || "Process lifecycle")}</strong><p>${esc(lifecycle.note)}</p></div>` : ""}${ready ? action("Choose router location", "router", {}, H().mutationReason()) : ""}`);
@@ -189,6 +197,12 @@
       if (a === "cc-manage-nodes") { const target = document.getElementById("cc-node-management"); target?.scrollIntoView({block:"start"}); target?.focus({preventScroll:true}); }
       else if (a === "cc-initialize") { button.disabled = true; await UI().post("setup/initialize",{}); notice="Workspace created. Add your compute nodes to continue."; H().announce(notice); await H().refresh(); }
       else if (a === "cc-add-node") await openMachine();
+      else if (a === "cc-adopt") UI().open({title:"Adopt node",confirm:"Adopt",body:`<label class="field">Pairing code from the node console<input class="inp" id="cc-pair-code" inputmode="numeric" autocomplete="off"></label>`,submit:async () => {
+        const result = await UI().post("discovery/adopt", {id:button.dataset.id,code:document.getElementById("cc-pair-code").value.trim()});
+        notice = `Adopted ${result.adopted}${result.provisioning_error ? ` · ${result.provisioning_error}` : ""}`;
+        await H().refresh();
+      }});
+      else if (a === "cc-provision") await H().mutate("discovery/provision", {machine:mid,profile:button.dataset.profile});
       else if (a === "cc-edit-node") await openMachine(mid);
       else if (a === "cc-trust-node") await trustNode(mid);
       else if (a === "cc-test-node") await H().mutate("ops/machine-test",{machine:mid});
@@ -199,7 +213,7 @@
   (window.HydraweavePages ||= {})["control-center"] = {
     title:"Home",group:"Control center",order:1,home:true,
     icon:'<path d="M3 9l7-6 7 6v8h-5v-5H8v5H3z"/>',
-    endpoints:() => ["setup", ...(H().pages.turns ? ["turns"] : [])],
+    endpoints:() => ["setup", "discovery", ...(H().pages.turns ? ["turns"] : [])],
     ready:() => !!H().state.docs.setup,
     error:() => H().state.errors.setup || "",render,
   };

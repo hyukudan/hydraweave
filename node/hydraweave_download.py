@@ -154,7 +154,7 @@ def lock_part(part):
     return fd
 
 
-def fetch(row, stop, turn_check):
+def fetch(row, stop, turn_check, progress=lambda have, total: None):
     """Run the planned command for one file and verify it; returns a failure reason or None."""
     part, destination = Path(row["part"]), Path(row["destination"])
     if os.path.lexists(destination):
@@ -163,9 +163,11 @@ def fetch(row, stop, turn_check):
         lock = lock_part(part)
     except ValueError as exc:
         return str(exc)
+    process = None
     try:
         process = subprocess.Popen(row["argv"], stdin=subprocess.DEVNULL, start_new_session=True)
         while process.poll() is None:
+            progress(part.stat().st_size if part.exists() else 0, row["bytes"])
             reason = stop() or turn_check()
             if reason:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -175,6 +177,7 @@ def fetch(row, stop, turn_check):
         if process.returncode:
             return f"download command exited {process.returncode}; rerun to resume"
         size = part.stat().st_size
+        progress(size, row["bytes"])
         if size != row["bytes"]:
             part.unlink(missing_ok=True)
             return "verification failed (size); partial file removed"
@@ -205,6 +208,12 @@ def fetch(row, stop, turn_check):
             part.unlink(missing_ok=True)
         return None
     finally:
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            process.wait()
         if lock is not None:
             os.close(lock)
 
@@ -230,7 +239,10 @@ def job_main(spec_path):
 
     try:
         for row in spec["files"]:
-            reason = fetch(row, lambda: "cancelled" if stop_file.exists() else None, turn)
+            def progress(have, total):
+                state["progress"] = {"file": row["destination"], "bytes": have, "total_bytes": total}
+                install.atomic_json(path, state)
+            reason = fetch(row, lambda: "cancelled" if stop_file.exists() else None, turn, progress)
             if reason:
                 raise ValueError(reason)
             state["done"].append(row["destination"])

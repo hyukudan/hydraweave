@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import socket
 
-from hydraweave import config, engines, nodegate, orchestrate, procs
+from hydraweave import config, engines, nodegate, orchestrate, procs, onboarding
 from hydraweave.recipes import service
 from . import ops
 
@@ -74,6 +74,7 @@ def overview(api, query):
     machines = cluster.machines if cluster else {}
     local = next((m for m in machines.values() if m.access == "local"), None)
     pinned = ops._pinned(api, cluster)
+    paired = onboarding.credentials(api.config_path)
     cached = api.cached_snapshot() or {}
     observed = {row["id"]: row for row in (cached.get("devices", {}).get("machines") or [])}
     nodes = []
@@ -92,15 +93,15 @@ def overview(api, query):
         evidence = observed.get(mid, {})
         nodes.append({"id": mid, "os": machine.os, "access": machine.access,
                       "address": machine.http_address, "roles": roles,
-                      "trust": "local" if machine.access == "local" else
+                      "trust": "paired" if mid in paired else "local" if machine.access == "local" else
                       "pinned" if pinned.get(mid) else "unverified",
                       "state": evidence.get("health"), "lab_mode": machine.lab_mode,
                       "last_seen": evidence.get("last_seen"),
                       "configured": True, "observed": evidence.get("last_seen") is not None,
                       "note": "Configure this host as an SSH worker as well if it will run inference."
                       if machine.access == "local" else None})
-    workers = [row for row in nodes if row["access"] == "ssh" and row["os"] == "linux"]
-    trustworthy = bool(workers) and all(row["trust"] == "pinned" for row in workers)
+    workers = [row for row in nodes if row["access"] in {"ssh", "agent"} and row["os"] == "linux"]
+    trustworthy = bool(workers) and all(row["trust"] in {"pinned", "paired"} for row in workers)
     assets_declared = bool(profiles) and all(not row["missing_assets"] for row in profiles)
     any_running = any(row.get("state") == "running" for row in
                       (cached.get("profiles", {}).get("profiles") or []))
@@ -110,9 +111,9 @@ def overview(api, query):
                               "Create a local configuration, then add your machines."),
          "href": "#home", "action": "setup/initialize" if state == "missing" else None},
         {"id": "nodes", "title": "Add your Linux nodes", "done": bool(workers),
-         "detail": "Add SSH addresses and the installation folder on each machine.", "href": "#ops"},
+         "detail": "Run the node bootstrap command, then adopt the discovered machines.", "href": "#home"},
         {"id": "trust", "title": "Verify the node identities", "done": trustworthy,
-         "detail": "Compare and pin SSH fingerprints, then test each connection.", "href": "#ops"},
+         "detail": "Enter each node's console pairing code, or verify its existing SSH identity.", "href": "#home"},
         {"id": "profile", "title": "Choose a model and its nodes", "done": bool(profiles),
          "detail": "Create a profile from a supported preset in Engine settings.", "href": "#engine-settings"},
         {"id": "assets", "title": "Assign model files", "done": assets_declared,

@@ -46,7 +46,7 @@ def eligible(cluster):
             skipped[mid] = "not a Linux node"
         elif not machine.lab_mode or not machine.lab_dir:
             skipped[mid] = "no lab directory configured (lab_mode with lab_dir)"
-        elif machine.access not in ("ssh", "local"):
+        elif machine.access not in ("ssh", "local", "agent"):
             skipped[mid] = "agent access is not supported"
         else:
             chosen.append(machine)

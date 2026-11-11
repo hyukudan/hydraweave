@@ -132,7 +132,7 @@ def sampler_gate(api, machine, poller=None, now=None):
     worker thread calls enter() before its node calls and release() after."""
     from hydraweave import nodegate, pollbudget
     config_path = getattr(api, "config_path", None)
-    if machine.access != "ssh" or config_path is None:
+    if machine.access not in {"ssh", "agent"} or config_path is None:
         return True, (lambda: None), (lambda: None)
     if poller is not None and pollbudget.for_api(api).node(machine.id, poller, now=now) is not None:
         return False, None, None
@@ -344,9 +344,9 @@ def occupancy(api, cluster, mid, inside_job=False):
             pass
         except Exception as exc:
             return f"saved launch of {profile} unreadable: {exc}", True
-    if machine is not None and machine.access not in ("ssh", "local"):
+    if machine is not None and machine.access not in ("ssh", "local", "agent"):
         return f"{mid} uses {machine.access} access: its lease records cannot be read", True
-    if machine is not None and machine.access == "ssh":
+    if machine is not None and machine.access in {"ssh", "agent"}:
         try:
             reply = _node_call(api, machine, "status", {"root": machine.install_root})
             if not isinstance(reply, dict) or reply.get("error"):

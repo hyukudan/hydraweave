@@ -162,6 +162,7 @@ class FixtureServer:
 
 
 def fixture_server(args):
+    os.environ["HYDRAWEAVE_NO_DISCOVERY"] = "1"  # Fixture only permits loopback traffic.
     from hydraweave import cli, config, orchestrate, remote, render, secrets
     from hydraweave.web import api as web_api
     from hydraweave.web import recipes as recipe_web

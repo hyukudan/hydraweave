@@ -71,7 +71,7 @@ def document(api, query):
         profiles.append(row)
     return api.document("engine-settings", version=version, profiles=profiles,
                         presets=[settings.preset_document(name) for name in config.PRESET_NAMES],
-                        machines=[{"id": m.id, "os": m.os, "access": m.access, "selectable": m.os == "linux" and m.access == "ssh"}
+                        machines=[{"id": m.id, "os": m.os, "access": m.access, "selectable": m.os == "linux" and m.access in {"ssh", "agent"}}
                                   for m in cluster.machines.values()],
                         writes_apply="next-launch", runtime_applied=False,
                         note="Settings are checked against the pinned release. Saving rechecks active launches and node leases.")
