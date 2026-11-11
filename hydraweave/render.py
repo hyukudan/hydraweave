@@ -11,7 +11,7 @@ import re
 import sys
 
 from . import engines, knobs
-from .config import ConfigError, family, listen, preset, validate_overrides
+from .config import ConfigError, deployment_spec, family, listen, preset, validate_overrides
 from .paths import repo_root
 
 
@@ -123,6 +123,15 @@ def render_processes(cluster, profile_name, *, diagnostics=(), run=None) -> list
                 argv.extend(tokens)
             else:
                 argv.append(token.format_map(values))
+        deploy = deployment_spec(profile, data)
+        if deploy is not None:
+            # The resolver owns capacity. Explicit profile overrides are applied
+            # below and remain pins; preset defaults must not pin a device tier.
+            for flag in ("--slots", "--capacity", "--context"):
+                if flag in argv:
+                    index = argv.index(flag)
+                    del argv[index:index + 2]
+            argv.extend(("--deploy", deploy))
         for flag, value in profile.get("overrides", {}).items():
             if flag in argv:
                 argv[argv.index(flag) + 1] = str(value)

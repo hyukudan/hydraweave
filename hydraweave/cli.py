@@ -88,10 +88,10 @@ def _router_env():
     env = dict(os.environ)
     source = repo_root() / "third_party" / "tensormeld" / "src"
     if source.is_dir():
-        env["PYTHONPATH"] = str(source)
+        env["PYTHONPATH"] = os.pathsep.join([str(repo_root()), str(source)])
     else:
         _module("tensormeld")
-        env.pop("PYTHONPATH", None)
+        env["PYTHONPATH"] = str(repo_root())
     return env
 
 
@@ -183,7 +183,7 @@ def _router_run(args):
     rendered = json.loads(path.read_text(encoding="utf-8"))
     endpoint = _endpoint(rendered)
     child = procs.LocalChild(
-        [str(Path(sys.executable).absolute()), "-m", "tensormeld", "serve-replicas", str(path)],
+        [str(Path(sys.executable).absolute()), "-m", "hydraweave.deployment", "serve-replicas", str(path)],
         _router_env(), directory, "router", port=endpoint)
     stop_path = directory / (args.token + ".stop")
     interrupted = False
@@ -334,6 +334,17 @@ VRAMPLAN_ENGINES = ("minimax-rtx-prefill", "qwen-rtx-prefill", "ds41-rtx-prefill
 def _vramplan(args):
     vramplan, placement = _module("hydraweave.vramplan"), _module("hydraweave.placement")
     params = {}
+    if args.deployment_json:
+        params["deployment"] = _module("hydraweave.config").read_json(args.deployment_json)
+        params["rank"] = args.deployment_rank
+        plan = placement.plan(args.engine, args.model, None, **params)
+        return dict(plan.to_dict(), explain=vramplan.explain(plan).splitlines())
+    if args.model is None or args.vram_cap_gib is None:
+        raise ValueError("vramplan needs --model and --vram-cap-gib, or --deployment-json")
+    if args.device_free_gib is not None:
+        if args.engine != "ds41-rtx-prefill":
+            raise ValueError("--device-free-gib is for ds41-rtx-prefill")
+        params["free_at_start_gib"] = args.device_free_gib
     if args.engine.endswith("-prefill"):
         if args.positions is None:
             raise ValueError(f"{args.engine} needs --positions")
@@ -593,9 +604,12 @@ def build_parser(parser_class=argparse.ArgumentParser):
     vplan = commands.add_parser("vramplan", help="RTX placement for a VRAM cap from the model files (prints the flags)")
     # Literal list (the parser imports nothing); hydraweave.placement.ENGINES is the same set (tested).
     vplan.add_argument("engine", choices=VRAMPLAN_ENGINES)
-    vplan.add_argument("--model", required=True, help="model file or directory (headers only are read)")
-    vplan.add_argument("--vram-cap-gib", type=float, required=True)
+    vplan.add_argument("--model", help="model file or directory (headers only are read)")
+    vplan.add_argument("--vram-cap-gib", type=float)
     vplan.add_argument("--host-gib", type=float, help="pinned host budget (required for ds41-rtx-prefill)")
+    vplan.add_argument("--deployment-json", type=Path, help="engine --deploy-check or /v1/deployment JSON; uses its measured budget")
+    vplan.add_argument("--deployment-rank", type=int, default=0)
+    vplan.add_argument("--device-free-gib", type=float, help="legacy CUDA planner: measured free memory after context creation")
     vplan.add_argument("--positions", type=int, help="prefill engines: prompt / context positions")
     vplan.add_argument("--layers", type=int, help="minimax-rtx-prefill: the engine's --layers subset (validation)")
     vplan.add_argument("--blob-cache", help="minimax-rtx-prefill: three-tier mode (--pinned + this file tier)")

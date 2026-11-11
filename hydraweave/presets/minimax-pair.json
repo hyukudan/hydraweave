@@ -1,4 +1,5 @@
 {
+  "deploy": null,
   "family": "minimax-pair",
   "qualified": true,
   "receipt": "MiniMax engine s2 serve, all defaults on (wave4/mmopt/fork-report.md section 3)",

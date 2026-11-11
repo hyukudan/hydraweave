@@ -184,6 +184,17 @@ def family(name):
     return preset(name).get("family", name)
 
 
+def deployment_spec(profile, data):
+    deploy = profile.get("deploy", data.get("deploy"))
+    if deploy is None:
+        return None
+    record(deploy, "deploy", ("spec",))
+    spec = text(deploy["spec"], "deploy.spec")
+    if spec != "auto":
+        absolute(spec, "deploy.spec", "linux")
+    return spec
+
+
 def validate_overrides(overrides, data):
     record(overrides, "overrides", optional=data["knobs"])
     for key, value in overrides.items():
@@ -346,9 +357,10 @@ def parse(obj: dict) -> Cluster:
     for name, p in profiles.items():
         identifier(name, "profile name")
         record(p, "profile", optional=("preset", "nodes", "rank0", "rank1", "port", "receipt", "overrides", "api_key_files",
-                                       "release_id", "prefill_service", "advanced"))
+                                       "release_id", "prefill_service", "advanced", "deploy"))
         kind = p.get("preset", name)
         data = preset(kind)
+        deployment_spec(p, data)
         from . import engines
         engine = engines.release_adapter(kind)
         engines.check_components(data, f"preset {kind}")

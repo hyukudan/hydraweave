@@ -1,4 +1,5 @@
 {
+  "deploy": null,
   "family": "qwen-replicas",
   "qualified": true,
   "receipt": "qwen w5 defaults validation w5g (wave4/qwenint/w5-e2e.md)",

@@ -9,7 +9,7 @@ from copy import deepcopy
 import time
 
 from . import engines, remote, render
-from .orchestrate import OrchestrationError, _call, _client, _node_name, _preset_name, _profile, _url, prelaunch
+from .orchestrate import OrchestrationError, _call, _client, _node_name, _preset_name, _profile, _url, deployment_checks, prelaunch
 
 
 OPERATIONS = ("install", "start", "stop", "status", "remove")
@@ -37,12 +37,15 @@ def _processes(cluster, profile, settings, kind, mids, clients):
     selected.profiles[profile]["release_id"] = prepared["release_id"]
     selected.profiles[profile]["api_key_files"] = paths = prepared["node_paths"]
     result = {}
-    for spec in render.render_processes(selected, profile):
+    processes = render.render_processes(selected, profile)
+    plans = deployment_checks(selected, processes, clients, kind, settings)
+    for spec in processes:
         machine = cluster.machines[spec.machine_id]
         port = int(spec.argv[spec.argv.index("--http-port") + 1])
         result[spec.machine_id] = {"name": _node_name(spec.machine_id), "machine": "local", "argv": spec.argv,
                                    "env": spec.env, "ready": spec.ready, "key_file": paths[spec.machine_id],
                                    "health_url": _url({"address": machine.http_address, "port": port}, "/health"),
+                                   "deployment_id": plans.get(spec.machine_id, {}).get("deployment_id"),
                                    "ready_timeout_s": 600}
     return prepared["release_id"], result
 

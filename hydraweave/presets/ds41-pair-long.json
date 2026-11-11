@@ -1,4 +1,5 @@
 {
+  "deploy": null,
   "family": "ds41-pair",
   "qualified": true,
   "receipt": "ds41-rtx long-context pair (main 21:05: --context 33024 --slots 2, as the W2 end-to-end runs)",

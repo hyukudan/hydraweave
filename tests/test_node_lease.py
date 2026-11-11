@@ -268,13 +268,14 @@ class LeaseLogicTests(LeaseFixture):
         with patch.object(lease, "http", side_effect=lambda *a, **kw: events.append("drain")), \
                 patch.object(lease, "group_signal", side_effect=lambda proc, sig: events.append((proc.pid, sig))), \
                 patch.object(lease, "signal", SimpleNamespace(**dict(vars(signal), SIGKILL=9))), \
-                patch.object(lease.time, "monotonic", side_effect=[0, 31]):
+                patch.object(lease.time, "monotonic", side_effect=[0, 0, 31]):
             lease.stop_children(processes)
         self.assertEqual(events[0], "drain")
-        self.assertEqual(events[1], (101, signal.SIGTERM))
-        self.assertEqual(events[2], (100, signal.SIGTERM))
+        self.assertEqual(events[:2], ["drain", "drain"])
+        self.assertEqual(events[2], (101, signal.SIGTERM))
+        self.assertEqual(events[3], (100, signal.SIGTERM))
         # Both groups are killed even if their leaders have already left children.
-        self.assertEqual([event[0] for event in events[3:]], [100, 101])
+        self.assertEqual([event[0] for event in events[4:]], [100, 101])
 
     def test_ds41_follower_stops_without_an_http_drain(self):
         proc = dict(self.spec["processes"][0], ready="ds41-json",

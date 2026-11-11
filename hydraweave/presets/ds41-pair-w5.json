@@ -1,4 +1,5 @@
 {
+  "deploy": null,
   "family": "ds41-pair",
   "qualified": true,
   "receipt": "integrate/ds41-w5 combined confirmation (wave4/dsint/report.md)",

@@ -566,7 +566,7 @@ def adapter_ready(adapter, stdout, stderr, rank=0):
     return False
 
 
-def http(url, *, drain=False, key_file=None, timeout=0.5):
+def http(url, *, drain=False, key_file=None, timeout=0.5, deployment_id=None):
     parsed = urlsplit(url)
     if drain:
         # Admin calls stay on the process's host, even when health binds a private IP.
@@ -579,7 +579,20 @@ def http(url, *, drain=False, key_file=None, timeout=0.5):
                       headers=headers, method="POST" if drain else "GET")
     try:
         with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
-            return response.status == 200
+            if response.status != 200:
+                return False
+            if drain or deployment_id is not None:
+                body = response.read(MAX_LOG + 1)
+                if len(body) > MAX_LOG:
+                    return False
+                try:
+                    value = json.loads(body)
+                except (ValueError, UnicodeError):
+                    return deployment_id is None
+                if deployment_id is not None:
+                    return isinstance(value, dict) and value.get("deployment_id") == deployment_id
+                return value if isinstance(value, dict) else True
+            return True
     except OSError:
         return False
 
@@ -666,19 +679,31 @@ class Child:
 
     def check_ready(self):
         stdout, stderr = self.logs()
+        identity = self.proc.get("deployment_id")
         return (adapter_ready(self.proc["ready"], stdout, stderr, rank_of(self.proc))
-                and http(self.proc["health_url"]))
+                and http(self.proc["health_url"], **({"deployment_id": identity} if identity is not None else {})))
+
+    def drain(self, deadline):
+        # Pair followers never serve HTTP. Peer owners run this on their host.
+        if self.peer or self.proc["ready"] == "http-health" or rank_of(self.proc) != 0:
+            return
+        while self.process.poll() is None:
+            try:
+                reply = http(self.proc["health_url"], drain=True, key_file=key_file(self.proc))
+            except (ValueError, OSError):
+                return
+            if (not isinstance(reply, dict) or reply.get("status") != "draining"
+                    or reply.get("drained") is not False):
+                return  # Legacy endpoint or completed drain.
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.05)
 
     def terminate(self):
         if self.peer:
             if self.process.stdin and not self.process.stdin.closed:
                 self.process.stdin.close()
         else:
-            if self.proc["ready"] == "ds41-json" and not ds41_follower(self.proc) and self.process.poll() is None:
-                try:
-                    http(self.proc["health_url"], drain=True, key_file=key_file(self.proc))
-                except (ValueError, OSError):
-                    pass
             group_signal(self.process, signal.SIGTERM)
 
     def close(self):
@@ -687,6 +712,10 @@ class Child:
 
 
 def stop_children(children, leader_grace=30):
+    drain_deadline = time.monotonic() + 30
+    for child in children:
+        if child.process is not None:
+            child.drain(drain_deadline)
     # A MiniMax rank 0 stops first (SIGTERM ends its scheduler, which sends the shutdown block to rank 1); the
     # others are signalled after it exits or after leader_grace, then share the grace period below.
     leaders = [child for child in children if child.process is not None and pair_leader(child)]
