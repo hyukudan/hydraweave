@@ -356,11 +356,21 @@ def service_command(operation, *, run=None):
     return 0
 
 
+def remove_service(*, dry_run=False, runner=None, unit_dirs=None, home=None):
+    """Stop, disable and remove only the agent's user unit; retain all data."""
+    from .uninstall import local_options, remove
+    options = local_options()
+    return remove(unit_dirs=options["unit_dirs"] if unit_dirs is None else unit_dirs,
+                  user_unit_dirs=options["user_unit_dirs"] if unit_dirs is None else unit_dirs,
+                  home=home, dry_run=dry_run, runner=runner, node_only=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", nargs="?", choices=("serve", "install-service", "pair"))
+    parser.add_argument("operation", nargs="?", choices=("serve", "install-service", "pair", "remove-service"))
     parser.add_argument("--root", default=str(Path.home() / "hydraweave"))
     parser.add_argument("--lab-dir")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--listen", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=18701)
     parser.add_argument("--no-announce", action="store_true", default=os.environ.get("HYDRAWEAVE_NO_ANNOUNCE") == "1")
@@ -374,6 +384,9 @@ def main(argv=None):
     if args.operation == "pair":
         with urlopen(Request(f"http://127.0.0.1:{args.port}/pair-code", data=b"{}", headers={"Content-Type": "application/json"}), timeout=5) as response:
             print("Hydraweave pairing code: " + json.loads(response.read())["code"])
+        return 0
+    if args.operation == "remove-service":
+        print(json.dumps(remove_service(dry_run=args.dry_run), indent=2))
         return 0
     args.lab_dir = args.lab_dir or default_lab_dir()
     if args.operation == "install-service":

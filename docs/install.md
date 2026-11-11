@@ -199,7 +199,7 @@ Per node, set:
 - `install_root`: an absolute path the node user owns or can create, for example `/home/<user>/hydraweave`. It must
   not be or contain your home directory, not be inside a git checkout, and not overlap the lab directory or any asset path.
   Hydraweave marks it and writes only inside it (plus `~/.hydraweave-boot` for the node tool).
-- `lab_mode` and `lab_dir`: in the lab, `lab_mode: true` (the default) and the lab directory that holds the turn scripts;
+- `lab_mode` and `lab_dir`: new workspaces default to `lab_mode: false`; in a shared lab, explicitly set `lab_mode: true` and the lab directory that holds the turn scripts;
   every GPU process then runs inside a GPU turn. This guide covers lab mode only.
 - `model_roots` (optional): up to 16 absolute directories that hold this machine's models. Without it, a machine
   with a `lab_dir` uses `<lab_dir>/models`. The model library scans these roots, and extra roots inside them can be
@@ -303,10 +303,54 @@ powershell -ExecutionPolicy Bypass -File .\windows\install.ps1 -Remove hydraweav
 Stop every profile (`hloom down`) before switching releases. Your configuration, keys and host keys in
 `%APPDATA%\hydraweave` are shared by all releases and are never removed by the installer.
 
-To remove Hydraweave from the control machine: `hloom down` for each profile, then delete `%LOCALAPPDATA%\hydraweave`,
-the shortcut `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Hydraweave.lnk`, and, if you no longer need them,
-`%APPDATA%\hydraweave` (configuration, secrets, pinned host keys). On the nodes, the install root and `~/.hydraweave-boot`
-are the only things Hydraweave created; assets are never touched.
+Stop running profiles with `hydraweave down <profile>` before uninstalling. Preview the removal first:
+
+```sh
+hydraweave uninstall --dry-run
+hydraweave uninstall --nodes --dry-run                 # include configured SSH nodes
+hydraweave uninstall --nodes --yes                     # keep models and configuration
+hydraweave uninstall --nodes --remove-models --purge-config --yes
+hydraweave-node remove-service --dry-run               # only the discovery agent's user unit
+hydraweave-node remove-service
+```
+
+Without `--yes`, uninstall prints the plan and asks for confirmation. Dry-run never
+stops services or deletes files. Uninstall stops and disables the project's portal/UI,
+agent and generated engine user units (`hl-*.service` and `hydraweave-*.service`).
+Vendor unit files stay package-owned. A failed service stop/disable prevents directory
+removal on that host. SSH nodes use pinned host keys and require no bootstrap or root.
+
+Only directories with a regular `.hydraweave-root` or `.hydraweave-assets` marker
+can be deleted. Symlink/junction roots, unmarked directories (including older boot
+and release directories), and unrelated units are retained. Models are kept by
+default (`--keep-models`); only `--remove-models` opts out. A marked install root
+containing retained models or config is kept as a whole. The output lists retained
+paths, reasons and logical sizes in bytes. `--purge-config` also requires a marker.
+Unmarked paths, Python packages and Windows shortcuts can be removed manually
+after reviewing the plan; this command does not use administrative privileges.
+
+New user paths follow XDG on Linux: `~/.config/hydraweave` for config,
+`~/.local/state/hydraweave/run` for runtime state, and `~/.local/share/hydraweave`
+for data. `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` override those
+bases (relative XDG values are ignored). Windows uses `%APPDATA%\hydraweave`
+for config and `%LOCALAPPDATA%\hydraweave` for data, with runtime state under
+`state\run`. `HYDRAWEAVE_HOME` instead contains `config`, `state` and `data`.
+Existing config/secrets and runtime directories remain readable in place; an
+existing run directory is reused. Explicit workspace paths remain local to that
+workspace. No automatic migration deletes data, and existing node `install_root`
+and model directories stay unchanged. Uninstall never adds ownership markers to
+existing unmarked directories.
+
+### Debian packaging (Ubuntu 22.04 and 24.04)
+
+`python3 packaging/build.py --dry-run` stages a `.deb` and prints its fpm command
+without fpm, networking or root. Add `--format rpm` for the RPM recipe; omit
+`--dry-run` only on a packaging host with fpm installed. CI checks the Debian dry-run
+with each Ubuntu release's distribution Python. Runtime dependencies include
+Python 3.10+, venv, curl, git and `python3-tomli`. CMake and Ninja are recommendations
+for optional source builds, with no CMake 3.24 requirement for package installation.
+On Python 3.10 without tomli, JSON recipes and JSON `--set` values work; TOML
+reports how to install tomli. A normal Python package install supplies tomli on 3.10.
 
 ## Troubleshooting
 

@@ -517,6 +517,25 @@ class Remote:
             raise RemoteError("invalid remote boot path") from exc
         self.node_path = _NODE_PATHS[(self.alias, self.target, self.port)] = path
 
+    def remove_install(self, payload, *, dry_run=True):
+        """Run the marker-checked remover through pinned SSH, without bootstrapping."""
+        source = Path(__file__).with_name("uninstall.py").read_text(encoding="utf-8")
+        source += '''
+import sys
+options = json.loads(sys.argv[1])
+home = Path.home()
+root = Path(options["root"])
+base = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+units = (base if base.is_absolute() else home / ".config") / "systemd/user"
+print(json.dumps(remove(roots=[root, home / ".hydraweave-boot"],
+    models=[*options["models"], root.parent / "hydraweave-models", root / "models"],
+    unit_dirs=[units, home / ".config/systemd/user", Path("/usr/lib/systemd/user"), Path("/lib/systemd/user")],
+    user_unit_dirs=[units, home / ".config/systemd/user"],
+    keep_models=options["keep_models"], dry_run=options["dry_run"])))
+'''
+        command = "python3 - " + shlex.quote(json.dumps({**payload, "dry_run": dry_run}))
+        return json.loads(self._ssh(command, source.encode("utf-8"), timeout=180))
+
     def _tool_path(self, timeout, cancel_event):
         if self.node_path is None:
             self.node_path = _NODE_PATHS.get((self.alias, self.target, self.port))

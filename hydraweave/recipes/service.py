@@ -114,7 +114,8 @@ def layers_dir():
 
 
 def runtime_dir():
-    return config_dir() / "run"
+    from ..paths import runtime_dir as run
+    return run(config=config_file())
 
 
 def facts_dir():
