@@ -9,7 +9,6 @@ from contextlib import ExitStack
 from copy import deepcopy
 import os
 from pathlib import Path
-import platform
 import socket
 
 from hydraweave import config, engines, nodegate, orchestrate, procs
@@ -60,6 +59,11 @@ def _requirements(cluster):
                      all(not cluster.machines[mid].lab_mode for mid in nodes),
                      "state": "configured", "installed": None})
     return rows
+
+
+def _os_name():
+    """The controller's OS name without platform.system(), which runs a `ver` child process on Windows."""
+    return "Windows" if os.name == "nt" else os.uname().sysname
 
 
 def overview(api, query):
@@ -133,7 +137,7 @@ def overview(api, query):
     return api.document("setup", configured=state == "valid",
                         configuration={"state": state, "path": str(api.config_path),
                                        "version": version, "error": error},
-                        controller={"hostname": socket.gethostname(), "os": platform.system(),
+                        controller={"hostname": socket.gethostname(), "os": _os_name(),
                                     "machine_id": local.id if local else None,
                                     "portal_bind": "127.0.0.1", "role": "control-plane"},
                         router=router, nodes=nodes, profiles=profiles, checklist=steps,

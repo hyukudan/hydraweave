@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
+import stat
 import signal
 import subprocess
 import tempfile
@@ -517,7 +519,18 @@ class Manager:
                 return {**receipt, "path": str(destination / "checkout"), "reused": False, "installed": False}
             finally:
                 if stage.exists() and not stage.is_symlink():
-                    shutil.rmtree(stage)
+                    _rmtree(stage)
+
+
+def _rmtree(path):
+    """Remove a staged checkout; git writes its objects read-only, which Windows refuses to delete as they are."""
+    def writable(func, target, *_):
+        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+        func(target)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=writable)
+    else:
+        shutil.rmtree(path, onerror=writable)
 
 
 def install_plan(cluster, profile):

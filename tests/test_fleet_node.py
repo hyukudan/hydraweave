@@ -343,7 +343,7 @@ class EngineStatusTests(unittest.TestCase):
             self.assertEqual(self.status(["/api/status?detail=1"])["/api/status?detail=1"]["why"], "response exceeds 1 MiB")
         payload = {"engine_status": {"port": self.port, "paths": ["/health", "/api/status?detail=1"]}}
         full = len(json.dumps(observe.collect(payload, root=self.dir.name, statvfs=statvfs, sleep=lambda s: None)))
-        with mock.patch.object(observe, "MAX_OUTPUT", full - 5):
+        with mock.patch.object(observe, "MAX_OUTPUT", full - 64):
             result = observe.collect(payload, root=self.dir.name, statvfs=statvfs, sleep=lambda s: None)
         trimmed = result["checks"]["engine_status"]["value"][0]["paths"]
         self.assertEqual(trimmed["/api/status?detail=1"]["why"], "response exceeds the node output budget")
