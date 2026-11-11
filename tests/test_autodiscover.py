@@ -611,3 +611,11 @@ def test_download_progress_failure_reaps_child_and_keeps_resume_file(tmp_path):
     terminate.assert_called_once_with(4242, module.signal.SIGTERM)
     child.wait.assert_called_once()
     assert part.read_bytes() == b"partial"
+
+
+def test_same_host_announcement_uses_its_a_record_but_lan_sources_win():
+    registry = discovery.Registry()
+    discovery.receive(discovery.packet(record("one", "10.0.0.5")), "127.0.0.1", registry)
+    discovery.receive(discovery.packet(record("two", "10.0.0.99")), "10.0.0.6", registry)
+    rows = {row["id"]: row["address"] for row in registry.rows()}
+    assert rows == {"one": "10.0.0.5", "two": "10.0.0.6"}

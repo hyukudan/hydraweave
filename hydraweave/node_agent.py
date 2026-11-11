@@ -331,9 +331,9 @@ def main(argv=None):
         server = Agent((args.listen, 0), root, lab_dir=args.lab_dir)
     print(f"Hydraweave agent port: {server.server_port}", flush=True)
     if not bind.is_loopback(args.listen):
-        print(bind.LAN_WARNING.format(what="the Hydraweave node agent",
-                                      listen=bind.url_host(args.listen, server.server_port))
-              + " Node calls still require the pairing token; pairing requires the console code.",
+        print(f"WARNING: the Hydraweave node agent listens on {bind.url_host(args.listen, server.server_port)} "
+              "over plain HTTP: anyone on this network can try the console pairing code; once paired, the "
+              "controller holding the token can run node operations. Use it only on a trusted LAN.",
               file=sys.stderr, flush=True)
     print("Hydraweave pairing code: " + (server.code if not server.token else "already paired"), flush=True)
     transport = None

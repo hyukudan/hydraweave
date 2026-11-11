@@ -134,7 +134,7 @@ def receive(data, source, registry):
         return False
     try:
         _, flags, questions, answers, authority, additional = struct.unpack_from("!6H", data)
-        offset, entries = 12, {}
+        offset, entries, hosts = 12, {}, {}
         for _ in range(questions):
             _, offset = _read_name(data, offset)
             offset += 4
@@ -149,6 +149,7 @@ def receive(data, source, registry):
                 entry = entries.setdefault(name, {})
                 if kind == 33:
                     entry["port"] = struct.unpack_from("!HHH", data, offset)[2]
+                    entry["target"] = _read_name(data, offset + 6)[0].lower()
                 elif kind == 16:
                     values, cursor = {}, offset
                     while cursor < end:
@@ -159,10 +160,17 @@ def receive(data, source, registry):
                         values[key] = value
                         cursor += size + 1
                     entry.update(values=values, ttl=ttl)
+            elif kind == 1 and length == 4:
+                hosts[name.lower()] = socket.inet_ntoa(data[offset:end])
             offset = end
         for entry in entries.values():
             if "values" in entry and "port" in entry:
-                registry.update(from_properties(entry["values"], source, entry["port"]), entry["ttl"])
+                # The datagram's source is authoritative. Only an announcement from this same host arrives from
+                # loopback; then its own A record names the LAN address other machines must use.
+                address = source
+                if ipaddress.ip_address(source).is_loopback and entry.get("target") in hosts:
+                    address = hosts[entry["target"]]
+                registry.update(from_properties(entry["values"], address, entry["port"]), entry["ttl"])
         return not bool(flags & 0x8000) and _name(SERVICE) in data
     except (ValueError, TypeError, KeyError, IndexError, struct.error, UnicodeError, RecursionError):
         return False
