@@ -464,6 +464,16 @@ def poll(payload, clock=None):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "turn-wait":
+        from hydraweave_turn_provider import BuiltinProvider
+        if len(argv) < 5 or argv[3] != "--":
+            raise SystemExit("usage: hydraweave-node turn-wait ROOT LABEL -- COMMAND...")
+        provider = BuiltinProvider(argv[1])
+        ticket = provider.acquire(argv[2])
+        try:
+            return subprocess.call(argv[4:])
+        finally:
+            provider.release(ticket)
     if argv and argv[0] == "poll":
         try:
             raw = b"" if sys.stdin.isatty() else sys.stdin.buffer.read(MAX_JSON + 1)

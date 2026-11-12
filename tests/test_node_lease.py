@@ -82,10 +82,9 @@ class LeaseLogicTests(LeaseFixture):
             with self.subTest(deadline=deadline), self.assertRaises(ValueError):
                 lease.validate_spec(self.spec)
 
-    def test_gpu_lease_requires_lab(self):
+    def test_gpu_lease_accepts_missing_lab(self):
         self.spec["lab_dir"] = None
-        with self.assertRaises(ValueError):
-            lease.validate_spec(self.spec)
+        self.assertIsNone(lease.validate_spec(self.spec).get("lab_dir"))
         self.spec["kind"] = "none"
         self.assertEqual(lease.validate_spec(self.spec)["kind"], "none")
 
