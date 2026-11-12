@@ -484,7 +484,10 @@ def build_parser(parser_class=argparse.ArgumentParser):
     uninstall.add_argument("--purge-config", action="store_true")
     uninstall.add_argument("--dry-run", action="store_true")
     uninstall.add_argument("--yes", action="store_true")
-    _module("hydraweave.releases").configure_cli(commands)
+    try:
+        _module("hydraweave.releases").configure_cli(commands)
+    except RuntimeError:
+        pass  # an incomplete install still parses; the missing module is reported when used
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",
                     help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "

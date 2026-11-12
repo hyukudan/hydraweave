@@ -11,7 +11,11 @@ from unittest.mock import Mock, patch
 import urllib.error
 import zipfile
 
-import pytest
+try:
+    import pytest
+except ImportError:  # pragma: no cover - unittest discovery without the test extra
+    from unittest import SkipTest
+    raise SkipTest("requires the test extra (pytest)") from None
 
 from hydraweave import cli, releases
 from hydraweave.web.features import components

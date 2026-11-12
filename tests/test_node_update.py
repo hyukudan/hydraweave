@@ -5,7 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import pytest
+try:
+    import pytest
+except ImportError:  # pragma: no cover - unittest discovery without the test extra
+    from unittest import SkipTest
+    raise SkipTest("requires the test extra (pytest)") from None
 
 from hydraweave import __version__, bootstrap, discovery, node_agent, onboarding
 from hydraweave.web.features import discovery as web
