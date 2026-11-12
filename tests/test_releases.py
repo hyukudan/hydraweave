@@ -107,7 +107,9 @@ def test_activation_atomic_replace_and_shims_follow_current(tmp_path):
         return original(source, destination)
     with patch.object(releases.os, "replace", side_effect=replace):
         manager.activate("new")
-    assert observed == ["old"] and manager.current == "new" and manager.previous == "old"
+    # Windows cannot rename over a directory symlink: the old link is moved aside first.
+    assert observed == ([None] if os.name == "nt" else ["old"])
+    assert manager.current == "new" and manager.previous == "old"
     assert (tmp_path / "bin" / "hydraweave").read_bytes() == shim
     assert "current" in shim.decode()
     assert not list(manager.root.glob(".current-*"))
