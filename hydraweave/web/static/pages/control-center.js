@@ -6,6 +6,10 @@
   const doc = () => H().state.docs.setup || {};
   const esc = value => H().esc(value ?? "");
   let notice = "";
+  let wizardStep = 0;
+  let wizardLeft = false;
+  try { wizardStep = Math.max(0, Math.min(3, Number(localStorage.getItem("hydraweave-setup-step")) || 0)); wizardLeft = localStorage.getItem("hydraweave-setup-left") === "true"; } catch (_) { /* storage may be disabled */ }
+  const setWizardStep = value => { wizardStep = Math.max(0, Math.min(3, value)); try { localStorage.setItem("hydraweave-setup-step", String(wizardStep)); } catch (_) { /* storage may be disabled */ } };
   const action = (label, name, data = {}, disabled = "", primary = false) => H().button(label, "", {
     style: primary ? "pri" : "", disabled,
     extra: `data-page-action="cc-${name}" ${Object.entries(data).map(([k,v]) => `data-${k}="${esc(v)}"`).join(" ")}`,
@@ -16,13 +20,7 @@
   // Presentation of existing read documents only. No launch or queue mutation lives on Home.
   const fresh = name => H().state.fresh && !H().state.errors[name] && H().state.fetched[name]
     && Date.now() - H().state.fetched[name] <= Math.max(10000, H().prefs().refresh_s * 3000);
-  const catalog = [
-    ["Qwen3.8", "Two replicas", /qwen/i],
-    ["DeepSeek V4.1", "Pair", /deepseek/i],
-    ["MiniMax M3.1", "Pair", /minimax.*m3|m3.*minimax/i],
-    ["GLM-5.3", "Pair", /glm/i],
-    ["MiniMax-H3-Image", "Image", /minimax.*h3|h3.*image/i],
-  ];
+  const presets = () => Array.isArray(H().state.docs["engine-settings"]?.presets) ? H().state.docs["engine-settings"].presets : [];
   function servingStatus() {
     if (!fresh("profiles") || !Array.isArray(H().state.docs.profiles?.profiles)) return "Engine status unavailable";
     const profiles = H().profiles();
@@ -31,47 +29,23 @@
     if (profiles.some(p => !["stopped", "idle", "not installed", "unavailable", "disabled"].includes(p.state))) return "Check engine state";
     return "No engine serving";
   }
-  function turnState(machine) {
-    const turns = H().state.docs.turns || {}, node = (turns.nodes || []).find(n => n.machine === machine?.id);
-    if (!fresh("turns") || !node || node.state !== "ok" || !Number.isFinite(node.age_s) || node.age_s > 90) return {text:"Turn status unavailable"};
-    const holder = node.holder;
-    if (!holder) return {text:"No GPU slot in use"};
-    const confirmed = holder.parsed && holder.alive === true && holder.verified === true && !holder.past_cap
-      && (!holder.pair_state || holder.pair_state.startsWith("running (confirmed"));
-    return confirmed ? {held:true,text:"GPU slot in use",label:holder.label} : {text:"GPU slot holder needs review"};
-  }
   function weave() {
     const observed = H().machines(), configured = doc().nodes || [];
-    const pc = observed.find(m => m.os === "windows" && H().rows(m.accelerators).some(g => !g.excluded && /RTX PRO 6000/i.test(g.name || "")));
-    // The two Strix Halo threads are the first two configured Linux nodes (any names); the controller's own one first.
-    const linux = configured.filter(n => (n.os || observed.find(m => m.id === n.id)?.declared_os) !== "windows");
-    const controllerId = doc().controller?.machine || doc().controller?.id;
-    linux.sort((a, b) => (b.id === controllerId || b.access === "local") - (a.id === controllerId || a.access === "local"));
-    const nodeSlot = (node, index) => ({id:node?.id, label:node?.id || `Node ${index + 1}`,
-      detail:(node && (node.id === controllerId || node.access === "local") ? "Controller · " : "") + "AMD Strix Halo"});
-    const slots = [nodeSlot(linux[0], 0), nodeSlot(linux[1], 1),
-      {id:pc?.id,label:"RTX PC",detail:"Optional · Windows · RTX PRO 6000"}];
-    const pairIds = slots.slice(0, 2).map(s => s.id).filter(Boolean);
+    const slots = configured.map(n => ({id:n.id,label:n.id,detail:n.access === "local" ? "This computer" : (n.os || "Machine")}));
     const links = H().rows(H().state.docs.topology?.links);
-    const usb = links.filter(l => l.kind === "USB4" && pairIds.includes(l.from) && pairIds.includes(l.to));
-    const usbNote = !fresh("topology") || !usb.length ? "Link status unavailable" : usb.every(l => ["up","ok"].includes(l.health)) ? "Reported up" : "Link needs review";
-    const lan = links.filter(l => l.kind === "Ethernet" && slots.some(s => s.id === l.from));
+    const linksHtml = links.map(l => `<li>${esc(l.from)} → ${esc(l.to)} · ${esc(l.kind || "Link")} · ${esc(l.health || "status unavailable")}</li>`).join("");
+    if (!slots.length && !links.length) return H().card("Machines & connections", `<p>No machines or links are configured yet.</p>${action("Add a machine", "add-node", {}, H().mutationReason(), true)}`);
     return `<section class="card cc-weave" aria-labelledby="cc-weave-title"><div class="cc-section-head"><div><span class="cc-eyebrow">Machines & connections</span><h2 id="cc-weave-title">The weave</h2></div><a class="cc-text-link" href="#/topology">Topology & links <span aria-hidden="true">↗</span></a></div>
-      <div class="cc-weave-map"><div class="cc-thread-links" aria-hidden="true"><div class="cc-usb-thread"></div><div class="cc-lan-thread"></div></div>
+      <div class="cc-weave-map"><div class="cc-thread-links" aria-hidden="true"></div>
       <ul class="cc-threads">${slots.map(s => {
         const machine = observed.find(m => m.id === s.id), config = configured.find(n => n.id === s.id);
-        const turn = turnState(machine), known = !!(machine || config);
-        const health = fresh("devices") && machine ? machine.health || "Status unavailable" : known ? "Status unavailable" : s.label === "RTX PC" ? "Optional · not configured" : "Not configured";
-        return `<li class="cc-thread${turn.held ? " cc-thread-held" : ""}"><div class="cc-machine-head"><span class="cc-machine-icon" aria-hidden="true">${mark(s.label === "RTX PC" ? "pc" : "node")}</span>${known ? `<a class="cc-machine-name" href="#/machine?id=${encodeURIComponent(s.id)}">${esc(s.label)}</a>` : `<strong class="cc-machine-name">${esc(s.label)}</strong>`}<span class="cc-machine-detail">${esc(s.detail)}</span><span class="cc-machine-health">${esc(health)}</span></div><div class="cc-machine-thread" aria-hidden="true"></div><div class="cc-turn${turn.held ? " cc-turn-held" : ""}"><strong>${esc(turn.text)}</strong>${turn.label ? `<span>${esc(turn.label)}</span>` : ""}</div></li>`;
-      }).join("")}</ul><div class="cc-usb-label"><strong>USB4 <span>· 2 cables / 4 streams</span></strong><span>${esc(usbNote)} · configured link</span></div><div class="cc-lan-label">LAN <span>· ${fresh("topology") && lan.length ? "Interface observations available" : "Status unavailable"}</span></div></div>
-      <div class="cc-weave-caption"><span><i class="cc-key-usb" aria-hidden="true"></i>USB4 between Strix Halo nodes</span><span><i class="cc-key-turn" aria-hidden="true"></i>Amber marks a verified GPU slot in use</span><a href="#/turns">Read the GPU queue <span aria-hidden="true">↗</span></a></div></section>`;
+        const health = fresh("devices") && machine ? machine.health || "Status unavailable" : "Status unavailable";
+        return `<li class="cc-thread"><div class="cc-machine-head"><span class="cc-machine-icon" aria-hidden="true">${mark("node")}</span><a class="cc-machine-name" href="#/machine?id=${encodeURIComponent(s.id)}">${esc(s.label)}</a><span class="cc-machine-detail">${esc(s.detail)}</span><span class="cc-machine-health">${esc(health)}</span></div></li>`;
+      }).join("")}</ul>${links.length ? `<ul class="cc-reported-links">${linksHtml}</ul>` : ""}</div></section>`;
   }
   function engineCatalog() {
-    return `<section class="card cc-catalog" aria-labelledby="cc-catalog-title"><div class="cc-section-head"><div><span class="cc-eyebrow">Inference</span><h2 id="cc-catalog-title">Engines</h2></div><a class="cc-text-link" href="#/engines">Browse engines <span aria-hidden="true">↗</span></a></div><ul class="cc-engine-list">${catalog.map(([name,mode,match]) => {
-      const profile = H().profiles().find(p => match.test(`${p.family || ""} ${p.label || ""} ${H().profileId(p)}`));
-      const href = profile ? `#/engines?profile=${encodeURIComponent(H().profileId(profile))}` : "#/engine-settings";
-      return `<li><a href="${esc(href)}"><strong>${esc(name)}</strong><span>${esc(mode)}</span><span class="cc-engine-state">${profile ? esc(fresh("profiles") ? profile.state || "State unavailable" : "State unavailable") : name === "GLM-5.3" ? "Needs a preset" : "Not configured"}</span><span aria-hidden="true">↗</span></a></li>`;
-    }).join("")}</ul><p class="cc-footnote">Catalog options · configured profiles open their current engine details.</p></section>`;
+    const rows = presets();
+    return H().card("Models", rows.length ? `<ul class="cc-engine-list">${rows.map(p => `<li><a href="#/engine-settings"><strong>${esc(p.label || p.id)}</strong><span>${esc(p.family || "Preset")}</span><span>${esc(p.qualified === false ? p.notes || "Not qualified" : "Available preset")}</span></a></li>`).join("")}</ul>` : `<p>No model presets are available yet.</p>${link("Open engine settings", "#/engine-settings", true)}`);
   }
 
   function controller() {
@@ -85,7 +59,7 @@
   function nodes() {
     const d = doc(), observed = H().machines();
     const remote = (d.nodes || []).filter(n => n.access !== "local");
-    if (!remote.length) return `<div class="cc-empty-inline"><strong>Add your first compute node</strong><p>Connect a Strix Halo machine using its address and SSH account. Its engine runs on that node.</p>${action("Add compute node", "add-node", {}, H().mutationReason(), true)}</div>`;
+    if (!remote.length) return `<div class="cc-empty-inline"><strong>No compute nodes yet</strong><p>Add a machine to run a model across this workspace.</p>${action("Add a machine", "add-node", {}, H().mutationReason(), true)}</div>`;
     return `<div class="cc-node-list">${remote.map(n => {
       const live = observed.find(m => m.id === n.id) || {}, trust = ["pinned", "paired"].includes(n.trust);
       return `<article class="cc-node"><div><a class="cc-node-name" href="#/machine?id=${encodeURIComponent(n.id)}">${esc(n.id)}</a><div class="hint">${esc(n.http_address || n.address || n.ssh_target || n.access)}</div></div><div>${H().statusPill(live.health || "unknown")}<div class="hint">${n.trust === "paired" ? "Agent paired" : trust ? "SSH identity verified" : "Verify SSH identity"}</div></div><div class="cc-node-actions">${trust ? action("Check node", "test-node", {machine:n.id}, H().mutationReason()) : action("Verify host key", "trust-node", {machine:n.id}, H().mutationReason())}${action("Edit", "edit-node", {machine:n.id}, H().mutationReason())}</div></article>`;
@@ -93,25 +67,39 @@
   }
   function discovered() {
     const d = H().state.docs.discovery || {}, rows = d.nodes || [];
-    const pairText = (d.pairs || []).map(p => `<p class="hint">USB4 pair available: ${p.map(esc).join(" + ")}</p>`).join("");
+    const pairText = (d.pairs || []).map(p => `<p class="hint">Connection available: ${p.map(esc).join(" + ")}</p>`).join("");
     const sha256 = (typeof document.querySelector === "function" && document.querySelector('meta[name="hydraweave-package-sha256"]')?.content) || "";
     const bootstrap = sha256 ? `<p>On each worker: <code>curl -fsSL ${esc(typeof location === "undefined" ? "" : location.origin)}/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=${esc(sha256)} sh</code></p><p class="hint">Package SHA-256: <code>${esc(sha256)}</code></p>` : "<p>Open the live portal to get the verified node bootstrap command.</p>";
     return H().card("Discovered on your LAN", `${bootstrap}${d.error ? `<p role="alert">${esc(d.error)}</p>` : ""}${pairText}${rows.map(n => {
       const profiles = (doc().profiles || []).filter(p => (p.machines || p.nodes || []).includes(n.machine));
       return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
-    }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs. Engines use the existing GPU queue when launched.</p>`);
+    }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs.${(d.nodes || []).some(n => n.lab_mode === true) ? " Engines use configured GPU slots when launched." : ""}</p>`);
   }
   function render() {
     const d = doc(), cfg = d.configuration || {}, ready = d.configured === true || cfg.state === "valid";
-    const header = `<section class="cc-welcome"><div><span class="cc-eyebrow">Home / Control center</span><h2>Your cluster, woven together.</h2><p>Two Strix Halo nodes. An optional RTX PC. One place to see how they connect.</p></div>${link("Open engines", "#/engines", true)}</section>`;
+    const checklist = d.checklist || [], completed = checklist.filter(s => s.state === "done").length;
+    const setupDone = [cfg.state === "valid", (d.nodes || []).some(n => n.access !== "local"), (() => { try { return !!localStorage.getItem("hydraweave-setup-model"); } catch (_) { return false; } })() || (d.profiles || []).some(p => p.state === "running"),
+      (d.profiles || []).some(p => p.state === "running")].filter(Boolean).length;
+    if ((cfg.state === "missing" || (checklist.length > 0 && completed < checklist.length)) && !wizardLeft) {
+      const names = ["This computer", "Nodes", "Model", "Start"];
+      const discovery = H().state.docs.discovery || {};
+      let content = wizardStep === 0 ? (cfg.state === "missing" ? `<p>Create the workspace on this computer to continue.</p>${action("Create workspace", "initialize", {}, "", true)}` : `<p>Workspace created. Run the local check, then continue.</p>${steps()}${action("Check again", "wizard-check")}${action("Continue", "wizard-next", {}, "", true)}`) : "";
+      if (wizardStep === 1) { const found = (discovery.nodes || []).filter(n => n.state !== "adopted"); content = (found.length ? `<p>Found on your network: ${found.map(n => `${esc(n.hostname || n.id)} ${action("Add", "adopt", {id:n.id})}`).join(" · ")}</p>` : `<p>No additional machines found.</p>`) + action("Add a machine", "add-node") + action("I only have this computer", "wizard-next", {}, "", true); }
+      if (wizardStep === 2) { const rows = presets(); content = rows.length ? `<ul class="cc-engine-list">${rows.map(p => { const unavailable = p.qualified === false; return `<li><button type="button" class="${unavailable ? "cc-model-unavailable" : ""}" ${unavailable ? "disabled" : `data-page-action="cc-wizard-model" data-model="${esc(p.id)}"`}><strong>${esc(p.label || p.id)}</strong><span>${esc(unavailable ? (p.notes || "Not qualified for this setup") : "Available preset")}</span></button></li>`; }).join("")}</ul>` : `<p>No model presets are available.</p>${link("Open engine settings", "#/engine-settings", true)}`; content += action("Continue", "wizard-next", {}, "", true); }
+      if (wizardStep === 3) content = `<ol>${(d.start_status?.steps || checklist).map(s => `<li>${esc(s.title || s.name || s.id)} · ${esc(s.state || "Pending")}</li>`).join("")}</ol>${link("Open Chat", "#/chat", true)} <button type="button" data-page-action="cc-copy-api">Copy API address</button>`;
+      return `<section class="cc-welcome"><div><span class="cc-eyebrow">Setup · Step ${wizardStep + 1} of 4</span><h2>Welcome. Let’s get a model running.</h2></div></section><section class="card cc-wizard"><nav aria-label="Setup steps">${names.map((n,i)=>`<span${i===wizardStep?' aria-current="step"':''}>${i+1}. ${n}</span>`).join(" · ")}</nav><h2>${names[wizardStep]}</h2>${content}${wizardStep ? action("Back", "wizard-back") : ""}${action("Leave setup", "wizard-leave")}</section>`;
+    }
+    const header = `<section class="cc-welcome"><div><span class="cc-eyebrow">Home / Control center</span><h2>Your machines and models.</h2><p>Machines and connections reported by this workspace.</p></div>${link("Open engines", "#/engines", true)}</section>`;
     const count = (d.nodes || []).length;
-    const summary = `<div class="cc-summary" aria-label="Cluster summary"><div><span class="cc-summary-icon" aria-hidden="true">${mark("engine")}</span><div><span class="cc-eyebrow">Serving</span><strong>${esc(servingStatus())}</strong></div></div><div><span class="cc-summary-icon" aria-hidden="true">${mark("turns")}</span><div><span class="cc-eyebrow">GPU slots</span><strong>Starting a model waits for a free GPU slot</strong></div></div><div><span class="cc-summary-icon" aria-hidden="true">${mark("node")}</span><div><span class="cc-eyebrow">Workspace</span><strong>${count} ${count === 1 ? "machine" : "machines"} configured</strong></div></div></div>`;
+    const lab = (d.nodes || []).some(n => n.lab_mode === true);
+    const summary = `<div class="cc-summary" aria-label="Cluster summary"><div><span class="cc-summary-icon" aria-hidden="true">${mark("engine")}</span><div><span class="cc-eyebrow">Serving</span><strong>${esc(servingStatus())}</strong></div></div>${lab ? `<div><span class="cc-summary-icon" aria-hidden="true">${mark("turns")}</span><div><span class="cc-eyebrow">GPU slots</span><strong>Status available in slot details</strong></div></div>` : ""}<div><span class="cc-summary-icon" aria-hidden="true">${mark("node")}</span><div><span class="cc-eyebrow">Workspace</span><strong>${count} ${count === 1 ? "machine" : "machines"} configured</strong></div></div></div>`;
     const invalid = cfg.state === "invalid" ? `<div class="banner warn" role="alert"><div><strong>The saved configuration needs attention</strong><p>${esc(cfg.error || "Validation failed")}</p><span class="mono">${esc(cfg.path)}</span></div></div>` : "";
     const initial = cfg.state === "missing" ? H().card("Start with this computer", `<p>Create the controller workspace, then add your compute nodes. No engine is started during setup.</p>${action("Create workspace", "initialize", {}, "", true)}<p class="hint">Configuration: <span class="mono">${esc(cfg.path)}</span></p>`) : "";
     const progress = ready ? `<div class="cc-main-grid">${H().card("Getting ready", steps(), "A guided path from installation to inference")}${H().card("Quick access", `<div class="cc-shortcuts"><a href="#/components"><strong>Components & updates</strong><span>Check versions and prepare downloads</span></a><a href="#/engine-settings"><strong>Engine configuration</strong><span>Profiles, model files and supported options</span></a><a href="#/recipes"><strong>Run a model</strong><span>Choose and deploy an inference recipe</span></a><a href="#/overview"><strong>Live monitoring</strong><span>Node health, memory and throughput</span></a></div>`)}</div>` : "";
     const lifecycle = d.lifecycle || {};
-    const next = `<section class="card cc-next" aria-labelledby="cc-next-title"><span class="cc-eyebrow">Keep things moving</span><h2 id="cc-next-title">Next steps</h2><a class="cc-next-link" href="#/turns"><strong>Review GPU turns</strong><span>See holders and waiting tickets <b aria-hidden="true">↗</b></span></a><a class="cc-next-link" href="#/components"><strong>Check components</strong><span>Review versions and node tools <b aria-hidden="true">↗</b></span></a><button type="button" class="cc-next-link" data-page-action="cc-manage-nodes"><strong>Manage nodes</strong><span>Connections and SSH identities <b aria-hidden="true">↓</b></span></button><p class="cc-queue-note">Engines start only inside a GPU ticket queue. Hydraweave reads the queue; it never writes it.</p></section>`;
-    return header + invalid + initial + summary + weave() + discovered() + `<div class="cc-home-grid">${engineCatalog()}${next}</div>`
+    const next = `<section class="card cc-next" aria-labelledby="cc-next-title"><span class="cc-eyebrow">Keep things moving</span><h2 id="cc-next-title">Next steps</h2>${lab ? `<a class="cc-next-link" href="#/turns"><strong>Review GPU slots</strong><span>See current slot status</span></a>` : ""}<a class="cc-next-link" href="#/components"><strong>Check components</strong><span>Review versions and node tools</span></a><button type="button" class="cc-next-link" data-page-action="cc-manage-nodes"><strong>Manage nodes</strong><span>Connections and SSH identities</span></button></section>`;
+    const resume = (cfg.state === "missing" || (checklist.length > 0 && completed < checklist.length)) ? H().card(`Setup: ${setupDone} of 4 done`, `<p>Continue the setup wizard where you left off.</p>${action("Continue", "wizard-resume", {}, "", true)}`) : "";
+    return header + invalid + resume + initial + summary + weave() + discovered() + `<div class="cc-home-grid">${engineCatalog()}${next}</div>`
       + `<div class="cc-setup-heading" id="cc-node-management" tabindex="-1"><span class="cc-eyebrow">Workspace management</span><h2>Keep your cluster ready.</h2></div>` + controller() + (notice ? `<p class="cc-notice" role="status">${esc(notice)}</p>` : "") + progress
       + (ready ? H().card("Your nodes", nodes() + `<div class="cc-card-footer">${action("Add node", "add-node", {}, H().mutationReason())}${link("All machines", "#/devices")}${link("Topology & links", "#/topology")}</div>`, "Connected explicitly; status comes from each machine") : "")
       + H().card("Where does Hydraweave run?", `<p>The panel runs on <strong>${esc(d.controller?.hostname || "this computer")}</strong>. The request router can run here or on a configured Linux node. The engine's rank 0 is a compute role and does not have to host the panel.</p><p class="hint">${esc(typeof d.recommendation === "string" ? d.recommendation : d.recommendation?.detail || d.recommendation?.note || "For regular use, choose an always-on controller. A laptop can connect to it through an SSH tunnel.")}</p>${lifecycle.note ? `<div class="cc-lifecycle"><strong>${esc(lifecycle.mode || "Process lifecycle")}</strong><p>${esc(lifecycle.note)}</p></div>` : ""}${ready ? action("Choose router location", "router", {}, H().mutationReason()) : ""}`);
@@ -122,14 +110,14 @@
     if (!Array.isArray(cfg.machines) || !cfg.version) throw new Error("Create a valid workspace first on Home.");
     const row = id ? cfg.machines.find(m => m.id === id) : null;
     if (id && !row) throw new Error("This machine is no longer configured. Refresh and try again.");
-    const e = row?.entry || {os:"linux", access:"ssh", ssh_port:22, lab_mode:true};
+    const e = row?.entry || {os:"linux", access:"ssh", ssh_port:22, lab_mode:false};
     const frozen = row?.frozen || "", lock = frozen ? `disabled title="${esc(frozen)}"` : "";
     const appendPeersOnly = !!frozen && row?.add_peer_aliases === true;
     const input = (key,label,value,placeholder="",type="text") => `<label class="field" for="cc-node-${key}">${esc(label)}<input class="inp" id="cc-node-${key}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" spellcheck="false" ${lock}></label>`;
     const peers = Object.entries(e.peer_ssh || {}).map(([mid,alias]) => `${mid}=${alias}`).join("\n");
     UI().open({title:id ? `Edit ${id}` : "Add compute node", confirm:appendPeersOnly ? "Save peer aliases" : frozen ? "Close" : id ? "Save node" : "Add node", body:
       `<p class="hint">Use a private network address and an SSH account that already has access to the machine. You will verify its host key after adding it.</p>${frozen ? `<p class="banner warn">${esc(frozen)}</p>` : ""}${appendPeersOnly ? '<p class="hint">You can add aliases for newly configured peer nodes. Existing aliases cannot be changed or removed. Saving records the configuration; it does not test SSH or change running processes.</p>' : ""}<div class="two">${input("id","Node name",e.id || "","cluster2")}${input("address","Private IP address",e.http_address || "","192.168.1.20")}</div><div class="two">${input("ssh","SSH account or configured alias",e.ssh_target || "","user@192.168.1.20")}${input("root","Install directory on this node",e.install_root || "","/home/user/hydraweave-node")}</div>
-      <div class="cc-lifecycle"><label class="check"><input type="checkbox" id="cc-node-lab" ${e.lab_mode ? "checked" : ""} ${lock}>Use the existing lab turn manager</label><p>Start profile uses GPU leases from this node’s lab directory. It must already contain <code>gpu-turn.sh</code>; paired profiles also need <code>gpu-turn-pair.sh</code>. Preparing node tools does not install these scripts.</p>${input("labdir","Lab directory on node (required for Start profile)",e.lab_dir || "","/home/user/gpu-lab")}<p>Without lab mode, you can register the node for monitoring and use the separate Qwen service workflow.</p></div>
+      <div class="cc-lifecycle"><label class="check"><input type="checkbox" id="cc-node-lab" ${e.lab_mode ? "checked" : ""} ${lock}>Use the existing lab slot manager</label><div id="cc-node-lab-fields" ${e.lab_mode ? "" : "hidden"}><p>Start profile uses GPU slots from this node’s lab directory. It must already contain the slot manager scripts.</p>${input("labdir","Lab directory on node (required for Start profile)",e.lab_dir || "","/home/user/gpu-lab")}</div><p>Without lab mode, you can register the node for monitoring.</p></div>
       <label class="field" for="cc-node-gpus">GPU identifiers (one per line, optional)<textarea class="inp" id="cc-node-gpus" rows="2" spellcheck="false" placeholder="gpu0" ${lock}>${esc((e.devices || []).map(g => g.id).join("\n"))}</textarea><span class="hint">Register only the devices you want Hydraweave to use. Hardware checks report their actual capabilities.</span></label>
       <details ${appendPeersOnly ? "open" : ""}><summary>Advanced connection settings</summary><div class="cc-form-stack"><div class="two"><label class="field" for="cc-node-os">System<select class="inp" id="cc-node-os" ${lock}>${["linux","windows"].map(v => `<option value="${v}" ${e.os === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label><label class="field" for="cc-node-access">Connection<select class="inp" id="cc-node-access" ${lock}>${["ssh","local"].map(v => `<option value="${v}" ${e.access === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label></div>${input("port","SSH port",e.ssh_port ?? 22,"22","number")}<label class="field" for="cc-node-peers">Peer SSH aliases (one node=alias per line)<textarea class="inp" id="cc-node-peers" rows="2" spellcheck="false" placeholder="cluster2=cluster2" ${appendPeersOnly ? "" : lock}>${esc(peers)}</textarea><span class="hint">Used for direct transfers between already configured nodes.</span></label></div></details>`,
       submit: async () => {
@@ -170,6 +158,7 @@
     });
   }
   window.HydraweaveNodesUI = {open:openMachine};
+  if (typeof document.addEventListener === "function") document.addEventListener("change", event => { if (event.target?.id === "cc-node-lab" && typeof document.getElementById === "function") { const fields = document.getElementById("cc-node-lab-fields"); if (fields) fields.hidden = !event.target.checked; } });
 
   async function trustNode(mid) {
     const scan = await UI().post("ops/hostkey/scan",{machine:mid});
@@ -197,7 +186,14 @@
     try {
       const a = button.dataset.pageAction, mid = button.dataset.machine;
       if (a === "cc-manage-nodes") { const target = document.getElementById("cc-node-management"); target?.scrollIntoView({block:"start"}); target?.focus({preventScroll:true}); }
-      else if (a === "cc-initialize") { button.disabled = true; await UI().post("setup/initialize",{}); notice="Workspace created. Add your compute nodes to continue."; H().announce(notice); await H().refresh(); }
+      else if (a === "cc-initialize") { button.disabled = true; await UI().post("setup/initialize",{}); setWizardStep(0); notice="Workspace created."; H().announce(notice); await H().refresh(); }
+      else if (a === "cc-wizard-next") { setWizardStep(wizardStep + 1); H().render(); }
+      else if (a === "cc-wizard-back") { setWizardStep(wizardStep - 1); H().render(); }
+      else if (a === "cc-wizard-check") { await H().refresh(); }
+      else if (a === "cc-wizard-model") { try { localStorage.setItem("hydraweave-setup-model", button.dataset.model || ""); } catch (_) {} setWizardStep(3); H().render(); }
+      else if (a === "cc-wizard-leave") { wizardLeft = true; try { localStorage.setItem("hydraweave-setup-left", "true"); } catch (_) {} H().render(); }
+      else if (a === "cc-wizard-resume") { wizardLeft = false; try { localStorage.setItem("hydraweave-setup-left", "false"); } catch (_) {} H().render(); }
+      else if (a === "cc-copy-api") { const address = `${location.origin}/v1`; if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(address); }
       else if (a === "cc-add-node") await openMachine();
       else if (a === "cc-adopt") UI().open({title:"Adopt node",confirm:"Adopt",body:`<label class="field">Pairing code from the node console<input class="inp" id="cc-pair-code" inputmode="numeric" autocomplete="off"></label>`,submit:async () => {
         const result = await UI().post("discovery/adopt", {id:button.dataset.id,code:document.getElementById("cc-pair-code").value.trim()});
@@ -215,7 +211,7 @@
   (window.HydraweavePages ||= {})["control-center"] = {
     title:"Home",group:"Control center",order:1,home:true,
     icon:'<path d="M3 9l7-6 7 6v8h-5v-5H8v5H3z"/>',
-    endpoints:() => ["setup", "discovery", ...(H().pages.turns ? ["turns"] : [])],
+    endpoints:() => ["setup", "discovery", "engine-settings", "topology"],
     ready:() => !!H().state.docs.setup,
     error:() => H().state.errors.setup || "",render,
   };

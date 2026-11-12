@@ -64,8 +64,10 @@ implemented.
 
 ## First-run workflow
 
-1. Open **Home** and create the workspace. This creates valid local configuration with no invented GPUs,
-   model files, hashes, releases or deployed workers.
+1. Open **Home** and follow the four-step setup wizard. It creates the workspace, checks this computer,
+   offers discovered machines and supported model presets, then shows start progress and links to Chat
+   and the API. The wizard can be resumed from Home. It creates no invented GPUs, model files, hashes,
+   releases or deployed workers.
 2. Add Linux nodes using the visual form. Set the host, SSH target, installation folder and the lab directory
    used by the bounded GPU turn manager for a normal **Start profile** launch.
    Pin host fingerprints after comparing them with the actual machines, then test connectivity.

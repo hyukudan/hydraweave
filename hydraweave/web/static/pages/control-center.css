@@ -165,6 +165,7 @@ a.cc-machine-name::after{content:"";position:absolute;inset:0;border-radius:10px
 .cc-engine-list{list-style:none;padding:0;margin:0}
 .cc-engine-list a{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,.9fr) 12px;gap:10px;align-items:center;padding:13px 0;border-top:1px solid var(--border);text-decoration:none;color:var(--text);font-size:12px;min-height:48px}
 .cc-engine-list a:hover{color:var(--accent-text);background:var(--surface-2)}
+.cc-model-unavailable{opacity:.48;cursor:not-allowed}
 .cc-engine-list strong{font-size:13px;overflow-wrap:anywhere}
 .cc-engine-list a>span{color:var(--text-2)}
 .cc-engine-list .cc-engine-state{font-size:10px;text-align:right}
