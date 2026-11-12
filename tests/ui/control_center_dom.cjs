@@ -79,6 +79,9 @@ try{
   click('[data-page-action="cc-wizard-next"]');
   console.log("PASS missing workspace wizard and resumable partial-progress card");
   click('[data-page-action="cc-add-node"]');
+  await until(()=>d.querySelector("#ops-dialog[open]") && el("#ops-dialog-title").textContent==="Add node","add node chooser");
+  assert.match(el("#ops-dialog").textContent,/Add manually over SSH/);
+  click('#ops-dialog [data-page-action="cc-add-manual"]');
   await until(()=>d.querySelector("#cc-node-id"),"node form");
   fill("#cc-node-id","halo-ui");
   fill("#cc-node-address","192.168.44.31");

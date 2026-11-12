@@ -105,6 +105,24 @@
       + H().card("Where does Hydraweave run?", `<p>The panel runs on <strong>${esc(d.controller?.hostname || "this computer")}</strong>. The request router can run here or on a configured Linux node. The engine's rank 0 is a compute role and does not have to host the panel.</p><p class="hint">${esc(typeof d.recommendation === "string" ? d.recommendation : d.recommendation?.detail || d.recommendation?.note || "For regular use, choose an always-on controller. A laptop can connect to it through an SSH tunnel.")}</p>${lifecycle.note ? `<div class="cc-lifecycle"><strong>${esc(lifecycle.mode || "Process lifecycle")}</strong><p>${esc(lifecycle.note)}</p></div>` : ""}${ready ? action("Choose router location", "router", {}, H().mutationReason()) : ""}`);
   }
 
+  function addNodeDialog(selected = null) {
+    const found = ((H().state.docs.discovery || {}).nodes || []).filter(n => n.state !== "adopted");
+    const manual = `<p class="hint">Not listed? Run the node bootstrap command on the worker and check again, or connect to it over SSH.</p><button type="button" class="btn" data-page-action="cc-add-manual" data-ops-close>Add manually over SSH</button>`;
+    if (!found.length) return {title:"Add node", confirm:"Check again", body:`<p>No new nodes found on your network yet.</p>${manual}`, submit:null};
+    const pick = found.some(n => n.id === selected) ? selected : found[0].id;
+    const rows = found.map(n => `<label class="cc-found"><input type="radio" name="cc-adopt-id" value="${esc(n.id)}"${n.id === pick ? " checked" : ""}> <strong>${esc(n.hostname || n.id)}</strong> <span class="hint">${[n.address, n.gpu_arch].filter(Boolean).map(esc).join(" · ")}</span></label>`).join("");
+    return {title:"Add node", confirm:"Adopt", body:`<p>Found on your network. Choose the node and enter the pairing code shown on its console.</p><fieldset class="field"><legend>Node</legend>${rows}</fieldset><label class="field" for="cc-pair-code">Pairing code<input class="inp" id="cc-pair-code" inputmode="numeric" autocomplete="off"></label>${manual}`, submit:"adopt"};
+  }
+  function openAddNode(selected = null) {
+    const d = addNodeDialog(selected);
+    UI().open({title:d.title, confirm:d.confirm, body:d.body, submit:async form => {
+      if (!d.submit) { await H().refresh(); openAddNode(); return true; }
+      const id = form.querySelector('input[name="cc-adopt-id"]:checked')?.value, code = form.querySelector("#cc-pair-code")?.value.trim();
+      if (!code) throw new Error("Enter the pairing code shown on the node console.");
+      const result = await UI().post("discovery/adopt", {id, code});
+      notice = `Adopted ${result.adopted}${result.provisioning_error ? ` · ${result.provisioning_error}` : ""}`;
+    }});
+  }
   async function openMachine(id = null) {
     const cfg = await H().request("ops/config");
     if (!Array.isArray(cfg.machines) || !cfg.version) throw new Error("Create a valid workspace first on Home.");
@@ -194,12 +212,9 @@
       else if (a === "cc-wizard-leave") { wizardLeft = true; try { localStorage.setItem("hydraweave-setup-left", "true"); } catch (_) {} H().render(); }
       else if (a === "cc-wizard-resume") { wizardLeft = false; try { localStorage.setItem("hydraweave-setup-left", "false"); } catch (_) {} H().render(); }
       else if (a === "cc-copy-api") { const address = `${location.origin}/v1`; if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(address); }
-      else if (a === "cc-add-node") await openMachine();
-      else if (a === "cc-adopt") UI().open({title:"Adopt node",confirm:"Adopt",body:`<label class="field">Pairing code from the node console<input class="inp" id="cc-pair-code" inputmode="numeric" autocomplete="off"></label>`,submit:async () => {
-        const result = await UI().post("discovery/adopt", {id:button.dataset.id,code:document.getElementById("cc-pair-code").value.trim()});
-        notice = `Adopted ${result.adopted}${result.provisioning_error ? ` · ${result.provisioning_error}` : ""}`;
-        await H().refresh();
-      }});
+      else if (a === "cc-add-node") openAddNode();
+      else if (a === "cc-add-manual") await openMachine();
+      else if (a === "cc-adopt") openAddNode(button.dataset.id);
       else if (a === "cc-provision") await H().mutate("discovery/provision", {machine:mid,profile:button.dataset.profile});
       else if (a === "cc-edit-node") await openMachine(mid);
       else if (a === "cc-trust-node") await trustNode(mid);
