@@ -25,9 +25,10 @@ _controllers = []
 
 
 def config_path():
-    if os.name == "nt":
-        return read_path(Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "hydraweave" / "cluster.json")
-    return read_path(Path.home() / ".config" / "hydraweave" / "cluster.json")
+    from . import paths
+    options = {"platform": os.name, "environ": getattr(os, "environ", {}), "home": Path.home()}
+    return paths.read_user_path(paths.config_dir(**options) / "cluster.json",
+                                paths.legacy_config_dir(**options) / "cluster.json")
 
 
 def _scope(args):
@@ -52,6 +53,8 @@ def _cluster(path):
 
 
 def _write(path, obj):
+    from .paths import prepare_write
+    prepare_write(path)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         temporary.write_text(json.dumps(obj, indent=2), encoding="utf-8")
@@ -62,7 +65,8 @@ def _write(path, obj):
 
 
 def _runtime():
-    directory = read_path(config_path().parent / "run")
+    from .paths import runtime_dir
+    directory = runtime_dir(config=config_path())
     return read_path(directory / "router-state.json").parent
 
 
@@ -471,6 +475,15 @@ def build_parser(parser_class=argparse.ArgumentParser):
     merge = commands.add_parser("gguf-merge", help="merge ordered GGUF v3 split parts locally")
     merge.add_argument("parts", nargs="+", type=Path)
     merge.add_argument("-o", "--output", required=True, type=Path)
+    uninstall = commands.add_parser("uninstall", help="remove owned user units and marked directories")
+    uninstall.add_argument("--config", type=Path, default=config_path())
+    uninstall.add_argument("--nodes", action="store_true", help="also uninstall configured nodes")
+    models = uninstall.add_mutually_exclusive_group()
+    models.add_argument("--keep-models", action="store_true", default=True)
+    models.add_argument("--remove-models", dest="keep_models", action="store_false")
+    uninstall.add_argument("--purge-config", action="store_true")
+    uninstall.add_argument("--dry-run", action="store_true")
+    uninstall.add_argument("--yes", action="store_true")
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",
                     help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "
@@ -872,6 +885,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     release = lambda: None
     try:
+        if args.command == "uninstall":
+            return _module("hydraweave.uninstall").command(args)
         if getattr(args, "ext_run", None) is not None:
             return args.ext_run(args)
         release = _admission_hold(args)

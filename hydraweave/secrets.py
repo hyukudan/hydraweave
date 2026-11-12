@@ -7,7 +7,7 @@ import re
 import secrets as random
 import tempfile
 
-from .compat import read_path
+from . import paths
 
 
 def _name(name):
@@ -17,15 +17,19 @@ def _name(name):
 
 
 def _directory():
-    if os.name == "nt":
-        return Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "hydraweave/secrets"
-    return Path.home() / ".config/hydraweave/secrets"
+    return paths.config_dir() / "secrets"
 
 
 def runtime_dir():
+    current = paths.state_dir() / "run"
+    if current.exists():
+        return current
+    from .compat import read_path
     if os.name == "nt":
-        return read_path(Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "hydraweave/run")
-    return read_path(Path.home() / ".config/hydraweave/run")
+        legacy = read_path(Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "hydraweave/run")
+    else:
+        legacy = read_path(Path.home() / ".config/hydraweave/run")
+    return legacy if legacy.exists() else paths.runtime_dir()
 
 
 def _dpapi(data, decrypt=False):
@@ -78,6 +82,7 @@ def _private(path):
 
 
 def _write(path, data, *, replace=True, exists_ok=True):
+    paths.prepare_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".key-", dir=path.parent)
     temporary = Path(temporary)
@@ -99,7 +104,7 @@ def _write(path, data, *, replace=True, exists_ok=True):
 
 
 def get(name):
-    path = read_path(_directory() / _name(name))
+    path = paths.read_user_path(_directory() / _name(name), paths.legacy_config_dir() / "secrets" / _name(name))
     try:
         data = path.read_bytes()
     except FileNotFoundError:
@@ -125,7 +130,7 @@ def ensure(name):
 def rotate(name):
     _name(name)
     data = random.token_hex(32).encode("ascii")
-    _write(read_path(_directory() / name), _dpapi(data) if os.name == "nt" else data)
+    _write(_directory() / name, _dpapi(data) if os.name == "nt" else data)
     return data.decode("ascii")
 
 

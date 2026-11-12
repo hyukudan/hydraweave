@@ -21,6 +21,8 @@ def command(kind, stage, output):
               "--chdir", str(stage), "--package", str(output)]
     for dependency in recipe["depends"]:
         result += ["--depends", dependency]
+    for dependency in recipe.get("recommends", []):
+        result += ["--" + kind + "-recommends", dependency]
     return result + ["usr"]
 
 
@@ -57,7 +59,7 @@ def build(kind, directory, dry_run=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--format", choices=("deb", "rpm"), required=True)
+    parser.add_argument("--format", choices=("deb", "rpm"), default="deb")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/packages")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

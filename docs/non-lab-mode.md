@@ -1,4 +1,4 @@
-# Non-lab mode: engines as `systemd --user` units (optional, off by default)
+# Non-lab mode: engines as `systemd --user` units
 
 GPU leases use the built-in FIFO turn manager by default when `lab_dir` is null. Set `lab_dir` to keep using the
 optional external `gpu-turn.sh` / `gpu-turn-pair.sh` scripts. The built-in provider stores its holder and queue under
@@ -6,9 +6,12 @@ optional external `gpu-turn.sh` / `gpu-turn-pair.sh` scripts. The built-in provi
 (item 11b). Lab machines may also run bounded leases through external scripts (SPEC §2.6). Non-lab
 mode is for machines you own outright, where no turn scripts exist and serving should outlive a 20-minute turn.
 It wraps the **same** node `supervise` in a user unit, with no turn and no deadline.
+New workspaces default to `lab_mode: false`. Existing `cluster.json` files keep
+their explicit values; shared lab machines must opt in with `lab_mode: true`.
+Starting service units still requires the commands below and the node policy checks.
 
 ## When it is allowed
-- Every machine of the profile sets `"lab_mode": false` in `cluster.json` (the default is `true`). The control
+- Every machine of the profile has `"lab_mode": false` in `cluster.json` (the default). The control
   machine refuses otherwise, before any remote call.
 - The node checks again and fails closed. It refuses unless the root's `etc/install-policy.json` exists and records
   `"lab_dir": null` explicitly (a root installed by `hydraweave install` with `lab_mode: false`), when a request carries
@@ -19,10 +22,13 @@ It wraps the **same** node `supervise` in a user unit, with no turn and no deadl
   - a GPU lease (`single`/`pair`, or any lease with a lab directory) and a pair peer refuse while an
     `etc/service-<profile>.json` exists (an enabled unit would start again), and every lease refuses while a unit's
     lease record is live; `hl-svc-` labels are reserved for units;
-  - `hydraweave install` with a lab directory refuses on a root with an installed unit, and `uninstall` refuses while
+  - `hydraweave install` with a lab directory refuses on a root with an installed unit, and the node protocol's release `uninstall` refuses while
     one exists (its spec references the root's releases): run `hydraweave service remove` first;
   - a unit start (`service start`, and the unit itself at every (re)start) refuses while any lease record of the root
     is live or turn files are found.
+- `hydraweave uninstall --nodes` stops and disables project user units before
+  removing marked roots. Models and configuration are retained by default;
+  see [Installation §8](install.md#8-upgrade-roll-back-uninstall).
 - Only `qwen-replicas`. The DeepSeek pair needs a peer turn on the second node and stays lease-only.
 - Profile names must match `[a-z0-9-]{1,40}` (they name the unit `hl-<profile>.service`).
 

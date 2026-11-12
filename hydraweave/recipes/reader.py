@@ -15,7 +15,10 @@ import re
 try:
     import tomllib
 except ImportError:  # Ubuntu 22 node/controller Python 3.10
-    import tomli as tomllib
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None  # JSON recipes remain usable in a stdlib-only installation.
 
 
 SCHEMA = "strix-stream/recipe-v1"
@@ -286,6 +289,8 @@ def load_text(text, origin="recipe"):
             if not isinstance(tree, dict):
                 raise RecipeError(f"{origin}: expected a JSON object")
         else:
+            if tomllib is None:
+                raise RecipeError(f"{origin}: TOML requires tomli on Python 3.10; use a JSON recipe or install tomli")
             tree = tomllib.loads(text)
     except (ValueError, RecursionError) as exc:
         if isinstance(exc, RecipeError):
@@ -799,10 +804,16 @@ def parse_set(text):
     if "=" not in text:
         raise RecipeError(f'--set "{text}": expected path=value')
     path, raw = (part.strip() for part in text.split("=", 1))
-    try:
-        value = tomllib.loads("v = " + raw)["v"]
-    except tomllib.TOMLDecodeError:
-        value = raw
+    if tomllib is None:
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            value = raw
+    else:
+        try:
+            value = tomllib.loads("v = " + raw)["v"]
+        except tomllib.TOMLDecodeError:
+            value = raw
     return path, value
 
 

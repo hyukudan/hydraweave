@@ -43,6 +43,8 @@ def _state_path(profile):
 
 
 def _write(path, value):
+    from .paths import prepare_write
+    prepare_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:

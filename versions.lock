@@ -24,7 +24,7 @@
     }
   },
   "toolchains": {
-    "control_python": ">=3.11",
+    "control_python": ">=3.10",
     "node_python": ">=3.10",
     "rocm": "gfx1151; qualified baseline core 10.1; detect ROCM_PATH, /opt/rocm, then newest rocm-* or core-*",
     "cuda": "13.0 (sm_120), MSVC 19.44 (VS 2022 17.14), CMake >= 3.24, Ninja",

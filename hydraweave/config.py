@@ -321,7 +321,7 @@ def parse(obj: dict) -> Cluster:
         machines[mid] = Machine(mid, m["os"], m["access"], address(m["http_address"], "http_address"),
                                 target, integer(m.get("ssh_port", 22), "ssh_port", 1, 65535),
                                 absolute(m["install_root"], "install_root", m["os"]),
-                                boolean(m.get("lab_mode", True), "lab_mode"), devices, lab, peers,
+                                boolean(m.get("lab_mode", False), "lab_mode"), devices, lab, peers,
                                 None if m.get("local") is None else boolean(m["local"], "local"), model_roots)
         if machines[mid].local and (m["access"] != "ssh" or m["os"] != "linux"):
             raise ConfigError("machine.local: only a linux ssh machine can be marked as this controller's host")

@@ -111,6 +111,8 @@ setup, controller placement, updates and the distinction between lab leases and 
 These host-side improvements do not requalify newer engine/driver revisions on GPU hardware. Upstream source,
 staged source and an installed/active profile are shown separately.
 
+New workspaces default to non-lab mode; shared lab machines must explicitly set `lab_mode: true`. `hydraweave uninstall --dry-run` previews removal of marked directories and user units; models and config are kept by default.
+
 Then use [the sample cluster configuration](examples/cluster.example.json) to describe your machines, model assets and profiles:
 
 ```powershell

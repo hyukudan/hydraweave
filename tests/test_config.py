@@ -15,6 +15,22 @@ def example():
 
 
 class ConfigTests(unittest.TestCase):
+    def test_new_workspace_defaults_non_lab(self):
+        obj = example()
+        for machine in obj["machines"]:
+            machine.pop("lab_mode", None)
+        self.assertTrue(all(not machine.lab_mode for machine in parse(obj).machines.values()))
+
+    def test_existing_files_preserve_explicit_lab_mode(self):
+        for value in (True, False):
+            obj = example()
+            for machine in obj["machines"]:
+                machine["lab_mode"] = value
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "cluster.json"
+                path.write_text(json.dumps(obj), encoding="utf-8")
+                self.assertTrue(all(machine.lab_mode is value for machine in load(path).machines.values()))
+
     def test_lab_fields_share_one_schema_for_parse_load_and_cli(self):
         from contextlib import redirect_stdout
         import io

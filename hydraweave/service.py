@@ -1,4 +1,4 @@
-"""Optional non-lab mode (off by default): engines as systemd --user units on the nodes.
+"""Non-lab mode: engines as systemd --user units on the nodes.
 
 Only for profiles whose every machine sets ``lab_mode: false``; lab machines start GPU work through
 leases only. The units wrap the same node supervise with no turn and no deadline. The router is not
@@ -25,7 +25,7 @@ def _machines(cluster, profile):
                                  "and stays lease-only")
     lab = [mid for mid in mids if cluster.machines[mid].lab_mode]
     if lab:
-        raise OrchestrationError("non-lab service mode refused: lab_mode is true (the default) on "
+        raise OrchestrationError("non-lab service mode refused: lab_mode is true on "
                                  + ", ".join(lab) + "; lab machines run GPU work through leases only")
     return settings, kind, mids
 
