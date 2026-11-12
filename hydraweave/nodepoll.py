@@ -187,10 +187,9 @@ class NodePoll:
                 self._busy.discard(LOCAL)
 
     def _remote_call(self, machine, payload):
-        if machine.access == "agent":
-            from .onboarding import Client
-            return Client(machine, self.api.config_path).call("poll", payload, timeout=CALL_TIMEOUT_S)
-        client = self.api.remote.Remote(machine, self.api.orchestrate._known_hosts())
+        from .transport import for_machine
+        client = for_machine(machine, self.api.config_path,
+                             known_hosts=self.api.orchestrate._known_hosts())
         return client.call("poll", payload, timeout=CALL_TIMEOUT_S)
 
     def _poll(self, machine, parts, release):

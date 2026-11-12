@@ -54,14 +54,9 @@ def _cluster(path):
 
 def _write(path, obj):
     from .paths import prepare_write
+    from .store import write_json
     prepare_write(path)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        temporary.write_text(json.dumps(obj, indent=2), encoding="utf-8")
-        # The router controller and the CLI read and replace the same state files.
-        retry_sharing(lambda: temporary.replace(path))
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_json(path, obj)
 
 
 def _runtime():
@@ -497,8 +492,13 @@ def build_parser(parser_class=argparse.ArgumentParser):
     ui.add_argument("--no-auth", action="store_true",
                     help="disable LAN access-token authentication (also HYDRAWEAVE_NO_AUTH=1)")
     ui.add_argument("--config", type=Path, help="workspace configuration to open or initialize")
+    ui.add_argument("--log-level", default="INFO")
+    ui.add_argument("--log-json", action="store_true")
     config = commands.add_parser("config").add_subparsers(dest="operation", required=True)
     config.add_parser("validate").add_argument("path", type=Path)
+    show_config = config.add_parser("show")
+    show_config.add_argument("path", nargs="?", type=Path, default=config_path())
+    show_config.add_argument("--effective", action="store_true")
     render = commands.add_parser("render")
     render.add_argument("profile")
     render.add_argument("--config", type=Path, default=config_path())
@@ -903,6 +903,9 @@ def main(argv=None):
             if args.port is not None and not 0 <= args.port <= 65535:
                 raise ValueError("ui port must be in 0..65535")
             listen = None if args.listen is None else _module("hydraweave.bind").address(args.listen, "--listen")
+            from .log import setup
+            from . import secrets as runtime
+            setup(args.log_level, args.log_json, runtime.runtime_dir() / "hydraweave.log")
             _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser, listen=listen,
                                                   **({"no_auth": True} if args.no_auth else {}),
                                                   **({"config_path": args.config} if args.config else {}))
@@ -1002,8 +1005,16 @@ def main(argv=None):
             if not ok:
                 return 1
         elif args.command == "config":
-            _cluster(args.path)
-            _json({"valid": True})
+            if args.operation == "show":
+                cluster = _cluster(args.path)
+                if args.effective:
+                    from .web.api import redact
+                    _json(redact(asdict(cluster)))
+                else:
+                    _json(cluster.raw)
+            else:
+                _cluster(args.path)
+                _json({"valid": True})
         elif args.command == "render":
             cluster = _cluster(args.config)
             renderer = _module("hydraweave.render")
