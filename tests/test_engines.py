@@ -89,7 +89,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_families_and_topologies(self):
         self.assertEqual({name: config.family(name) for name in config.PRESET_NAMES},
-                         {"qwen-replicas": "qwen-replicas", "qwen-replicas-w5": "qwen-replicas",
+                         {"qwen-replicas": "qwen-replicas", "qwen-replicas-w5": "qwen-replicas", "qwen-starter": "qwen-replicas",
                           "ds41-pair": "ds41-pair", "ds41-pair-long": "ds41-pair", "ds41-pair-w5": "ds41-pair",
                           "minimax-pair": "minimax-pair"})
         mm = engines.adapter("minimax-pair")

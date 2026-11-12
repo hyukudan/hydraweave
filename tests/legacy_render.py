@@ -18,6 +18,9 @@ ORACLE = "eb9ae96"
 CAPS = (None, 90, 8)
 
 
+# Presets added after the eb9ae96 oracle; they are covered by their own tests.
+POST_ORACLE_PRESETS = {"qwen-starter"}
+
 def capture(root):
     # The caller starts a fresh interpreter: imports must come from the requested checkout.
     sys.path.insert(0, str(root))
@@ -38,6 +41,8 @@ def capture(root):
         if "argv" not in raw:
             continue
         name = path.stem
+        if name in POST_ORACLE_PRESETS:
+            continue
         data = config.preset(name)
         adapter = engines.adapter(config.family(name))
         settings = {"preset": name, "release_id": "0" * 12}

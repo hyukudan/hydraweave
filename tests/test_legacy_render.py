@@ -27,7 +27,7 @@ class LegacyRenderTests(unittest.TestCase):
         presets = {p.stem for p in (ROOT / "hydraweave/presets").glob("*.json")
                    if "argv" in json.loads(p.read_text(encoding="utf-8"))}
         profiles = {r["profile"] for r in doc["rows"]}
-        self.assertEqual(profiles - {"ds41-rtx"}, presets - {"rtx-prefill-ds41"})
+        self.assertEqual(profiles - {"ds41-rtx"}, presets - {"rtx-prefill-ds41", "qwen-starter"})
         for profile in profiles:
             self.assertEqual({r["vram_cap_gib"] for r in doc["rows"] if r["profile"] == profile}, {None, 90, 8})
         service = [r for r in doc["rows"] if r["profile"] == "ds41-rtx"]
