@@ -96,8 +96,7 @@ def _execute(cluster, path, mid, profile, *, report, cancelled, sources):
     from .web.features import ops
     desired = plan(cluster, mid, profile)
     machine = cluster.machines[mid]
-    from .transport import for_machine
-    client = for_machine(machine, path)
+    client = Client(machine, path)
     root = machine.install_root
     report(f"Preparing {mid}: engine and {len(desired['models'])} model assets")
     # Keep model discovery in the shared library. The node scans only its configured lab roots.
