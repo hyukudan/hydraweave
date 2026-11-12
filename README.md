@@ -181,6 +181,7 @@ Pending integration follows these decisions:
 | [Technical overview](docs/README-technical.md) | Original detailed README: architecture, requests, leases, builds, component pins, measurements and security |
 | [System specification and roadmap](docs/SPEC.md) | Planned phases, design constraints and acceptance gates |
 | [Adapters](docs/adapters.md) | Interfaces to the underlying engines and router |
+| [One endpoint for several models](docs/front-router.md) | `hydraweave front`: one OpenAI URL routed by `model`, aggregated `/v1/models` |
 | [Model assets](docs/assets.md) and [downloads](docs/model-downloads.md) | Asset verification and acquisition |
 | [UI specification](docs/ui/UI-SPEC.md) | Planned local portal designs, explicitly mockups |
 | [Performance and diagnostic runs](docs/diagnostic-runs.md) | Measurement context and diagnostics |

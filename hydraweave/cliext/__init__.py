@@ -10,7 +10,7 @@ import sys
 
 
 MODULES = ("bench", "telemetry", "observe", "ledger", "usb4", "energy", "health", "alerts", "turns", "library", "logsearch",
-           "ops", "planner", "endpoints", "integrations", "prefs", "probe", "control_center")
+           "ops", "planner", "endpoints", "integrations", "prefs", "probe", "control_center", "front")
 
 
 def add_all(commands):
