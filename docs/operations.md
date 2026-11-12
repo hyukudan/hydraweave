@@ -4,7 +4,7 @@
 
 Start the portal with `hydraweave ui --log-level INFO --log-json` to select the
 log level and JSON output. The node agent's `serve` command accepts the same
-flags. Logs are written under the state directory as `hydraweave.log`, with
+flags. Logs are written to `logs/hydraweave.log` in the portal state directory (`state/hydraweave.log` in a node install root), with
 rotated copies retained. Credential-like values are redacted before output.
 
 ## Metrics

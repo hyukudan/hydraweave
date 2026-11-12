@@ -904,8 +904,9 @@ def main(argv=None):
                 raise ValueError("ui port must be in 0..65535")
             listen = None if args.listen is None else _module("hydraweave.bind").address(args.listen, "--listen")
             from .log import setup
-            from . import secrets as runtime
-            setup(args.log_level, args.log_json, runtime.runtime_dir() / "hydraweave.log")
+            from .paths import state_dir
+            # Kept outside state/run: creating that directory would hide a legacy run dir.
+            setup(args.log_level, args.log_json, state_dir() / "logs" / "hydraweave.log")
             _module("hydraweave.web.server").serve(args.port, no_browser=args.no_browser, listen=listen,
                                                   **({"no_auth": True} if args.no_auth else {}),
                                                   **({"config_path": args.config} if args.config else {}))
