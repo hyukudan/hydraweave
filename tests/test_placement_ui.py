@@ -15,7 +15,7 @@ class PlannerPlacementUITests(unittest.TestCase):
     def test_gpu_name_does_not_exclude_and_configuration_uuid_does(self):
         ident = "GPU-" + str(uuid.uuid4())
         raw = {"id": ident, "uuid": ident, "name": "NVIDIA GeForce RTX 4090"}
-        self.assertTrue(_accelerator(raw, {}, {}, [])["excluded"])  # unmentioned 4090: legacy rule
+        self.assertFalse(_accelerator(raw, {}, {}, [])["excluded"])  # no built-in model-name exclusion
         declared = [{"id": "configured-assist", "uuid": ident, "excluded": True}]
         self.assertTrue(_accelerator(raw, {}, {}, declared)["excluded"])
         raw["name"] = "any other GPU model"

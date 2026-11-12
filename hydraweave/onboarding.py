@@ -128,11 +128,26 @@ class Controller:
                     raise ValueError("node install root differs from existing machine")
             else:
                 mid = config.identifier(node_id, "node id")
-                raw["machines"].append({"id": mid, "os": "linux", "access": "agent",
+                devices = verified.get("devices")
+                if isinstance(devices, list) and devices and all(isinstance(d, dict) for d in devices):
+                    gpus = 0
+                    adopted = []
+                    for device in devices:
+                        kind = device.get("type") if device.get("type") in config.DEVICE_TYPES else "other"
+                        if kind == "cpu":
+                            did = "cpu"
+                        else:
+                            did, gpus = f"gpu{gpus}", gpus + 1
+                        adopted.append({**device, "id": did, "type": kind})
+                    devices = adopted
+                else:
+                    devices = [{"id": "gpu", "type": "amd"}]  # agents older than the pairing inventory
+                node_os = verified.get("os") if verified.get("os") in ("linux", "windows", "darwin") else "linux"
+                raw["machines"].append({"id": mid, "os": node_os, "access": "agent",
                                         "http_address": verified["address"], "install_root": verified["install_root"],
                                         "lab_mode": bool(verified.get("lab_dir")),
                                         **({"lab_dir": verified["lab_dir"]} if verified.get("lab_dir") else {}),
-                                        "devices": [{"id": "gpu", "type": "amd"}]})
+                                        "devices": devices})
             config.parse(raw)
             saved[mid] = {"node_id": node_id, "address": row["address"], "port": row["port"],
                           "token": response["token"], "usb4_ids": verified.get("usb4_ids", []),

@@ -505,10 +505,16 @@ def test_two_fake_nodes_end_to_end_discover_pair_adopt_provision(tmp_path):
         # Validate the new node's POSIX remote root separately on Windows (its HTTP daemon remains loopback).
         if os.name == "nt":
             agents[1].record["install_root"] = "/home/operator/hydraweave"
-        second = controller.adopt("two", agents[1].code)
+        with patch.object(node_agent, "inventory", return_value={"os": "linux", "arch": "x86_64",
+                                                                   "devices": [{"type": "nvidia", "vendor": "NVIDIA",
+                                                                                "name": "Example", "memory_bytes": 123,
+                                                                                "driver": "test"}]}):
+            second = controller.adopt("two", agents[1].code)
         assert second["adopted"] == "two"
         updated = config.read_json(config_path)
         assert updated["machines"][1] == raw["machines"][1]
+        assert updated["machines"][2]["devices"] == [{"id": "gpu0", "type": "nvidia", "vendor": "NVIDIA",
+                                                       "name": "Example", "memory_bytes": 123, "driver": "test"}]
         assert len(updated["machines"]) == 3
         assert controller.adopt("one", "unused")["already_adopted"] is True
         assert "token" not in json.dumps(controller.inventory())

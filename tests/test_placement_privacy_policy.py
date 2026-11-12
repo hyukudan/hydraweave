@@ -15,7 +15,8 @@ def test_06_unmatched_4090_and_matched_policy_agree_across_views(identity):
     from hydraweave.web.features import machines
     raw = dict(uuid=identity, id=identity, name="NVIDIA RTX 4090")
     declared = [dict(uuid="other", name=raw["name"], excluded=False)]
-    assert api._accelerator(raw, {}, {}, declared)["excluded"]
+    # No built-in model-name rule: a matching name policy applies, and both views agree.
+    assert api._accelerator(raw, {}, {}, declared)["excluded"] == machines.excluded_card(raw, declared)
     declared[0]["uuid"] = identity
     assert not machines.excluded_card(raw, declared)
     for card, configured in ((dict(raw, device=identity[:12]), {"id": identity, "excluded": False}),

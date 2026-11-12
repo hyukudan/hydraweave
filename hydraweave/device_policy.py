@@ -19,5 +19,5 @@ def resolve(card, declared, *, placement=False):
         excluded = not matches or policy.get("excluded", False)
         return {"excluded": excluded, "policy_reason": policy.get("reason") if matches else "device is not configured"}
     excluded = policy.get("excluded", default.get("excluded", False))
-    reason = policy.get("reason") or (default.get("reason", "RTX 4090 is excluded by policy") if excluded else None)
+    reason = policy.get("reason") or (default.get("reason", "device is excluded by policy") if excluded else None)
     return {"excluded": excluded, "policy_reason": reason}

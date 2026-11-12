@@ -61,8 +61,9 @@ class Cluster:
 MAX_CONFIG_BYTES = 256 * 1024
 BROKER_HOST = re.compile(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
                          r"[A-Za-z0-9])?)*|[0-9A-Fa-f:.]{2,45}")
-DEFAULT_DEVICE_POLICIES = ({"name_contains": "4090", "excluded": True, "require_identity": True,
-                            "reason": "RTX 4090 is excluded by policy"},)
+DEFAULT_DEVICE_POLICIES = ()
+# Types written by node adoption. Hand-written configs may keep older free-text types (e.g. "igpu").
+DEVICE_TYPES = frozenset(("amd", "nvidia", "intel", "apple", "cpu", "other"))
 PRESETS = Path(__file__).with_name("presets")
 
 
@@ -289,8 +290,8 @@ def parse(obj: dict) -> Cluster:
         mid = identifier(m["id"], "machine.id")
         if mid in machines:
             raise ConfigError("duplicate machine id")
-        if m["os"] not in ("linux", "windows") or m["access"] not in ("local", "ssh", "agent"):
-            raise ConfigError("machine: expected linux/windows and local/ssh/agent")
+        if m["os"] not in ("linux", "windows", "darwin") or m["access"] not in ("local", "ssh", "agent"):
+            raise ConfigError("machine: expected linux/windows/darwin and local/ssh/agent")
         local_count += m["access"] == "local"
         target = m.get("ssh_target")
         if m["access"] == "ssh" and target is None:
@@ -304,7 +305,7 @@ def parse(obj: dict) -> Cluster:
             raise ConfigError("devices: expected list")
         ids = set()
         for device in devices:
-            record(device, "device", ("id",), ("type", "uuid", "excluded", "name", "memory_gib", "pci", "arch", "driver", "pc_big_conflict"))
+            record(device, "device", ("id",), ("type", "uuid", "excluded", "name", "vendor", "memory_bytes", "memory_gib", "pci", "arch", "driver", "pc_big_conflict"))
             did = identifier(device["id"], "device.id")
             if did in ids:
                 raise ConfigError("duplicate device id")
@@ -312,6 +313,10 @@ def parse(obj: dict) -> Cluster:
             for key in ("type", "uuid", "name", "pci", "arch", "driver"):
                 if key in device:
                     text(device[key], f"device.{key}")
+            if "vendor" in device:
+                text(device["vendor"], "device.vendor")
+            if "memory_bytes" in device:
+                integer(device["memory_bytes"], "device.memory_bytes", 0, 2**63 - 1)
             if "excluded" in device:
                 boolean(device["excluded"], "device.excluded")
             if "pc_big_conflict" in device:

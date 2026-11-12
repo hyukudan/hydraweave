@@ -14,6 +14,10 @@ Device budgets above the selected UUID's grant are refused without changing the 
 its own grant and cannot work while any configured PC-BIG grant, host grant or legacy reservation is active.
 A relative legacy reservation is conservatively treated as active because only its operator gate knows the slot.
 
+No device model name is excluded by default. To exclude a device, configure the policy on its matching device
+in `cluster.json`, for example `{"id":"gpu0","type":"nvidia","name":"Example GPU","excluded":true,"reason":"Reserved for another workload"}`.
+Explicit `excluded` and `reason` settings keep their existing effect.
+
 Placement probes list all configured, non-excluded candidates with `present`, including configured devices missing
 from the passive inventory. CUDA configuration requires a UUID; optional `name`, `memory_gib`, `pci`, `arch`, and
 `driver` describe an absent candidate so Tierstream can distinguish configured absence from a typo. Live inventory

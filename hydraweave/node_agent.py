@@ -12,6 +12,7 @@ import ipaddress
 import json
 import logging
 import os
+import platform
 from pathlib import Path
 import re
 import secrets
@@ -35,6 +36,53 @@ from .winproc import no_window
 _request_metrics_lock = threading.Lock()
 _request_count = Counter()
 _request_duration_ms = 0.0
+
+
+def inventory(*, sysfs=Path("/sys/class/drm"), runner=None, system=None, arch=None):
+    """Best-effort, unprivileged hardware inventory for the pairing handshake."""
+    run = runner or subprocess.run
+    devices = []
+    try:
+        if (system or platform.system()).lower() == "linux":
+            for card in sorted(Path(sysfs).glob("card[0-9]*/device")):
+                try:
+                    device = card.resolve()
+                    vendor_id = (device / "vendor").read_text().strip().lower()
+                    if vendor_id != "0x1002":
+                        continue
+                    name = (device / "product_name").read_text().strip() if (device / "product_name").exists() else "AMD GPU"
+                    try:
+                        memory = int((device / "mem_info_vram_total").read_text().strip())
+                    except (OSError, ValueError):
+                        result = run(["rocm-smi", "--showmeminfo", "vram", "--json"],
+                                     capture_output=True, text=True, timeout=3, check=False)
+                        payload = json.loads(result.stdout) if result.returncode == 0 else {}
+                        numbers = [int(value) for row in payload.values() if isinstance(row, dict)
+                                   for key, value in row.items() if "total" in key.lower()
+                                   for value in [str(value).split()[0]] if value.isdigit()]
+                        memory = numbers[0] if numbers else 0
+                    devices.append({"type": "amd", "vendor": "AMD", "name": name,
+                                    "memory_bytes": memory, "driver": "amdgpu"})
+                except (OSError, ValueError):
+                    continue
+        result = run(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"],
+                     capture_output=True, text=True, timeout=3, check=False)
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                parts = [part.strip() for part in line.split(",", 2)]
+                if len(parts) == 3:
+                    try:
+                        devices.append({"type": "nvidia", "vendor": "NVIDIA", "name": parts[0],
+                                        "memory_bytes": int(float(parts[1]) * 1024 * 1024), "driver": parts[2]})
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    for index, device in enumerate(devices):
+        device["id"] = f"gpu{index}"
+    if not devices:
+        devices = [{"id": "cpu", "type": "cpu", "vendor": "", "name": "CPU", "memory_bytes": 0, "driver": ""}]
+    return {"os": (system or platform.system()).lower(), "arch": arch or platform.machine(), "devices": devices}
 
 
 def load_tool():
@@ -180,7 +228,7 @@ class Agent(ThreadingHTTPServer):
             storage._write(self.credentials, json.dumps({"token": token}).encode(), replace=False, exists_ok=False)
             self.token = token
             self.code = ""
-            return {"token": self.token, "node": self.record}
+            return {"token": self.token, "node": {**self.record, **inventory(runner=self.runner)}}
 
     def reissue_code(self):
         with self.lock:

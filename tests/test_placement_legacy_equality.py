@@ -187,11 +187,12 @@ def test_devices_document_summary_and_rules_match_baseline(tmp_path, monkeypatch
         fixture.doCleanups()
 
 
-def test_configured_exclusion_reason_matches_legacy_default():
+def test_configured_exclusion_reason_is_generic():
+    # Intentional divergence from the legacy baseline: its default reason named one GPU model for any device.
     card = {"id": "configured", "name": "GPU"}
     declared = [{"id": "configured", "excluded": True}]
-    expected = baseline(api, "_accelerator")(card, {}, {}, declared)
-    assert device_policy.resolve(card, declared)["policy_reason"] == expected["policy_reason"]
+    assert baseline(api, "_accelerator")(card, {}, {}, declared)["excluded"]
+    assert device_policy.resolve(card, declared) == {"excluded": True, "policy_reason": "device is excluded by policy"}
 
 
 def test_engine_dependent_ingestion_has_no_dead_launch_wrappers():
