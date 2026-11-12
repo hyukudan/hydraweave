@@ -34,7 +34,7 @@ let html = render();
 assert(html.includes('No engine serving'));
 assert(!html.includes('cc-turn-held'));
 for (const text of ['Qwen3.8','DeepSeek V4.1','MiniMax M3.1','GLM-5.3','MiniMax-H3-Image',
- 'Needs a preset','USB4','2 cables / 4 streams','Queue is read only']) assert(html.includes(text),text);
+ 'Needs a preset','USB4','2 cables / 4 streams','Starting a model waits for a free GPU slot']) assert(html.includes(text),text);
 for (const action of ['cc-add-node','cc-edit-node','cc-trust-node','cc-router']) assert(html.includes(action),action);
 assert(html.includes('#/engines?profile=qwen'));
 assert.deepEqual(Array.from(page.endpoints()),['setup','discovery','turns']);
@@ -73,7 +73,7 @@ queue.state='stale'; assert(!render().includes('cc-turn-held')); queue.state='ok
 state.fetched.turns=now-20000; assert(!render().includes('cc-turn-held')); state.fetched.turns=now;
 state.errors.turns='unavailable'; assert(!render().includes('cc-turn-held')); delete state.errors.turns;
 state.fresh=false; assert(!render().includes('cc-turn-held')); state.fresh=true;
-queue.holder=null; assert(render().includes('No GPU turn held'));
+queue.holder=null; assert(render().includes('No GPU slot in use'));
 state.docs.devices.machines.push({id:'rtxpc',os:'windows',accelerators:[{name:'RTX PRO 6000',excluded:true}]});
 assert(!render().includes('#/machine?id=rtxpc'));
 state.docs.devices.machines[2].accelerators[0].excluded=false;

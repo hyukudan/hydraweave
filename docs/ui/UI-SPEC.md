@@ -25,6 +25,14 @@ Status: design for main/user review (2026-10-23); sections 9-11 answer the secon
 
 ## 2. Information architecture
 
+**Navigation:** the default sidebar has six destinations: Home, Models, Chat, Nodes, Updates and Settings. The Advanced
+toggle starts off and is remembered in this browser. It reveals Monitoring (health, live stats, latency, thermals,
+energy and logs), Benchmarks, and Lab tools. Ctrl/Cmd-K searches every page whether or not Advanced is open. At 700 px
+and below, the bottom tabs are Home, Models, Chat, Nodes and More; More opens the full navigation.
+
+**UI glossary:** use *model* for the selectable model, *setup* for a saved way to run it, *engine* only for the binary
+shown in Updates, *node* for a host, *this computer* for the local portal host, and *GPU slot* for a lease/turn.
+
 | # | Screen | Purpose | Image |
 |---|---|---|---|
 | 1 | **Devices** | every machine with its accelerators, memory, usage, drivers, roles, health and last seen; discovered machines waiting to pair | `img/devices-*.png` |

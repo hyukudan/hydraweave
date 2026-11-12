@@ -21,8 +21,11 @@
   // Controls with data-page-action are handled by the page itself.
   const pages = window.HydraweavePages || {};
   const coreOrder = Object.keys(routes);
-  // Sidebar groups (F7): core screens sit in the same groups as feature pages, ordered by `order` within a group.
-  const groupOrder = ["Control center", "Workspace", "Inference", "Benchmarks", "Operations"];
+  const primaryNav = ["control-center", "models", "chat", "devices", "components", "settings"];
+  const navTitles = {"control-center": "Home", models: "Models", chat: "Chat", devices: "Nodes", components: "Updates", settings: "Settings"};
+  const advancedGroups = {health: "Monitoring", stats: "Monitoring", latency: "Monitoring", thermals: "Monitoring", energy: "Monitoring", logs: "Monitoring", logsearch: "Monitoring",
+    "bench-decode": "Benchmarks", "bench-prefill": "Benchmarks", "bench-ab": "Benchmarks", "bench-quality": "Benchmarks", "bench-tools": "Benchmarks", "bench-history": "Benchmarks", demo: "Benchmarks", results: "Benchmarks", ceiling: "Benchmarks",
+    turns: "Lab tools", recipes: "Lab tools", planner: "Lab tools", tokens: "Lab tools", rtx: "Lab tools", usb4: "Lab tools", sessioncache: "Lab tools", integrations: "Lab tools", alerts: "Lab tools"};
   const coreNav = {devices: ["Control center", 20], topology: ["Workspace", 25], models: ["Inference", 20], recipes: ["Inference", 25],
     engines: ["Inference", 30], stats: ["Inference", 40], logs: ["Operations", 60], settings: ["Operations", 90]};
   for (const [id, page] of Object.entries(pages).sort((a, b) => (a[1].order ?? 100) - (b[1].order ?? 100))) {
@@ -33,7 +36,7 @@
   // Shell strings (F51): pages/shell-i18n.js loads before this file; without it every string is its English fallback.
   const i18n = window.HydraweaveI18n || {lang: "en", t: (key, vars, fallback) => fallback ?? key, add() {}, languages: ["en"]};
   const t = (key, vars, fallback) => i18n.t(key, vars, fallback);
-  const titleOf = id => coreOrder.includes(id) ? t("route." + id, null, routes[id]) : routes[id];
+  const titleOf = id => navTitles[id] || (coreOrder.includes(id) ? t("route." + id, null, routes[id]) : routes[id]);
   const homeRoute = pages["control-center"] ? "control-center" : Object.keys(pages).find(id => pages[id]?.home && Object.hasOwn(routes, id)) || "devices";
   const pageOf = name => coreOrder.includes(name) ? null : pages[name] || null;
   const pageEndpoints = name => { try { return (pageOf(name)?.endpoints?.() || []).filter(e => typeof e === "string" && e); } catch (_) { return []; } };
@@ -91,7 +94,7 @@
     const control = `<button type="button" class="btn ${style}" ${id ? `id="${esc(id)}"` : ""} ${action ? `data-action="${esc(action)}"` : ""} ${disabled ? `disabled title="${esc(disabled)}"` : ""} ${extra}>${esc(label)}</button>`;
     return disabled ? `<span class="disabled-control">${control}<span class="hint">${esc(disabled)}</span></span>` : control;
   }
-  const later = (label, blocker) => `<div class="row">${button(label, "", {disabled: blocker})}</div>`;
+  const later = () => "";
   function card(title, content, subtitle = "", id = "", about = "") {
     return `<section class="card"${id ? ` id="${esc(id)}"` : ""}><h2>${esc(title)}${about ? info(about) : ""}${subtitle ? `<span class="sub">${esc(subtitle)}</span>` : ""}</h2>${content}</section>`;
   }
@@ -119,7 +122,7 @@
     if (!lease) return "";
     const seconds = timestamp(lease.deadline) - timestamp(serverTime);
     const left = Number.isFinite(seconds) ? `${Math.max(0, Math.floor(seconds / 60))}:${String(Math.max(0, Math.floor(seconds % 60))).padStart(2, "0")} left` : "";
-    return `<div class="accel"><div class="row between"><span>GPU turn ${display(lease.label ?? lease.lease, "lease label not reported")}</span><b>${left || unavailable(reason(lease, "deadline", "server time or lease deadline unavailable"))}</b></div>${kv(lease, [["Cap", "cap_s", "s"], ["Drain margin", "drain_margin_s", "s"], ["Approval", "approval"]])}<p class="hint">Extension needs an approver's ACK. Countdown uses the lease deadline and server time.</p></div>`;
+    return `<div class="accel"><div class="row between"><span>GPU slot ${display(lease.label ?? lease.lease, "lease label not reported")}</span><b>${left || unavailable(reason(lease, "deadline", "server time or lease deadline unavailable"))}</b></div>${kv(lease, [["Cap", "cap_s", "s"], ["Drain margin", "drain_margin_s", "s"], ["Approval", "approval"]])}<p class="hint">Extension needs an approver's ACK. Countdown uses the lease deadline and server time.</p></div>`;
   }
   function timestamp(value) {
     value = unwrap(value);
@@ -342,7 +345,7 @@
       if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
     });
     const current = selected(), disabled = mutationReason();
-    const controls = page === "devices" ? button("Add by address", "add", {id: "add-machine", style: "pri", disabled}) + button("Doctor…", "doctor-dialog", {id: "doctor-devices", disabled}) : page === "engines" ? button("Start profile…", "start-dialog", {id: "start-profile", style: "pri", disabled: disabled || profileStartBlocker(current)}) + button("Install…", "install-dialog", {id: "install-profile", disabled: disabled || profileBlocker(current)}) + button("Doctor…", "doctor-dialog", {id: "doctor-profile", disabled}) + button("Stop profile", "stop", {id: "stop-profile", style: "dan", disabled: current ? "" : "No profile configured"}) : page === "topology" ? button("Measure Ethernet links", "", {disabled: "later phase · Phase 2"}) : page === "logs" ? button("Download redacted log", "export-log", {disabled: logEntries().length ? "" : "No log entries"}) : "";
+    const controls = page === "devices" ? button("Add by address", "add", {id: "add-machine", style: "pri", disabled}) + button("Doctor…", "doctor-dialog", {id: "doctor-devices", disabled}) : page === "engines" ? button("Start profile…", "start-dialog", {id: "start-profile", style: "pri", disabled: disabled || profileStartBlocker(current)}) + button("Install…", "install-dialog", {id: "install-profile", disabled: disabled || profileBlocker(current)}) + button("Doctor…", "doctor-dialog", {id: "doctor-profile", disabled}) + button("Stop profile", "stop", {id: "stop-profile", style: "dan", disabled: current ? "" : "No profile configured"}) : page === "topology" ? "" : page === "logs" ? button("Download redacted log", "export-log", {disabled: logEntries().length ? "" : "No log entries"}) : "";
     const pageControls = pageOf(page)?.actions ? (() => { try { return pageOf(page).actions(); } catch (_) { return ""; } })() : controls;
     if ($("page-actions").innerHTML !== pageControls) $("page-actions").innerHTML = pageControls;
     const running = profiles().find(p => ["running", "starting", "stopping", "degraded", "error", "failed"].includes(p.state));
@@ -354,7 +357,7 @@
     $("global-status").outerHTML = `<span id="global-status">${statusPill(label)}</span>`;
     $("mobile-status").outerHTML = `<span id="mobile-status">${statusPill(label)}</span>`;
     const local = machines().find(m => m.access === "local");
-    $("control-machine").textContent = local ? `Control · ${local.name || local.id}` : "Control · this machine";
+    $("control-machine").textContent = local ? `This computer · ${local.name || local.id}` : "This computer";
     $("version").textContent = doc("settings").version ? `Hydraweave ${doc("settings").version}` : "Hydraweave · local portal";
     renderShell(page);
     const renderers = {devices: renderDevices, topology: renderTopology, models: renderModels, engines: renderEngines, stats: renderStats, logs: renderLogs, settings: renderSettings};
@@ -1034,30 +1037,34 @@
     return matches(text, q) ? 1 : 0;
   }
 
-  // F7: grouped sidebar with remembered groups, hidden panels, machines and the heartbeat.
-  const collapsedGroups = new Set(store.get("hydraweave-nav-groups", ["Workspace", "Inference", "Benchmarks", "Operations"]));
-  const groupOf = key => coreNav[key]?.[0] || pageOf(key)?.group || "";
-  const orderOf = key => coreNav[key]?.[1] ?? pageOf(key)?.order ?? 100;
+  // Advanced navigation is a per-browser preference; unavailable storage leaves it off.
+  const collapsedGroups = new Set();
+  let advancedOpen = false;
+  try { advancedOpen = localStorage.getItem("hydraweave-advanced-nav") === "true"; } catch (_) { /* storage may be disabled */ }
+  const groupOf = key => primaryNav.includes(key) ? "Primary" : advancedGroups[key] || (pageOf(key)?.group === "Benchmarks" ? "Benchmarks" : "Lab tools");
+  const orderOf = key => primaryNav.indexOf(key) >= 0 ? primaryNav.indexOf(key) : pageOf(key)?.order ?? 100;
   const visible = key => key === "settings" || !prefs().hidden_panels.includes(key);
   let navKey = "";
   function navGroups() {
-    const groups = new Map(groupOrder.map(g => [g, []]));
-    for (const key of Object.keys(routes)) { const g = groupOf(key) || "Other"; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(key); }
+    const primary = primaryNav.filter(id => Object.hasOwn(routes, id));
+    if (!advancedOpen) return [["Primary", primary]];
+    const groups = new Map([["Monitoring", []], ["Benchmarks", []], ["Lab tools", []]]);
+    for (const key of Object.keys(routes)) if (!primaryNav.includes(key)) groups.get(groupOf(key)).push(key);
     for (const keys of groups.values()) keys.sort((a, b) => orderOf(a) - orderOf(b));
-    return [...groups].filter(([, keys]) => keys.length);
+    return [["Primary", primary], ...groups];
   }
   function renderNav(page) {
     const current = groupOf(page) || "Other";
-    const key = JSON.stringify([i18n.lang, prefs().hidden_panels, [...collapsedGroups], current, Object.keys(routes)]);
+    const key = JSON.stringify([i18n.lang, prefs().hidden_panels, advancedOpen, current, Object.keys(routes)]);
     if (key === navKey && $("navigation").childElementCount) return;
     navKey = key;
     const link = id => `<a href="#/${id}" title="${esc(titleOf(id))}"><svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${navIcons[id]}</svg><span class="lbl">${esc(titleOf(id))}</span></a>`;
-    $("navigation").innerHTML = navGroups().map(([group, keys]) => {
+    $("navigation").innerHTML = `<div class="nav-section"><div class="nav-links">${navGroups()[0][1].map(link).join("")}</div><button type="button" class="nav-group advanced-toggle" data-shell="advanced" aria-expanded="${advancedOpen}">Advanced <span class="chev" aria-hidden="true"></span></button></div>` + (advancedOpen ? navGroups().slice(1).map(([group, keys]) => {
       const shown = keys.filter(visible);
       if (!shown.length) return "";
       const open = group === current || !collapsedGroups.has(group), gid = `nav-group-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       return `<div class="nav-section"><button type="button" class="nav-group" data-shell="group" data-group="${esc(group)}" aria-expanded="${open}" aria-controls="${gid}"><span class="lbl">${esc(t("group." + group.toLowerCase(), null, group))}</span><span class="chev" aria-hidden="true"></span></button><div id="${gid}" class="nav-links"${open ? "" : " hidden"}>${shown.map(link).join("")}</div></div>`;
-    }).join("");
+    }).join("") : "");
   }
   // The fleet overview document (exact fields read): machines[] = {id, status, engines: [{profile, role ("rank 0",
   // "rank 1", "replica", "router", "prefill service"), throughput (completed tok/s, number or null), follower_of
@@ -1198,10 +1205,8 @@
 
   // F49: bottom tab bar on narrow screens.
   function renderTabbar(page) {
-    const guided = Object.hasOwn(routes, "control-center");
-    const tabs = guided ? [["control-center", "Home"], ["devices", "Nodes"], ["components", "Updates"], ["engine-settings", "Engine"]]
-      : [["overview", t("tab.overview", null, "Overview")], ["devices", t("tab.machines", null, "Machines")], ["stats", t("tab.stats", null, "Stats")], ["settings", t("tab.settings", null, "Settings")]].filter(([id])=>Object.hasOwn(routes,id));
-    const html = tabs.map(([id,label])=>`<a href="#/${id}"${id === page ? ' aria-current="page" class="on"' : ""}><svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${navIcons[id]}</svg><span>${esc(label)}</span></a>`).join("");
+    const tabs = [["control-center", "Home"], ["models", "Models"], ["chat", "Chat"], ["devices", "Nodes"]].filter(([id]) => Object.hasOwn(routes, id));
+    const html = tabs.map(([id,label])=>`<a href="#/${id}"${id === page ? ' aria-current="page" class="on"' : ""}><svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${navIcons[id]}</svg><span>${esc(label)}</span></a>`).join("") + '<button type="button" data-shell="mobile-more" aria-label="More navigation">More</button>';
     if ($("tabbar").innerHTML !== html) $("tabbar").innerHTML=html;
   }
   function renderShell(page) {
@@ -1403,14 +1408,19 @@
     const shell = event.target.closest("[data-shell]");
     if (!shell || shell.disabled) return;
     const kind = shell.dataset.shell;
-    if (kind === "group") {
+    if (kind === "advanced") {
+      advancedOpen = !advancedOpen;
+      try { localStorage.setItem("hydraweave-advanced-nav", String(advancedOpen)); } catch (_) { /* storage may be disabled */ }
+      navKey = ""; renderNav(route());
+    } else if (kind === "mobile-more") {
+      $("sidebar").classList.add("open"); $("menu").setAttribute("aria-expanded", "true");
+    } else if (kind === "group") {
       const group = shell.dataset.group;
-      if (shell.getAttribute("aria-expanded") === "true") collapsedGroups.add(group); else collapsedGroups.delete(group);
-      store.set("hydraweave-nav-groups", [...collapsedGroups]);
       const open = shell.getAttribute("aria-expanded") !== "true";
       shell.setAttribute("aria-expanded", String(open));
       $(shell.getAttribute("aria-controls")).hidden = !open;
-      navKey = JSON.stringify([i18n.lang, prefs().hidden_panels, [...collapsedGroups], groupOf(route()) || "Other", Object.keys(routes)]);
+      if (open) collapsedGroups.delete(group); else collapsedGroups.add(group);
+      navKey = "";
     } else if (kind === "strip") { stripOpen = !stripOpen; renderStrip(); $("exceptions").querySelector("[data-shell=strip]")?.focus(); }
     else if (kind === "notify") toggleNotifications();
     else if (kind === "palette") openPalette();
