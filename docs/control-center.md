@@ -177,3 +177,8 @@ Remaining hardware acceptance is explicit: bootstrap a real node, build one supp
 start/stop and reconnect, exercise a two-node failure/rollback, and confirm which persistent modes the selected
 engine supports. Extending latest GLM/MiniMax/H3 or every new engine toggle requires the corresponding adapter
 and qualification; a finished settings form cannot substitute for that contract.
+
+
+## Troubleshooting
+
+Open **Troubleshoot** from the status chip and choose **Run all checks** to run the existing doctor check on this computer and configured nodes. Each result shows a plain-language cause and a next step. **Copy report** copies the check results for support; access tokens are removed.

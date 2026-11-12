@@ -47,6 +47,27 @@
   let inFlight = null;
   let pollAbort = null;
   const esc = value => String(value).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+  const errorTable = [
+    [/unreachable|connection refused|timed out/i, "The node cannot be reached from this computer.", "Check node", "troubleshoot"],
+    [/unauthori[sz]ed|token|pairing refused|authentication/i, "The node did not accept its access credentials.", "Troubleshoot", "troubleshoot"],
+    [/address already in use|port.*(use|busy)/i, "Another service is using this port.", "Open settings", "settings"],
+    [/not found|missing.*(file|asset|model)|no such file/i, "A required file is missing.", "Check files", "models"],
+    [/out of memory|oom/i, "There is not enough memory for this operation.", "Choose a smaller model", "models"],
+    [/gpu slot|turn.*busy|already held/i, "The GPU slot is being used by another job.", "Check GPU turns", "turns"],
+    [/engine.*(binary|executable).*(missing|not found)|binary.*not found/i, "The engine program is missing.", "Install engine", "engines"],
+    [/portal data unavailable|settings.*(read|load)/i, "Hydraweave cannot read its settings.", "Troubleshoot", "troubleshoot"]
+  ];
+  const fixRoutes = new Set(["troubleshoot", "settings", "models", "turns", "engines"]);
+  function fixHref(explained) {
+    return `#/${fixRoutes.has(explained?.fixAction) ? explained.fixAction : "troubleshoot"}`;
+  }
+
+  function explainError(value) {
+    const raw = String(value ?? "");
+    const match = errorTable.find(([pattern]) => pattern.test(raw));
+    return match ? {cause: match[1], fixLabel: match[2], fixAction: match[3], detail: raw, hasDetails: false}
+      : {cause: "Something went wrong", fixLabel: "Troubleshoot", fixAction: "troubleshoot", detail: raw, hasDetails: true};
+  }
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const unwrap = value => object(value) && value.status === "unavailable" ? null : object(value) && Object.hasOwn(value, "value") ? value.value : value;
   function reason(owner, key, fallback = "source not reported") {
@@ -354,8 +375,10 @@
       || (profiles().length ? "stopped" : page === "control-center" ? "No engine serving" : state.docs.profiles ? "not configured" : "loading");
     // "stopped" is the serving state of the profiles, not of this page: say so in words.
     const label = global === "stopped" ? t("serve.none", null, "No engine serving") : global;
-    $("global-status").outerHTML = `<span id="global-status">${statusPill(label)}</span>`;
-    $("mobile-status").outerHTML = `<span id="mobile-status">${statusPill(label)}</span>`;
+    const flags = Object.values(state.errors).length + (profiles().some(p => /error|failed|degraded/i.test(p.state || "")) ? 1 : 0);
+    const chip = !navigator.onLine ? "Offline" : flags ? `Needs attention · ${flags}` : "All good";
+    $("global-status").outerHTML = `<a id="global-status" class="pill p-${flags ? "warn" : navigator.onLine ? "ok" : "off"}" href="#/troubleshoot">${esc(chip)}</a>`;
+    $("mobile-status")?.remove();
     const local = machines().find(m => m.access === "local");
     $("control-machine").textContent = local ? `This computer · ${local.name || local.id}` : "This computer";
     $("version").textContent = doc("settings").version ? `Hydraweave ${doc("settings").version}` : "Hydraweave · local portal";
@@ -418,7 +441,8 @@
     const panel = $("job-panel"), job = state.launchRefusal || state.job, active = !state.launchRefusal && activeJob();
     panel.hidden = !job;
     if (!job) return;
-    panel.innerHTML = `<div class="row"><b>${esc(job.action || "Action")} · ${statusPill(job.state || job.status)}</b><span class="mono">${esc(job.id || job.job || "")}</span>${active && (job.action === "up" || job.action?.includes("/")) ? button(["up", "recipes/deploy"].includes(job.action) ? "Cancel start" : "Cancel job", "cancel-job") : ""}${active && job.arguments?.profile ? button("Stop profile", "stop", {style: "dan"}) : ""}</div><p>${display(job.progress, "waiting for progress")}</p>${["up", "recipes/deploy"].includes(job.action) && (job.id || job.job) ? window.HydraweaveLaunch?.render(state.docs["launch/" + (job.id || job.job)]) || (state.launchErrors?.["launch/" + (job.id || job.job)] ? '<p class="hint">Launch timeline unavailable</p>' : "") : ""}${job.error ? `<p class="field-error" role="alert">${display(job.error)}</p><a class="btn" href="#/logs">View logs</a>` : ""}${job.result != null ? `<details><summary>Result (redacted)</summary><pre class="raw">${esc(JSON.stringify(job.result, null, 2))}</pre></details>` : ""}`;
+    const explained = job.error ? explainError(job.error) : null;
+    panel.innerHTML = `<div class="row"><b>${esc(job.action || "Action")} · ${statusPill(job.state || job.status)}</b><span class="mono">${esc(job.id || job.job || "")}</span>${active && (job.action === "up" || job.action?.includes("/")) ? button(["up", "recipes/deploy"].includes(job.action) ? "Cancel start" : "Cancel job", "cancel-job") : ""}${active && job.arguments?.profile ? button("Stop profile", "stop", {style: "dan"}) : ""}</div><p>${display(job.progress, "waiting for progress")}</p>${["up", "recipes/deploy"].includes(job.action) && (job.id || job.job) ? window.HydraweaveLaunch?.render(state.docs["launch/" + (job.id || job.job)]) || (state.launchErrors?.["launch/" + (job.id || job.job)] ? '<p class="hint">Launch timeline unavailable</p>' : "") : ""}${job.error ? `<p class="field-error" role="alert">Failed: ${esc(explained.cause)}</p><a class="btn" href="${fixHref(explained)}">${esc(explained.fixLabel)}</a>${explained.hasDetails ? `<details><summary>Details</summary><pre>${esc(explained.detail)}</pre></details>` : ""}` : ""}${job.result != null ? `<details><summary>Result (redacted)</summary><pre class="raw">${esc(JSON.stringify(job.result, null, 2))}</pre></details>` : ""}`;
   }
   // A portal restarted under a page that stayed open answers its old CSRF token with 403: read the current token
   // from the portal's own page (same origin only) and send the write once more.
@@ -1012,7 +1036,9 @@
     return `<span class="info"><button type="button" class="info-btn" aria-label="${esc(t("info.label", null, "About this value"))}" aria-describedby="${id}" data-info><span aria-hidden="true">i</span></button><span role="tooltip" id="${id}" class="info-tip">${esc(body)}</span></span>`;
   }
   function problem({title, why, retry = true, next} = {}) {
-    return `<section class="card empty problem"><h2>${esc(title || t("problem.title", null, "Data unavailable"))}</h2><p class="t2">${esc(why || t("problem.no_reason", null, "source not reported"))}</p><div class="row">${retry ? button(t("retry", null, "Retry"), "refresh", {style: "pri"}) : ""}${next?.href ? `<a class="btn" href="${esc(next.href)}">${esc(next.label || next.href)}</a>` : ""}</div></section>`;
+    const explained = explainError(why || "");
+    const fix = next?.href ? `<a class="btn" href="${esc(next.href)}">${esc(next.label || next.href)}</a>` : `<a class="btn" href="${fixHref(explained)}">${esc(explained.fixLabel)}</a>`;
+    return `<section class="card empty problem"><h2>${esc(title || t("problem.title", null, "Data unavailable"))}</h2><p class="t2">${esc(explained.cause)}</p><div class="row">${retry ? button(t("retry", null, "Retry"), "refresh", {style: "pri"}) : ""}${fix}</div>${explained.hasDetails ? `<details><summary>Details</summary><pre>${esc(explained.detail)}</pre></details>` : ""}</section>`;
   }
   // F6: filter boxes for pages; the value survives re-renders (render() keeps focus and caret by id).
   function filter(id, {label, placeholder = "", statuses} = {}) {
@@ -1491,7 +1517,7 @@
   setInterval(renewOwned, 15000);
   window.Hydraweave = {esc, display, unavailable, statusPill, tag, button, card, table, cells, kv, empty, rows, own,
     request, mutate, refresh, render, announce, mutationReason, capability, profiles, profileId, state, activeJob,
-    doc, machines, meter, kpi, chart, lineChart, spark, field, route, routes, pages, download,
+    doc, machines, meter, kpi, chart, lineChart, spark, field, route, routes, pages, download, explainError, fixHref,
     info, problem, filter, filterValue, matches, prefs, setPref, temperature, time: formatTime, zone, t, i18n,
     palette: openPalette, toggleSidebar,
     csrf: () => document.querySelector('meta[name="hydraweave-csrf"]')?.content};

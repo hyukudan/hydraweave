@@ -34,7 +34,8 @@ try{
   vc.on("error",(...e)=>errors.push(e.join(" ")));
   dom=await JSDOM.fromURL(origin+"/",{
     resources:"usable",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole:vc,
-    beforeParse(w){ w.scrollTo=()=>{};
+    beforeParse(w){
+      w.scrollTo=()=>{};
       w.fetch=(input,init={})=>{
         const headers=new Headers(init.headers||{});
         if(init.method && init.method!=="GET")headers.set("Origin",origin);
@@ -65,6 +66,11 @@ try{
   assert.doesNotMatch(d.body.textContent,/TM-R\d|later phase|Phase \d/);
   assert.equal(d.querySelectorAll(".disabled-control").length,0,"no disabled later placeholders on Home");
   click('#navigation [data-shell="advanced"]');
+  for (const [input, cause] of [["unreachable node", "The node cannot be reached"], ["invalid token", "did not accept its access credentials"], ["address already in use", "using this port"], ["missing model file", "required file is missing"], ["out of memory", "not enough memory"], ["GPU slot busy", "GPU slot is being used"], ["engine binary missing", "engine program is missing"], ["Portal data unavailable", "cannot read its settings"]])
+    assert.match(w.Hydraweave.explainError(input).cause, new RegExp(cause, "i"));
+  const unknownError=w.Hydraweave.explainError("fixture raw detail");
+  assert.equal(unknownError.cause,"Something went wrong");assert.equal(unknownError.hasDetails,true);
+  assert.equal(d.querySelectorAll("header #global-status").length,1);assert.equal(d.querySelector("#global-status").getAttribute("href"),"#/troubleshoot");
   assert.equal((await api("setup")).configuration.state,"missing");
   assert.equal(d.querySelector("#page-title").textContent,"Home");
   click('[data-page-action="cc-initialize"]');
