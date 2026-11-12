@@ -190,10 +190,16 @@
     return svg + "</svg>";
   }
   function renderModels() {
-    const d = doc("models"), models = rows(d.models ?? d.assets);
-    const library = models.length ? table(["Model / asset", "Declared size", "Machine", "Verification", ["Declared identity", "hide-n"]], models.map(m => cells([display(m.name ?? m.id), field(m.manifest, "bytes", "bytes"), field(m, "machine"), statusPill(m.presence, reason(m, "presence")), `<span class="mono hide-n">${field(m.manifest, "sha256")} · ${field(m.manifest, "path")}</span>`])).join("")) + `<p class="hint">Manifest sizes and hashes declare identity; they do not prove file presence. Size only means SHA-256 has not been verified. Hashing runs outside measurement turns.</p>${later("Schedule hash", "unavailable · no hash scheduling endpoint in Phase 1b")}` : empty("No model files registered", d.models == null ? reason(d, "models") : "Register asset paths in the cluster configuration; then install a qualified profile.");
-    const choices = profiles().map(p => `<div class="accel"><div class="row between"><b>${esc(p.label || profileId(p))}</b>${statusPill(p.state, reason(p, "state"))}</div>${kv({...p.configuration, preset: p.configuration?.preset || profileId(p), receipt: p.receipt, nodes: p.nodes}, [["Preset", "preset"], ["Receipt", "receipt"], ["Machines", "nodes"]])}${button("Start / switch…", "start-dialog", {disabled: profileStartBlocker(p) || mutationReason() || capability("up"), extra: `data-profile="${esc(profileId(p))}"`})}</div>`).join("");
-    return card("Model library", library, "Files are never downloaded or converted automatically") + card("What can run on the connected machines", `<div class="grid g2">${choices}</div><p>${unavailable(reason(d, "proposals", "later phase · Phase 2.5 · R17 / TM-R15"))}</p>`, "Qualified profiles · placement proposals arrive in Phase 2.5");
+    const d = doc("models"), assets = rows(d.models ?? d.assets), running = new Set(profiles().filter(p => ["running", "starting", "degraded"].includes(p.state)).map(profileId));
+    const cards = profiles().map(p => {
+      const id = profileId(p), configured = rows(p.assets || p.configuration?.assets), related = assets.filter(a => configured.some(c => c.id === a.id && c.machine === a.machine));
+      const present = related.length > 0 && related.every(a => ["complete", "verified", "present", "ok"].includes(String(a.presence || a.state).toLowerCase()));
+      const isRunning = running.has(id), bytes = related.reduce((n, a) => n + Number(a.manifest?.bytes || a.bytes || 0), 0);
+      const stateText = related.length ? (present ? "Files present" : related.some(a => ["partial"].includes(a.presence)) ? "Files partial" : "Files missing") : "Files state unavailable";
+      const action = isRunning ? `<a class="btn pri" href="#/chat?model=${encodeURIComponent(id)}">Open chat</a>` : present ? button("Start", "start-dialog", {style: "pri", disabled: profileStartBlocker(p) || mutationReason() || capability("up"), extra: `data-profile="${esc(id)}"`}) : button("Get files", "files-info", {style: "pri", disabled: "This portal has no browser download workflow for model assets"});
+      return `<article class="accel model-card"><div class="row between"><h2>${esc(p.label || id)}</h2>${statusPill(p.state, reason(p, "state"))}</div><p>${esc(display(bytes || p.size_bytes, "Size unavailable", "bytes"))} · ${esc(rows(p.nodes).map(n => typeof n === "string" ? n : n.machine || n.id).join(", ") || "node placement unavailable")}</p><p>${esc(stateText)}</p>${isRunning ? `<p>Running at <span class="mono">${esc(rows(p.processes).map(x => x.endpoint).find(Boolean) || "URL unavailable")}</span></p>` : ""}<div class="row">${action}${isRunning ? button("Copy API snippet", "copy-api", {extra: `data-profile="${esc(id)}"`}) : ""}</div></article>`;
+    }).join("");
+    return cards || empty("No models are configured", "Choose a model profile in Engine settings.", `<a class="btn pri" href="#/engine-settings">Choose a model</a>`);
   }
   function profileBlocker(p) {
     if (!p) return "No configured profile";
@@ -720,6 +726,11 @@
     if (action === "add" && window.HydraweaveNodesUI) { window.HydraweaveNodesUI.open().catch(error => announce(error.message)); return; }
     if (action === "cancel-job") { const id = state.job?.id || state.job?.job; if (id) mutate("cancel", {job:id}, true).catch(error => announce(error.message)); return; }
     if (action === "refresh") { refresh(); window.HydraweaveRecipes?.refresh(); pageOf(route())?.refresh?.(); return; }
+    if (action === "copy-api") {
+      const p = profiles().find(item => profileId(item) === control.dataset.profile), endpoint = rows(p?.processes).map(item => item.endpoint).find(Boolean);
+      const snippet = `curl ${JSON.stringify((endpoint || "<router-base-url>").replace(/\/$/, "") + "/v1/chat/completions")} -H 'Content-Type: application/json' -d '{"model":"${profileId(p)}","messages":[{"role":"user","content":"Hello"}]}'`;
+      navigator.clipboard?.writeText(snippet).then(() => announce("API snippet copied"), () => announce(snippet)); return;
+    }
     if (control.dataset.recipeAction || control.dataset.pageAction) return;      // recipes.js and feature pages handle their own controls
     if (action === "export-csv") { exportCSV(); return; }
     if (action === "export-config") { download("hydraweave-config-redacted.json", JSON.stringify(doc("settings").configuration, null, 2)); return; }
