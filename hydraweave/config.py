@@ -173,8 +173,16 @@ def read_json(path):
 def preset_names():
     """Discover repo and user presets; user data lives beside the existing runtime state."""
     from . import secrets
-    names = {path.stem for directory in (PRESETS, secrets.runtime_dir() / "presets")
-             for path in directory.glob("*.json") if path.stem != "sources"}
+    names = set()
+    for directory in (PRESETS, secrets.runtime_dir() / "presets"):
+        for path in directory.glob("*.json"):
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            # Files with their own "schema" (sources, RTX placement/prefill services) are not launchable presets.
+            if isinstance(document, dict) and "schema" not in document:
+                names.add(path.stem)
     return tuple(sorted(names))
 
 PRESET_NAMES = preset_names()

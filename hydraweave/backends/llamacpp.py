@@ -18,5 +18,5 @@ class LlamaCpp(Backend):
 BACKEND = LlamaCpp("llamacpp", ("llamacpp",), ("replicas",), ("cuda", "vulkan", "cpu", "hip"),
                    {"http": "/health"}, "sigterm",
                    frozenset({"chat", "completions", "stream", "embeddings", "usage"}),
-                   {"binary": "llama-server", "targets": (), "topology": "replicas", "ready": "http-health", "health_path": "/health", "drain": "sigterm", "bind": "loopback", "key_file": False, "trellis": None, "label": "hl-llama", "layout_required": None, "capabilities": ("http-serve",)},
+                   {"binary": "llama-server", "targets": ("llama-server",), "topology": "replicas", "ready": "http-health", "health_path": "/health", "drain": "sigterm", "bind": "loopback", "key_file": False, "trellis": None, "label": "hl-llama", "layout_required": None, "capabilities": ("http-serve",)},
                    ("llamacpp-generic", "model"))
