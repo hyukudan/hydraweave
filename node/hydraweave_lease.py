@@ -244,8 +244,6 @@ def validate_spec(payload, now=None):
     path(spec.get("root"))
     if spec.get("lab_dir") is not None:
         path(spec["lab_dir"])
-    if kind != "none" and spec.get("lab_dir") is None:
-        raise ValueError("GPU leases require a lab turn script")
     deadline = number(spec.get("deadline_s", 1140), "deadline_s")
     spec["deadline_s"] = deadline
     approval = spec.get("approval")
@@ -284,8 +282,10 @@ def validate_spec(payload, now=None):
     diagnostic_names(spec.get("diagnostic"))
     if spec.get("layout_required") not in {None, "1"}:
         raise ValueError("only production layout 1 is supported")
-    if spec.get("layout_required") and not spec.get("lab_dir"):
-        raise ValueError("layout check requires a lab directory")
+    if kind == "pair" and not spec.get("lab_dir"):
+        raise ValueError("pair leases need lab turn scripts; the built-in provider is single-node")
+    if spec.get("layout_required") and not spec.get("lab_dir") and kind != "none":
+        raise ValueError("built-in turn provider has no USB4 layout state")
     return spec
 
 
@@ -420,8 +420,11 @@ def start_lease(payload):
     command = [str(boot), "supervise-internal", str(filename)]
     env = environment({})
     if spec["kind"] != "none":
-        script = "gpu-turn-pair.sh" if spec["kind"] == "pair" else "gpu-turn.sh"
-        command = [str(path(spec["lab_dir"]) / script), spec["label"], *command]
+        if spec.get("lab_dir"):
+            script = "gpu-turn-pair.sh" if spec["kind"] == "pair" else "gpu-turn.sh"
+            command = [str(path(spec["lab_dir"]) / script), spec["label"], *command]
+        else:
+            command = [str(boot), "turn-wait", str(root), spec["label"], "--", *command]
         if spec["kind"] == "single" and spec.get("approval") is not None:
             env["GPU_TURN_MAX"] = str(spec["approval"]["lease_s"])
     # start_new_session is setsid without an extra executable or shell.
@@ -508,6 +511,10 @@ def usb4_layout_id(layout):
 
 
 def layout_check(spec):
+    if not spec.get("lab_dir"):
+        if spec.get("layout_required"):
+            raise ValueError("built-in turn provider has no USB4 layout state")
+        return
     lab = path(spec["lab_dir"])
     holder = (lab / ".gpu-turn" / "holder").read_text().split()
     index = 1 if holder and holder[0] == "PAIR" else 0

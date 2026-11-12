@@ -1,6 +1,9 @@
 # Non-lab mode: engines as `systemd --user` units (optional, off by default)
 
-Lab machines run GPU work only through bounded leases (`gpu-turn.sh` / `gpu-turn-pair.sh`, SPEC §2.6). Non-lab
+GPU leases use the built-in FIFO turn manager by default when `lab_dir` is null. Set `lab_dir` to keep using the
+optional external `gpu-turn.sh` / `gpu-turn-pair.sh` scripts. The built-in provider stores its holder and queue under
+`<root>/run/turns/` and does not provide USB4 layout-state checks. Service mode for pair topologies is a follow-up
+(item 11b). Lab machines may also run bounded leases through external scripts (SPEC §2.6). Non-lab
 mode is for machines you own outright, where no turn scripts exist and serving should outlive a 20-minute turn.
 It wraps the **same** node `supervise` in a user unit, with no turn and no deadline.
 
