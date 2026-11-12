@@ -387,6 +387,6 @@ def test_configured_device_policy_does_not_inherit_model_name_default(topology):
     _, _, assist = topology
     card = dict(uuid=assist, name="RTX 4090")
     assert not device_policy.resolve(card, [dict(uuid=assist, pc_big_conflict=True)], placement=True)["excluded"]
-    assert device_policy.resolve(card, [])["excluded"]
+    assert not device_policy.resolve(card, [])["excluded"]  # no built-in model-name exclusion
     assert device_policy.resolve(card, [dict(uuid=assist, excluded=True)], placement=True)["excluded"]
     assert device_policy.resolve(dict(uuid=assist, name="generic"), [dict(name="generic")], placement=True)["excluded"]
