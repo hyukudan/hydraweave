@@ -1,6 +1,7 @@
 """Controller-served source package and POSIX bootstrap; never executes privileged commands."""
 import io
 import hashlib
+import gzip
 from pathlib import Path
 import re
 import tarfile
@@ -123,7 +124,8 @@ def package() -> tuple[bytes, str]:
                     for path, name in sources for stat in [path.stat()])
         if key != _cache_key or not _cache_package:
             stream = io.BytesIO()
-            with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+            with gzip.GzipFile(fileobj=stream, mode="wb", mtime=0) as compressed, \
+                    tarfile.open(fileobj=compressed, mode="w") as archive:
                 for path, name in sources:
                     archive.add(path, arcname=name, recursive=False)
             data = stream.getvalue()

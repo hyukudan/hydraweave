@@ -19,8 +19,12 @@ SH = shutil.which("sh")
 
 class InstallerHelpersTests(unittest.TestCase):
     def setUp(self):
-        self.functions = {}
-        exec(compile(SOURCE.split("\ntry:\n    main()", 1)[0], str(SCRIPT), "exec"), self.functions)
+        self.functions = {"__name__": "installer_test"}
+        exec(compile(SOURCE, str(SCRIPT), "exec"), self.functions)
+
+    def test_installer_embeds_the_shared_implementation_verbatim(self):
+        shared = SCRIPT.parent / "hydraweave" / "releases.py"
+        self.assertEqual(SOURCE, shared.read_text(encoding="utf-8").rstrip())
 
     def test_embedded_python_is_valid_and_rejects_unsafe_versions(self):
         compile(SOURCE, str(SCRIPT), "exec")

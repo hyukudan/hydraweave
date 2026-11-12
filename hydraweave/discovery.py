@@ -16,7 +16,7 @@ GROUP = "224.0.0.251"
 PORT = 5353
 TTL = 90
 LOG = logging.getLogger(__name__)
-TXT_FIELDS = {"id", "agent_version", "hostname", "gpu_arch", "unified_memory", "engine_version",
+TXT_FIELDS = {"id", "agent_version", "agent_commit", "hostname", "gpu_arch", "unified_memory", "engine_version",
               "usb4_ids", "usb4_peers", "port"}
 
 
@@ -33,7 +33,7 @@ def from_properties(values, address, port):
             row[key] = json.loads(value)
     if not isinstance(row.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}", row["id"]):
         raise ValueError("invalid announcement id")
-    for key in ("agent_version", "hostname", "gpu_arch", "engine_version"):
+    for key in ("agent_version", "agent_commit", "hostname", "gpu_arch", "engine_version"):
         value = row.get(key, "")
         if not isinstance(value, str) or len(value) > 253 or any(ord(c) < 32 for c in value):
             raise ValueError("invalid announcement " + key)
@@ -52,6 +52,21 @@ def from_properties(values, address, port):
         raise ValueError("invalid agent port")
     row.update(address=address, port=port)
     return row
+
+
+def controller_commit():
+    from pathlib import Path
+    try:
+        return json.loads((Path(__file__).parent / "data" / "_build.json").read_text(encoding="utf-8"))["commit"]
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
+def version_mismatch(row):
+    from . import __version__
+    commit = controller_commit()
+    return bool(row.get("agent_version") != __version__ or
+                (commit and row.get("agent_commit") != commit))
 
 
 class Registry:
@@ -73,7 +88,8 @@ class Registry:
         with self.lock:
             self.records = {key: value for key, value in self.records.items() if value[0] > self.clock()}
             return [dict(value[1], state="discovered, not adopted",
-                         version_status=version_status(value[1].get("agent_version"), __version__))
+                         version_status=version_status(value[1].get("agent_version"), __version__),
+                         version_mismatch=version_mismatch(value[1]))
                     for value in self.records.values()]
 
 

@@ -484,6 +484,7 @@ def build_parser(parser_class=argparse.ArgumentParser):
     uninstall.add_argument("--purge-config", action="store_true")
     uninstall.add_argument("--dry-run", action="store_true")
     uninstall.add_argument("--yes", action="store_true")
+    _module("hydraweave.releases").configure_cli(commands)
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",
                     help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "
@@ -890,7 +891,9 @@ def main(argv=None):
         if getattr(args, "ext_run", None) is not None:
             return args.ext_run(args)
         release = _admission_hold(args)
-        if args.command == "gguf-merge":
+        if args.command in ("releases", "update"):
+            return _module("hydraweave.releases").run_cli(args)
+        elif args.command == "gguf-merge":
             from .gguf_merge import merge
             print(json.dumps(merge(args.parts, args.output)))
         elif args.command == "ui":

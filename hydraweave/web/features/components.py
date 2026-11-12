@@ -5,6 +5,7 @@ jobs only touch the controller's marked component cache. Node builds/activation
 continue through the existing install job and its admission checks.
 """
 from hydraweave import components as core
+from hydraweave import releases
 from hydraweave.web.features import machines
 
 
@@ -40,7 +41,18 @@ def overview(api, query):
                                         download={"enabled": False, "why": str(exc)}) for row in rows],
                     "profiles": [], "storage": {"scope": "controller", "path": None, "error": str(exc)},
                     "config_error": config_error, "checks_are_read_only": True, "activation_is_automatic": False}
+    document["release_update"] = releases.update_status(releases.ReleaseManager())
     return api.document("components", **document)
+
+
+def update_validate(api, arguments):
+    return _arguments(arguments)
+
+
+def update(api, arguments, ctx):
+    _arguments(arguments)
+    return releases.portal_update(releases.ReleaseManager(), report=ctx, cancelled=ctx.cancelled,
+                                  url=getattr(api, "portal_health_url", "http://127.0.0.1:18700/api/health"))
 
 
 def plan(api, query):
@@ -89,6 +101,7 @@ def download(api, arguments, ctx):
 def register(reg):
     reg.get("components", overview)
     reg.get("components/plan", plan)
+    reg.job("components/update", update, validate=update_validate, exclusive=True, deadline_s=3600)
     reg.job("components/check", check, validate=check_validate, deadline_s=240)
     reg.job("components/download", download, validate=download_validate, deadline_s=1900)
     reg.capability("components", True, "Explicit upstream checks and immutable source downloads; profile installs stay pinned")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import errno
 import hmac
 import importlib.machinery
@@ -17,9 +18,12 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.request import Request, urlopen
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, bind, discovery
@@ -73,7 +77,7 @@ def metadata(root, lab_dir, address, port):
     for manifest in sorted((root / "releases").glob("*/MANIFEST.json"))[:64]:
         versions.append(manifest.parent.name)
     return {"id": "node-" + identity_of(root),
-            "agent_version": __version__, "hostname": socket.gethostname(),
+            "agent_version": __version__, "agent_commit": discovery.controller_commit(), "hostname": socket.gethostname(),
             "gpu_arch": arch, "unified_memory": (ram.get("value") or {}).get("total_bytes", 0),
             "engine_version": ",".join(versions)[:200],
             **usb, "address": address, "port": port}
@@ -109,13 +113,17 @@ def prepare(root):
 class Agent(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, root, *, lab_dir=None, record=None, call=dispatch):
+    def __init__(self, address, root, *, lab_dir=None, record=None, call=dispatch, runner=None, download=None):
         self.root, self.lab_dir, self.call = prepare(root), lab_dir, call
         policy = self.root / "etc" / "install-policy.json"
         if not policy.exists():
             from . import secrets as storage
             storage._write(policy, json.dumps({"lab_dir": lab_dir, "asset_paths": []}).encode(), replace=False)
         self.lock, self.failures = threading.Lock(), []
+        self.update_lock = threading.RLock()
+        self.runner = runner or subprocess.run
+        self.download = download or download_package
+        self.updating = False
         self.code = f"{secrets.randbelow(100000000):08d}"
         self.code_expires = time.monotonic() + 600
         self.credentials = self.root / "etc" / "agent-pairing.json"
@@ -178,6 +186,10 @@ class Agent(ThreadingHTTPServer):
             return {"code": self.code, "expires_in": 600}
 
     def invoke(self, verb, payload):
+        with self.update_lock:
+            return self._invoke(verb, payload)
+
+    def _invoke(self, verb, payload):
         # A paired controller cannot redirect this daemon to another user's install or lab root.
         if payload.get("root", str(self.root)) != str(self.root):
             raise ValueError("wrong install root")
@@ -187,6 +199,10 @@ class Agent(ThreadingHTTPServer):
             for part in payload.get("parts", []):
                 self.check_paths(part.get("payload", {}))
         self.check_paths(payload)
+        if verb == "agent-update":
+            return self.update_agent(payload)
+        if self.updating and verb not in {"version", "doctor", "gpu", "poll", "status", "turns", "stop", "cancel", "logs"}:
+            raise ValueError("Node update in progress; new work is refused until restart")
         if verb == "provision-prepare":
             tool = load_tool()
             install = tool.extension_for("install")
@@ -234,11 +250,69 @@ class Agent(ThreadingHTTPServer):
             return {"offset": offset + len(data)}
         return self.call(verb, payload)
 
+    def update_agent(self, payload):
+        """Authenticated /call verb; hashes come from the paired controller."""
+        if set(payload) != {"origin", "sha256"}:
+            raise ValueError("node update requires origin and sha256")
+        origin, digest = payload["origin"], payload["sha256"]
+        from .bootstrap import script
+        script(origin)  # reuse the bootstrap's strict origin validation
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("invalid package SHA256")
+        with self.update_lock:
+            if self.updating:
+                raise ValueError("Node update already in progress")
+            install = load_tool().extension_for("install")
+            if install.active_leases(self.root):
+                raise ValueError("Update node refused: a live GPU lease is active; stop it first")
+            if self.lab_dir:
+                turns = self.call("turns", {"lab_dir": self.lab_dir})
+                holder = turns.get("holder")
+                if turns.get("error") or (holder and holder.get("alive") is not False):
+                    raise ValueError("Update node refused: a GPU turn is live or its state cannot be verified")
+                if not turns.get("present"):
+                    raise ValueError("Update node refused: GPU turn state is unavailable")
+            self.updating = True
+            try:
+                self._update_command(["systemctl", "--user", "is-active", "hydraweave-node.service"])
+                with tempfile.TemporaryDirectory(prefix="hydraweave-node-update-") as directory:
+                    data = self.download(origin.rstrip("/") + "/node/package.tar.gz")
+                    if hashlib.sha256(data).hexdigest() != digest:
+                        raise ValueError("Node package SHA256 mismatch; nothing was installed")
+                    package = Path(directory) / "package.tar.gz"
+                    package.write_bytes(data)
+                    python = self.root / "agent-venv" / "bin" / "python"
+                    if not python.is_file():
+                        raise ValueError("Node agent venv is missing; run node bootstrap first")
+                    self._update_command([str(python), "-m", "pip", "install", "--upgrade", "--force-reinstall",
+                                          "hydraweave[node] @ " + package.as_uri()])
+                # A separate unit survives this daemon's cgroup being stopped. The delay lets /call reply.
+                self._update_command(["systemd-run", "--user", "--collect", "--on-active=2s",
+                                      "--unit=hydraweave-node-restart-" + secrets.token_hex(6),
+                                      "--", "systemctl", "--user", "restart", "hydraweave-node.service"])
+                return {"state": "updated", "restart": "scheduled"}
+            except BaseException:
+                self.updating = False
+                raise
+
+    def _update_command(self, argv):
+        result = self.runner(argv, capture_output=True, text=True, timeout=1800, **no_window())
+        if result.returncode:
+            raise ValueError("Node update failed: " + (result.stderr or result.stdout or "command failed")[-1000:])
+
     def check_paths(self, payload):
         if "root" in payload and payload["root"] != str(self.root):
             raise ValueError("wrong install root")
         if "lab_dir" in payload and payload["lab_dir"] != self.lab_dir:
             raise ValueError("wrong lab directory")
+
+
+def download_package(url):
+    with urllib.request.urlopen(url, timeout=60) as response:
+        data = response.read(64 * 1024 * 1024 + 1)
+    if len(data) > 64 * 1024 * 1024:
+        raise ValueError("Node package exceeds 64 MiB")
+    return data
 
 
 class AgentHandler(BaseHTTPRequestHandler):

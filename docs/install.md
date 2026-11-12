@@ -54,7 +54,8 @@ curl -fsSL https://github.com/hyukudan/hydraweave/releases/latest/download/insta
 regardless of its `dry_run` input. Until the first tag release, use a source checkout below.
 
 The installer resolves the latest GitHub release, verifies the wheel's SHA-256 against that same
-release's `SHA256SUMS`, and installs it into `~/.local/share/hydraweave/venvs/v<version>`.
+release's `SHA256SUMS`, and stages a separate environment in
+`~/.local/share/hydraweave/venvs/<id>` (`<id>` includes the version and wheel digest).
 It writes `~/.local/bin/hydraweave` and prints a PATH instruction if needed. No root command runs.
 If Python venv support is missing, it prints `sudo apt-get install python3-venv` for you to run.
 Git and SSH are needed for cluster operations, not for installing the wheel.
@@ -73,6 +74,66 @@ service configuration remain explicit; see [Node discovery](node-discovery.md). 
 `~/.local`, including both `share/hydraweave/venvs` and `bin`. Dry runs resolve metadata (or verify
 local wheels) without downloading release assets or writing an environment or shim. An existing
 version environment is left intact and reported as already installed.
+
+### Linux releases, updates and rollback
+
+The data root is `<prefix>/share/hydraweave` (default prefix `~/.local`):
+
+```text
+releases/<id>/release.json   # id, version, commit, created, wheel_sha256, extras
+venvs/<id>/                # independent Python environment per wheel
+current -> venvs/<id>       # atomically replaced symlink
+previous                   # previous release id
+```
+
+The shims in `<prefix>/bin` always run through `current/bin`; activation does not
+rewrite them. The standalone installer embeds `hydraweave/releases.py` verbatim;
+maintainers regenerate it with `python tools/embed_installer.py`.
+
+```sh
+hydraweave releases list
+hydraweave releases activate <id>
+hydraweave releases remove <old-id>
+hydraweave update --check
+hydraweave update
+hydraweave update --version v0.1.0
+hydraweave update --wheel ./hydraweave-0.1.0-py3-none-any.whl
+```
+
+`list` marks current and previous releases; removing the current release is
+refused. For a custom prefix use `hydraweave releases --prefix /path list` or
+`hydraweave update --prefix /path`. An installed venv infers its prefix; source
+checkouts can also set `HYDRAWEAVE_PREFIX`.
+
+Update verifies the release wheel against `SHA256SUMS`, creates a new venv,
+installs the release and its compatible lock/package resources, then activates
+it and runs the new `hydraweave --version`. A local `--wheel` requires adjacent
+`SHA256SUMS` and uses the same verified, binary-only offline dependencies as the
+installer. Node extras are retained from the active release. `--check` only
+reads metadata and clearly reports when no release is published.
+
+If a portal user service (`hydraweave-portal.service`, `hydraweave-ui.service` or
+`hydraweave.service`) is active, update restarts it and polls `/api/health`.
+Configure its `ExecStart` to use the stable `<prefix>/bin/hydraweave ui` shim.
+The default health URL is `http://127.0.0.1:18700/api/health`; portal-triggered
+updates use the portal's actual listen port. Portal updates run in a separate
+transient user unit so restarting the portal cannot interrupt rollback; progress
+and the result persist below `update-jobs/` and reappear after reconnecting.
+
+A failed health check automatically restores the old `current` pointer, restarts
+the old portal service, and reports **rolled back** with the failure reason.
+A failed initial installation reports that no previous release exists. Successful
+updates retain three releases by default, always protecting current and previous;
+the shared manager's `keep` setting accepts a minimum of two. Existing GPU engine
+deployments remain under their profile installer and are not restarted by this
+controller update. No root command runs automatically.
+
+For paired agents that discovery reports as **Node out of date**, **Update node**
+re-pulls the controller's `/node/package.tar.gz`, verifies its digest from the
+authenticated request, reinstalls the node package and restarts its user service.
+The agent refuses this action while a GPU lease or turn is live, or turn state
+cannot be checked. Stop the active work before retrying; the portal must be
+reachable from the node at the browser's origin.
 
 For offline installation, put the wheel, `SHA256SUMS` and any dependency wheels in the same directory.
 All sibling wheels must appear in `SHA256SUMS` and pass verification. Pip uses `--no-index` and only

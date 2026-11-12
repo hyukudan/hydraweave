@@ -53,12 +53,14 @@ form read; they do not restart a model. GET documents do not run Git, contact a 
 | `GET discovery/plan` | Optional `machine`, `profile` (together) | Exact pinned engine recipe, model requirements, model roots and blockers; no node calls. |
 | `POST discovery/adopt` | `id`, `code` | Verify the node console code, merge its machine entry and save a private agent token. Codes/tokens are not audited. Starts provisioning assigned profiles as a visible job. |
 | `POST discovery/provision` | `machine`, optional `profile` | Background job: use existing bundles/builds and verified resumable downloads; activate for a stopped profile; never start inference. |
+| `POST discovery/update` | `machine`, `origin` | Exclusive background job for a paired agent: re-pull the controller's `/node/package.tar.gz` with an authenticated SHA-256 digest, reinstall and schedule its user-service restart. Refuse live GPU leases/turns or unverifiable turn state. |
 | `POST setup/initialize` | `{}` | Create a controller-only workspace only when its configuration does not exist. Audited. |
 | `POST setup/router/validate` | `machine`, optional `port`, `version` | Preview router placement and preset constraints; no write. |
 | `POST setup/router/save` | `version`, `machine`, optional `port` | Save placement for the next launch; refuse stale forms or saved/running launches. Audited. |
 | `GET components` | None | Component pins, checked upstream revisions, staged sources, declared install evidence and cache location. |
 | `GET components/plan` | Optional `profile` | Node installation steps, exact revisions, build host and blockers. |
 | `POST components/check` | Optional `component` | Background job: check allowlisted Git remotes and cache the result. Does not install. |
+| `POST components/update` | `{}` | Exclusive background job: verify a published Hydraweave wheel, stage and activate side by side, health-check and automatically roll back on failure. Progress and the updated/rolled_back result with reason persist across a portal restart. Browser-supplied paths and commands are refused. |
 | `POST components/download` | `component`, `commit` | Background job: download a full configured or recently checked SHA to an immutable controller cache. Does not activate. |
 | `GET engine-settings` | None | Supported presets, configured profiles, typed controls, model assets and launch previews. |
 | `POST engine-settings/validate` | `profile`, `changes`, optional `version` | Validate a configuration patch and render the proposed launch, without saving. |
@@ -71,6 +73,11 @@ not a qualified engine/Trellis/driver deployment. The existing `install` job bui
 profile on SSH nodes; USB4 kernel installation remains explicit node maintenance.
 
 Command-line equivalents: `hydraweave setup status|init|router`, `hydraweave components status|check|download|plan`.
+
+`hydraweave update [--check] [--wheel PATH] [--version V]` uses the same release
+transaction as `components/update`. The separate HTTP transport endpoint
+`/api/health` returns liveness, package version and build commit without polling
+nodes. The existing `/hydraweave/api/health` findings document is unchanged.
 All take `--config`. The portal also accepts `hydraweave ui --config <path>` for a new or existing workspace.
 
 ## Access and authentication
