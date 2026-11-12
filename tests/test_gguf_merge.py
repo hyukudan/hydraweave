@@ -7,7 +7,11 @@ import struct
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-import pytest
+try:
+    import pytest
+except ImportError as exc:  # unittest discover runs before pytest is installed
+    import unittest
+    raise unittest.SkipTest("pytest is required") from exc
 
 from hydraweave import cli, gguf_merge
 
