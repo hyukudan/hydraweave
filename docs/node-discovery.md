@@ -166,3 +166,8 @@ python packaging/build.py --format rpm
 Packages ship the Python implementation and a systemd **user** unit. After the administrator installs
 the package, its user runs `systemctl --user enable --now hydraweave-node`.
 Packages do not enable a root service or install a driver.
+
+
+## Add a node
+
+Open Home and choose **Add node**. Discovered nodes can be adopted with the short code printed by the node agent; confirm the displayed fingerprint by selecting the matching read-only value. If discovery is unavailable, use the existing address form and verify the SSH host key before trusting the node.

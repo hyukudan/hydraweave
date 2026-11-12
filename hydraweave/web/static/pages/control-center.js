@@ -162,9 +162,10 @@
 
   async function trustNode(mid) {
     const scan = await UI().post("ops/hostkey/scan",{machine:mid});
-    UI().open({title:`Verify ${mid}`,confirm:"Trust this host key",body:`<p>Compare this fingerprint with the one shown on the node or provided by your administrator.</p><ul class="cc-fingerprints">${(scan.candidates || []).map(c => `<li><b>${esc(c.algorithm)}</b><code>${esc(c.fingerprint)}</code></li>`).join("")}</ul><label class="field" for="cc-fingerprint">Fingerprint you verified<input class="inp" id="cc-fingerprint" spellcheck="false" autocomplete="off" placeholder="SHA256:…"></label>`,submit:async () => {
-      const fingerprint = document.getElementById("cc-fingerprint").value.trim();
-      if (!(scan.candidates || []).some(c => c.fingerprint === fingerprint)) throw new Error("Enter one of the scanned fingerprints after verifying it on the node.");
+    UI().open({title:`Verify ${mid}`,confirm:"It matches · trust this node",body:`<p>Compare this fingerprint with the one shown on the node. Select the matching fingerprint to confirm.</p><ul class="cc-fingerprints">${(scan.candidates || []).map((c,i) => `<li><label class="check"><input type="radio" name="cc-fingerprint" value="${i}"><b>${esc(c.algorithm)}</b> <code>${esc(c.fingerprint)}</code></label></li>`).join("")}</ul><details><summary>Details</summary><p>The fingerprint is shown read-only for comparison.</p></details>`,submit:async () => {
+      const index = Number(document.querySelector('input[name="cc-fingerprint"]:checked')?.value);
+      const fingerprint = scan.candidates?.[index]?.fingerprint;
+      if (!fingerprint) throw new Error("Select the fingerprint that matches the node.");
       await H().mutate("hosts/pin",{machine:mid,fingerprint});
     }});
   }
