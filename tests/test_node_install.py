@@ -51,6 +51,13 @@ class InstallCase(unittest.TestCase):
 
 
 class InstallTests(InstallCase):
+    def test_missing_rocm_fails_before_fetching_sources(self):
+        with patch.object(install, "lab_idle"), patch.object(install, "detect_rocm", return_value=None), \
+                patch.object(install, "fetch_sources") as fetch:
+            with self.assertRaisesRegex(ValueError, "ROCm not found; set ROCM_PATH"):
+                install.build(self.root, self.payload, "a" * 12)
+        fetch.assert_not_called()
+
     def test_verbs(self):
         self.assertEqual(install.VERBS, {"install", "job", "releases", "activate", "uninstall", "verify-model", "stat-assets", "push-release",
                                          "bundle-prepare", "bundle-accept", "bundle-discard"})
@@ -387,8 +394,13 @@ class PosixBuildTests(InstallCase):
             shutil.copyfile(fixture, path)
             path.chmod(0o755)
         self.trace = self.base / "trace.jsonl"
+        rocm = self.base / "rocm"
+        (rocm / "bin").mkdir(parents=True)
+        shutil.copyfile(tools / "amdclang++", rocm / "bin" / "amdclang++")
+        (rocm / "bin" / "amdclang++").chmod(0o755)
         self.environment = patch.dict(os.environ, {"PATH": str(tools) + os.pathsep + os.environ["PATH"],
-                                                 "FAKE_TRACE": str(self.trace), "FAKE_SYSTEMD": "0"})
+                                                 "FAKE_TRACE": str(self.trace), "FAKE_SYSTEMD": "0",
+                                                 "ROCM_PATH": str(rocm)})
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
@@ -409,12 +421,16 @@ class PosixBuildTests(InstallCase):
         second = self.wait_job(install.run("install", self.payload))
         self.assertEqual(second["release_id"], first["release_id"])
         _, manifest = install.release(self.root, first["release_id"])
-        self.assertEqual(manifest["runtime_env"], install.RUNTIME_ENV)
+        self.assertEqual(manifest["runtime_env"], install.runtime_environment(install.detect_rocm()))
+        self.assertEqual(manifest["rocm_root"], os.environ["ROCM_PATH"])
         self.assertEqual(manifest["components"], self.payload["components"])
         self.assertTrue(manifest["capabilities"]["strix-server"]["ok"])
         trace = [json.loads(line) for line in self.trace.read_text().splitlines()]
         self.assertTrue(any(row[0] == "git" and "--depth" in row and "1" in row for row in trace))
         self.assertTrue(any(row[0] == "ninja" and "-j6" in row and "strix-host-tests" in row for row in trace))
+        self.assertTrue(any(row[0] == "cmake" and
+                            "-DCMAKE_HIP_COMPILER=" + os.environ["ROCM_PATH"] + "/bin/amdclang++" in row
+                            for row in trace))
         source = self.root / "src" / ("tensormeld-" + "c" * 40)
         self.assertTrue((source / ".git").is_dir())
         self.assertFalse(any(row[0] == "cmake" and str(source) in row for row in trace))
@@ -445,7 +461,7 @@ class PosixBuildTests(InstallCase):
         peer_home = self.base / "peer home"
         peer_boot = peer_home / ".hydraweave-boot"
         peer_boot.mkdir(parents=True)
-        for name in ("hydraweave_install.py", "hydraweave_compat.py"):
+        for name in ("hydraweave_install.py", "hydraweave_compat.py", "hydraweave_rocm.py"):
             shutil.copyfile(NODE / name, peer_boot / name)
         tools = self.base / "tools"
         shutil.copyfile(Path(__file__).with_name("fixtures") / "node_install" / "fake_ssh.py", tools / "ssh")

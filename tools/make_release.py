@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = "hydraweave/release-v1"
 COMPONENTS = ("tensormeld", "engine", "strix-trellis")
 # Executable inside the release (git tracks no mode bits on Windows checkouts).
-EXECUTABLE = {"node/hydraweave-node", "node/build-node.sh", "tools/make_release.py", "tools/ci-docker.sh"}
+EXECUTABLE = {"install.sh", "node/hydraweave-node", "node/build-node.sh", "tools/make_release.py", "tools/ci-docker.sh"}
 # git archive applies text/eol conversion; pin it so a Windows core.autocrlf=true cannot add CRLF.
 ARCHIVE = ("-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive")
 
@@ -115,9 +115,17 @@ def write_archives(tree, name, out, stamp):
     return [zipped, tarred]
 
 
+def write_checksums(out: Path) -> None:
+    """Hash every top-level release asset, including optional engine archives."""
+    assets = sorted(p for p in out.iterdir() if p.is_file() and p.name != "SHA256SUMS")
+    sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in assets)
+    (out / "SHA256SUMS").write_text(sums, encoding="utf-8")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=ROOT / "dist")
+    parser.add_argument("--checksums-only", action="store_true", help="hash all assets already in --out")
     parser.add_argument("--wheels", action="store_true",
                         help="bundle setuptools and wheel for an offline pip install (needs PyPI now)")
     parser.add_argument("--node-sources", action="store_true",
@@ -125,6 +133,9 @@ def main(argv=None):
     parser.add_argument("--allow-dirty", action="store_true",
                         help="build from HEAD although the checkout has uncommitted changes (they are NOT included)")
     args = parser.parse_args(argv)
+    if args.checksums_only:
+        write_checksums(args.out)
+        return 0
     dirty = git("status", "--porcelain", "--untracked-files=no", "--ignore-submodules=dirty")
     if dirty and not args.allow_dirty:
         raise SystemExit("the checkout has uncommitted changes:\n" + dirty)
@@ -163,8 +174,7 @@ def main(argv=None):
                     "components": components, "files": collect(tree)}
         (tree / "RELEASE.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         outputs = write_archives(tree, name, args.out, stamp)
-    sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in outputs)
-    (args.out / "SHA256SUMS").write_text(sums, encoding="utf-8")
+    write_checksums(args.out)
     print(json.dumps({"name": name, "archives": [str(p) for p in outputs],
                       "files": len(manifest["files"]), "sha256sums": str(args.out / "SHA256SUMS")}, indent=2))
     return 0

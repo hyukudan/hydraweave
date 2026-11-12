@@ -19,13 +19,20 @@ fi
 engine=$1 trellis=$2 build=$3 out=$4
 shift 4
 mkdir -p -- "$build" "$out"
-export PATH="/opt/rocm/core-10.1/bin:$PATH"
-export HIPCXX=/opt/rocm/core-10.1/bin/amdclang++
-export ROCM_PATH=/opt/rocm/core-10.1
-export HIP_PATH=/opt/rocm/core-10.1
+detect_rocm() {
+    python3 "$(dirname -- "${BASH_SOURCE[0]}")/hydraweave_rocm.py"
+}
+ROCM_PATH=$(detect_rocm)
+export ROCM_PATH
+export PATH="$ROCM_PATH/bin:$PATH"
+export HIPCXX="$ROCM_PATH/bin/amdclang++"
+export HIP_PATH="$ROCM_PATH"
 configure=()
 while IFS= read -r flag; do
-    [[ -z "$flag" ]] || configure+=("$flag")
+    [[ -z "$flag" ]] && continue
+    # The lock pins the qualified compiler path; build with the detected ROCm instead.
+    [[ "$flag" == -DCMAKE_HIP_COMPILER=* ]] && flag="-DCMAKE_HIP_COMPILER=$HIPCXX"
+    configure+=("$flag")
 done <<< "${HYDRAWEAVE_CONFIGURE:-}"
 # Per-family trellis recipe (hydraweave/engines.py): ds41 links the archive through STRIX_DS41_TRELLIS_*
 # (adapter HYDRAWEAVE_TRELLIS_API, v12 unless the preset says otherwise); minimax points STRIX_MINIMAX_TRELLIS_DIR at
@@ -57,7 +64,7 @@ if [[ "$trellis" != - ]]; then
             "-DSTRIX_DS41_TRELLIS_INCLUDE_DIR=$trellis/include")
     fi
 fi
-cmake -S "$engine" -B "$build/engine" -G Ninja "${configure[@]}"
+cmake -S "$engine" -B "$build/engine" -G Ninja "${configure[@]}" -DCMAKE_HIP_COMPILER="$HIPCXX"
 regex=${HYDRAWEAVE_CTEST_REGEX:?a named host-only ctest subset is required}
 ctest --test-dir "$build/engine" --show-only=json-v1 -R "$regex" > "$build/tests.json"
 # CTest provides the executable paths, so only the selected host test targets are built.

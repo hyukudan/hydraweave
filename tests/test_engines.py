@@ -504,8 +504,8 @@ class LifecycleTests(unittest.TestCase):
 
     def test_original_presets_build_exactly_mains_recipe(self):
         """qwen-replicas, ds41-pair and ds41-pair-long declare no components: their install payload (recipe with
-        required_flags and options, and components) is pinned to what main computes, so their release ids stay
-        main's. The expected values were computed by main's install path (tests/fixtures/main_recipes.json)."""
+        required_flags and options, and components) is pinned to what main computes, so their
+        release ids stay main's; the build swaps in the detected ROCm compiler. The expected values were computed by main's install path (tests/fixtures/main_recipes.json)."""
         expected = json.loads(read_fixture(ROOT / "tests" / "fixtures" / "main_recipes.json"))["presets"]
         self.assertEqual(sorted(expected), ["ds41-pair", "ds41-pair-long", "qwen-replicas"])
         obj = cluster_obj()

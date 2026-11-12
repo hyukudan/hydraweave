@@ -1,7 +1,8 @@
 # Installing Hydraweave from scratch
 
 This guide takes a control machine with nothing installed to a validated configuration and a passing
-`doctor` on every node. Every step was run on a clean path (see [How this guide was checked](#how-this-guide-was-checked)).
+`doctor` on every node. Historical checks are listed in [How this guide was checked](#how-this-guide-was-checked);
+the release installer is covered by hardware-free unit tests.
 Running a profile on the GPUs (`install`, `up`) needs the node toolchain and, in lab mode, the lab's
 turn scripts; those steps are listed at the end.
 
@@ -9,11 +10,11 @@ turn scripts; those steps are listed at the end.
 
 ## 1. What you need
 
-**Control machine** (where you run `hydraweave`; Windows is the main target, Linux works too):
+**Control machine** (where you run `hydraweave`; Linux and Windows are supported):
 
 | Need | Windows | Linux |
 |---|---|---|
-| Python | 3.11, 3.12 or 3.13 (`py -3.13` or `python` on PATH) | `python3` ≥ 3.11 with `venv` |
+| Python | controller requires ≥ 3.11 (node agent ≥ 3.10); the Windows helper requires ≥ 3.11 (`py` or `python` on PATH) | `python3` ≥ 3.11 with `venv` and `ensurepip` (node-only `--node`: ≥ 3.10) |
 | git | Git for Windows | distribution package |
 | ssh client | the Windows OpenSSH client (Settings → Optional features), plus Git for Windows' copy, see [Troubleshooting](#troubleshooting) | `openssh-client` |
 | ssh key | a key in `%USERPROFILE%\.ssh` (for example `id_ed25519`) whose public half is in each node's `~/.ssh/authorized_keys` | the same in `~/.ssh` |
@@ -25,7 +26,7 @@ turn scripts; those steps are listed at the end.
 |---|---|
 | `python3` ≥ 3.10, `git` | `python`, `git` |
 | `cmake` ≥ 3.24, `ninja` | `cmake`, `ninja` |
-| ROCm core 10.1 at `/opt/rocm/core-10.1` with `amdclang++` | `rocm_root`, `rocm_version`, `rocm_package_version`, `compiler` |
+| ROCm SDK with `amdclang++` for source builds; root detected automatically (see below) | `rocm_root`, `rocm_version`, `rocm_package_version`, `compiler` |
 | a gfx1151 GPU visible in sysfs | `gfx_targets` |
 | disk space for sources, builds and releases | `disk` |
 | lab mode only: the lab directory with `gpu-turn.sh` / `gpu-turn-pair.sh` | `lab` |
@@ -41,7 +42,45 @@ Hydraweave never installs or changes any of these, needs no root, and never touc
 
 The Nodes view compares an agent's announced version with the controller. A different release is shown as **Out of date**; local and development suffixes do not count as a release difference. An absent version is shown as unknown. `versions.lock` records component pins, and CI warns when those commits differ from the repository's submodule gitlinks. Run `python tools/check_versions_lock.py --strict` to make drift fail locally.
 
-### From a release archive (recommended)
+### Linux one-line installer
+
+```sh
+curl -fsSL https://github.com/hyukudan/hydraweave/releases/latest/download/install.sh | sh
+```
+
+**No GitHub release exists yet.** Releases are produced by pushing a `v*` tag that matches
+`pyproject.toml` (for example `v0.1.0`). The release workflow builds a wheel, sdist, source archives,
+`install.sh` and `SHA256SUMS`. A manual workflow run only builds artifacts and never publishes,
+regardless of its `dry_run` input. Until the first tag release, use a source checkout below.
+
+The installer resolves the latest GitHub release, verifies the wheel's SHA-256 against that same
+release's `SHA256SUMS`, and installs it into `~/.local/share/hydraweave/venvs/v<version>`.
+It writes `~/.local/bin/hydraweave` and prints a PATH instruction if needed. No root command runs.
+If Python venv support is missing, it prints `sudo apt-get install python3-venv` for you to run.
+Git and SSH are needed for cluster operations, not for installing the wheel.
+
+Download `install.sh` once to pass options:
+
+```sh
+sh install.sh --dry-run
+sh install.sh --version v0.1.0 --node
+sh install.sh --prefix "$HOME/tools/hydraweave"
+sh install.sh --from-file ./hydraweave-0.1.0-py3-none-any.whl
+```
+
+`--node` installs the wheel's node extras and adds a `hydraweave-node` shim. Start, pairing and
+service configuration remain explicit; see [Node discovery](node-discovery.md). `--prefix` replaces
+`~/.local`, including both `share/hydraweave/venvs` and `bin`. Dry runs resolve metadata (or verify
+local wheels) without downloading release assets or writing an environment or shim. An existing
+version environment is left intact and reported as already installed.
+
+For offline installation, put the wheel, `SHA256SUMS` and any dependency wheels in the same directory.
+All sibling wheels must appear in `SHA256SUMS` and pass verification. Pip uses `--no-index` and only
+binary wheels. Node-only installs on Python 3.10 require a `tomli` wheel; `--node` also needs its optional dependencies.
+The wheel includes the controller and node agent; a local TensorMeld router still needs the pinned
+source supplied by the source archive or checkout.
+
+### From a release archive
 
 A release is `hydraweave-<version>-g<commit>.zip` (Windows) or `.tar.gz` (Linux) with a `SHA256SUMS` file.
 It contains the product and the pinned TensorMeld source; every file is listed with its sha256 in `RELEASE.json`.
@@ -66,10 +105,8 @@ tar xzf hydraweave-<version>-g<commit>.tar.gz
 Only the TensorMeld submodule is needed on the control machine
 (the engine and strix-trellis are fetched and built on the nodes by their pinned SHAs):
 
-Set `REPOSITORY_URL` to this repository’s current clone URL; the hosting repository has not been renamed.
-
 ```sh
-git clone "$REPOSITORY_URL" hydraweave
+git clone https://github.com/hyukudan/hydraweave.git
 cd hydraweave
 git submodule update --init --depth 1 third_party/tensormeld
 ```
@@ -100,20 +137,37 @@ What it does:
 
 Add `%LOCALAPPDATA%\hydraweave` to your user PATH if you want to type `hloom` anywhere; the rest of this guide assumes you did.
 
-### Linux
+### Linux from source (advanced)
 
 ```sh
 cd hydraweave-<version>-g<commit>            # or the checkout
 python3 -m venv ~/.local/share/hydraweave/venv
 ~/.local/share/hydraweave/venv/bin/pip install ./third_party/tensormeld -e .
+mkdir -p ~/.local/bin
 ln -s ~/.local/share/hydraweave/venv/bin/hydraweave ~/.local/bin/hloom   # optional
 hloom --version
 ```
 
 Keep the unpacked directory: the install is editable, and the node tool is copied from it.
 
-There is no Linux installer: `sha256sum -c` checks the archive as a whole, but nothing checks the unpacked
-files against `RELEASE.json` (the Windows installer does). Unpack into an empty directory and do not edit it.
+For this manual source path, `sha256sum -c` checks the archive as a whole. Unpack into an empty directory
+and do not edit it. The one-line installer above instead verifies the wheel before invoking pip.
+
+### ROCm discovery and optional engine assets
+
+Builds, runtime manifests and node inspection share one detector: an existing `$ROCM_PATH`, then
+`/opt/rocm` (normally a symlink to the installed SDK), then the numerically newest directory matching
+`/opt/rocm-*` or `/opt/rocm/core-*`. If `/opt/rocm` only contains versioned `core-*` children, it is
+treated as a parent directory. Set `ROCM_PATH` explicitly to select an SDK; the build records that
+root and library paths in its manifest. Discovery does not establish hardware compatibility;
+the qualified gfx1151 baseline remains ROCm core 10.1.
+
+Repository maintainers can set the `HYDRAWEAVE_BUILD_NODE_ENGINE` Actions variable to `true` to try
+building the gfx1151 Qwen engine (`strix-hip-decode-token`) inside `rocm/dev-ubuntu-24.04`. Successful builds attach
+`hydraweave-node-engine-<version>-linux-x86_64-gfx1151.tar.gz`, including a manifest, to the tag release
+and its `SHA256SUMS`. Compiler failures do not block the Python release. These optional binaries
+require a compatible ROCm runtime; this installer does not automatically activate them or replace
+profile-specific source builds (including Trellis-enabled profiles).
 
 Linux workers on the same LAN can instead announce themselves and be adopted from the portal with a console
 pairing code: see [Node discovery](node-discovery.md). The manual steps below remain the reference.

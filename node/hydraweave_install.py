@@ -21,6 +21,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hydraweave_compat import LEGACY_NAME, read_marker, read_path, tool_command
+from hydraweave_rocm import detect_rocm, runtime_environment
 
 VERBS = {"install", "job", "releases", "activate", "uninstall", "verify-model", "stat-assets", "push-release",
          "bundle-prepare", "bundle-accept", "bundle-discard"}
@@ -31,7 +32,6 @@ STAGE_MAX_AGE_S = 3600  # bundle-prepare removes older stages of interrupted upl
 TRELLIS_MODES = {"ds41", "minimax"}
 HASH_BLOCK = 8 * 1024 ** 2
 DIRECT_UNSUPPORTED = {errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP}
-RUNTIME_ENV = {"LD_LIBRARY_PATH": "/opt/rocm/core-10.1/lib"}
 TERMINAL = {"stopped", "failed", "aborted", "cancelled", "canceled", "finished"}
 
 
@@ -552,12 +552,18 @@ def fetch_sources(root, components):
 
 def build(root, payload, job):
     lab_idle(payload.get("lab_dir"))
+    rocm = detect_rocm()
+    if rocm is None:
+        raise ValueError("ROCm not found; set ROCM_PATH to an installed ROCm SDK")
+    runtime_env = runtime_environment(rocm)
     sources = fetch_sources(root, payload["components"])
     staging = inside(root, "releases", ".build-" + job)
     staging.mkdir()
     output = staging / "bin"
     recipe = payload["recipe"]
-    env = dict(os.environ, **RUNTIME_ENV)
+    env = dict(os.environ, **runtime_env)
+    env.update(ROCM_PATH=str(rocm), HIP_PATH=str(rocm))
+    env["PATH"] = str(rocm / "bin") + os.pathsep + env.get("PATH", "")
     env["HYDRAWEAVE_CONFIGURE"] = "\n".join(recipe["configure"])
     env["HYDRAWEAVE_CTEST_REGEX"] = recipe["ctest_regex"]
     env["HYDRAWEAVE_TRELLIS_MODE"] = recipe.get("trellis_mode", "ds41")
@@ -582,12 +588,12 @@ def build(root, payload, job):
                                  ",".join(capabilities[target]["missing"][:8]))
         node = Path(__file__).with_name("hydraweave-node").read_text(encoding="utf-8")
         node_version = re.search(r'^VERSION = "([^"]+)"', node, re.MULTILINE).group(1)
-        rocm_file = Path("/opt/rocm/core-10.1/.info/version")
+        rocm_file = rocm / ".info" / "version"
         manifest = {"schema": "hydraweave/release-v1", "components": payload["components"],
                     "recipe": recipe, "binaries": hashes, "capabilities": capabilities,
-                    "hydraweave_node_version": node_version, "runtime_env": RUNTIME_ENV,
-                    "toolchains": {"amdclang++": version([shutil.which("amdclang++") or
-                                                           "/opt/rocm/core-10.1/bin/amdclang++", "--version"]),
+                    "hydraweave_node_version": node_version, "runtime_env": runtime_env,
+                    "rocm_root": str(rocm),
+                    "toolchains": {"amdclang++": version([str(rocm / "bin" / "amdclang++"), "--version"]),
                                    "cmake": version(["cmake", "--version"]),
                                    "ninja": version(["ninja", "--version"]),
                                    "rocm": rocm_file.read_text().strip() if rocm_file.is_file() else "unavailable",

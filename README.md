@@ -53,6 +53,34 @@ Hydraweave reports the installed package version, or a Git describe version when
 
 ## Getting started
 
+### Linux
+
+```sh
+curl -fsSL https://github.com/hyukudan/hydraweave/releases/latest/download/install.sh | sh
+```
+
+**No GitHub release exists yet.** Releases are produced by pushing a `v*` tag matching the package
+version; the command above becomes available after the first release. Until then, use the
+[source checkout instructions](docs/install.md#from-a-git-checkout).
+
+The installer requires Python 3.11+ (3.10+ with `--node`) with `venv`, verifies the release wheel against `SHA256SUMS`,
+and installs under `~/.local/share/hydraweave/venvs/<version>` with a `~/.local/bin/hydraweave` shim.
+It needs no root access. Use `sh install.sh --node` for node extras and an agent shim, or
+`--version v0.1.0`, `--prefix <directory>`, `--dry-run`, and `--from-file <wheel>` as needed.
+See [Installation](docs/install.md) for offline installs and ROCm discovery.
+
+### Windows
+
+The Windows helper requires Python 3.11+, Git and OpenSSH. In PowerShell:
+
+```powershell
+git clone https://github.com/hyukudan/hydraweave.git
+cd hydraweave
+git submodule update --init --depth 1 third_party/tensormeld
+.\windows\install.ps1
+hloom --help
+```
+
 ### Open the control center
 
 After installing the Python package, run `hydraweave ui`. **Home** can create a new workspace, then guide you
@@ -71,23 +99,12 @@ setup, controller placement, updates and the distinction between lab leases and 
 These host-side improvements do not requalify newer engine/driver revisions on GPU hardware. Upstream source,
 staged source and an installed/active profile are shown separately.
 
-**Prerequisites (control machine):** Python 3.11+, Git and OpenSSH. The Windows installation workflow is documented in [Installation](docs/install.md), including node prerequisites and rollback.
-
-Set `REPOSITORY_URL` to this repository’s current clone URL; the hosting repository has not been renamed.
-
-```powershell
-git clone --recurse-submodules $env:REPOSITORY_URL hydraweave
-cd hydraweave
-.\windows\install.ps1
-hloom --help
-```
-
 Then use [the sample cluster configuration](examples/cluster.example.json) to describe your machines, model assets and profiles:
 
 ```powershell
 hloom config validate "$env:APPDATA\hydraweave\cluster.json"
-hloom doctor halo-1
-hloom doctor halo-2
+hloom doctor node1
+hloom doctor node2
 hloom render qwen-replicas
 ```
 
