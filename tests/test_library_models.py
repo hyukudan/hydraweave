@@ -187,7 +187,7 @@ class FamilyMappingTests(unittest.TestCase):
         cluster = parse(example())
         halo = cluster.machines["halo-1"]
         cases = {
-            "Qwen3.8-Flash-Next": ("qwen-replicas", ["qwen-replicas", "qwen-replicas-w5"], None),
+            "Qwen3.8-Flash-Next": ("qwen-replicas", ["qwen-replicas", "qwen-replicas-w5", "qwen-starter"], None),
             "DeepSeek-V4.1-Flash-1017": ("ds41-pair", ["ds41-pair", "ds41-pair-long", "ds41-pair-w5"], None),
             "ds41-exl3": ("ds41-pair", ["ds41-pair", "ds41-pair-long", "ds41-pair-w5"], None),
             "MiniMax-M3.1-Flash-EXL3-3.06bpw": ("minimax-pair", ["minimax-pair"], None),

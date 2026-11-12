@@ -84,7 +84,7 @@ def source_url(item):
     return url
 
 
-def target(item, protected=()):
+def target(item, protected=(), allow_existing=False):
     destination = install.absolute(item.get("destination"))
     directory = install.absolute(item.get("directory"))
     if destination.parent != directory or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", destination.name):
@@ -98,7 +98,7 @@ def target(item, protected=()):
     if marker.is_symlink() or not marker.is_file():
         raise ValueError(f"asset directory is not dedicated to hydraweave downloads (no {ASSET_MARKER} file): "
                          + str(directory))
-    if os.path.lexists(destination):
+    if os.path.lexists(destination) and not (allow_existing and destination.is_file() and not destination.is_symlink()):
         raise ValueError("destination already exists; nothing is overwritten: " + str(destination))
     part = read_marker(directory / ("." + destination.name + ".hydraweave-part"))
     if part.is_symlink() or (part.exists() and not part.is_file()):
@@ -121,7 +121,8 @@ def plan(payload, root):
         size, digest = item.get("bytes"), item.get("sha256")
         if type(size) is not int or size <= 0 or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ValueError("every file needs pinned bytes and sha256")
-        destination, part = target(item, [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []))
+        destination, part = target(item, [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []),
+                                   allow_existing=bool(payload.get("merge")))
         if str(destination) in directories:
             raise ValueError("duplicate destination")
         directories.add(str(destination))
@@ -130,13 +131,34 @@ def plan(payload, root):
                      "argv": [*prefix, curl, *CURL, str(part), source_url(item)]})
         have = part.stat().st_size if part.exists() else 0
         need[destination.parent] = need.get(destination.parent, 0) + max(0, size - have)
-    code = hashlib.sha256(install.canonical(rows)).hexdigest()[:12]
+    merge = payload.get("merge")
+    if merge is not None:
+        if (not isinstance(merge, dict) or set(merge) != {"kind", "destination", "expected"}
+                or merge["kind"] != "gguf-split" or len(rows) < 2):
+            raise ValueError("merge must declare gguf-split, destination and expected with at least two parts")
+        directory = Path(rows[0]["destination"]).parent
+        target({"destination": merge["destination"], "directory": str(directory)},
+               [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []))
+        if any(Path(row["destination"]).parent != directory for row in rows):
+            raise ValueError("GGUF split parts must share the merge directory")
+        if merge["destination"] in directories:
+            raise ValueError("merge destination must differ from the parts")
+        partial = Path(merge["destination"] + ".partial")
+        if os.path.lexists(partial):
+            raise ValueError("merge partial already exists; inspect and remove it before retrying")
+        expected = merge["expected"]
+        if expected is not None and (not isinstance(expected, dict) or set(expected) != {"bytes", "sha256"}
+                or type(expected["bytes"]) is not int or expected["bytes"] <= 0
+                or not isinstance(expected["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", expected["sha256"])):
+            raise ValueError("merged pin needs positive bytes and lowercase sha256")
+        need[directory] += expected["bytes"] if expected else sum(row["bytes"] for row in rows)
+    code = hashlib.sha256(install.canonical(rows if merge is None else {"files": rows, "merge": merge})).hexdigest()[:12]
     disk = []
     for directory, required in need.items():
         free = shutil.disk_usage(directory).free
         disk.append({"directory": str(directory), "required_bytes": required, "free_bytes": free,
                      "ok": free >= required + HEADROOM})
-    return {"files": rows, "disk": disk, "confirm": code}
+    return {"files": rows, "disk": disk, "confirm": code, "merge": merge}
 
 
 def lock_part(part):
@@ -242,11 +264,33 @@ def job_main(spec_path):
             def progress(have, total):
                 state["progress"] = {"file": row["destination"], "bytes": have, "total_bytes": total}
                 install.atomic_json(path, state)
-            reason = fetch(row, lambda: "cancelled" if stop_file.exists() else None, turn, progress)
+            if spec.get("merge") and Path(row["destination"]).is_file():
+                retained = Path(row["destination"])
+                reason = "retained split part failed verification"
+                if not retained.is_symlink() and retained.stat().st_size == row["bytes"]:
+                    if install.hash_file(retained) == row["sha256"]:
+                        reason = None
+            else:
+                reason = fetch(row, lambda: "cancelled" if stop_file.exists() else None, turn, progress)
             if reason:
                 raise ValueError(reason)
             state["done"].append(row["destination"])
             install.atomic_json(path, state)
+        if spec.get("merge"):
+            from hydraweave_gguf_merge import merge
+            def check_merge():
+                reason = "cancelled" if stop_file.exists() else turn()
+                if reason:
+                    raise ValueError(reason)
+            check_merge()
+            action = spec["merge"]
+            if os.path.lexists(action["destination"]):
+                raise ValueError("merge destination appeared during the job")
+            state["merged"] = merge([row["destination"] for row in spec["files"]],
+                                    action["destination"], expected=action["expected"], check=check_merge)
+            install.atomic_json(path, state)
+            for row in spec["files"]:
+                Path(row["destination"]).unlink()
         state["state"] = "succeeded"
     except Exception as exc:
         state.update(state="cancelled" if str(exc) == "cancelled" else "failed", error=str(exc))
@@ -271,7 +315,7 @@ def start(root, payload):
     state_path = install.inside(root, "run", "job-" + job + ".json")
     log = install.inside(root, "log", "job-" + job + ".log")
     install.atomic_json(spec, {"root": str(root), "job": job, "lab_dir": payload.get("lab_dir"),
-                               "files": result["files"]})
+                               "files": result["files"], "merge": result.get("merge")})
     install.atomic_json(state_path, {"job": job, "kind": "download", "state": "queued", "log": str(log),
                                      "boot_id": install.boot_id()})
     # The job itself hashes the files: idle CPU and I/O priority, like verify-model.

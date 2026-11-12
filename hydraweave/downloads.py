@@ -2,7 +2,7 @@
 
 Nothing downloads without a confirmation: ``plan`` asks the node for the exact commands
 and a confirmation code; ``start`` runs only when the caller passes that code and the node
-recomputes the same plan. Conversions and merges are documented, never run.
+recomputes the same plan. Declared GGUF split merges run after verified downloads.
 """
 from __future__ import annotations
 
@@ -34,20 +34,35 @@ def catalog():
             if row["status"] == "unavailable":
                 record(row, where, ("status", "why"))
                 continue
-            record(row, where, ("status", "repo", "revision", "files", "ledger", "license", "metadata"), ("after",))
+            record(row, where, ("status", "repo", "revision", "files", "ledger", "license", "metadata"),
+                   ("after", "merge", "merged"))
             if not re.fullmatch(r"[0-9a-f]{40}", row["revision"]):
                 raise ConfigError(f"{where}: revision must be an immutable commit")
+            if not isinstance(row["files"], list) or not row["files"]:
+                raise ConfigError(f"{where}: files must be a nonempty list")
+            if "merge" in row and (row["merge"] != "gguf-split" or len(row["files"]) < 2):
+                raise ConfigError(f"{where}: merge must be gguf-split with at least two parts")
+            if "merged" in row:
+                if "merge" not in row:
+                    raise ConfigError(f"{where}: merged requires merge")
+                record(row["merged"], where + ".merged", ("bytes", "sha256"))
             for item in row["files"]:
                 record(item, where + ".files", ("file", "bytes", "sha256"))
+            for item in [*row["files"], *([row["merged"]] if "merged" in row else [])]:
+                if (type(item["bytes"]) is not int or item["bytes"] <= 0
+                        or not isinstance(item["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+                    raise ConfigError(f"{where}: every file needs positive bytes and lowercase sha256")
     return data
 
 
 def sources(cluster, profile):
     """Every asset of a profile with its pinned source or the reason it has none (read-only)."""
     _, kind, _ = orchestrate._profile(cluster, profile)
-    rows = catalog()["profiles"].get(kind, {})
-    return {name: rows.get(name, {"status": "unavailable", "why": "no pinned source"})
-            for name in preset(kind)["assets"]}
+    name = cluster.profiles[profile].get("preset", profile)
+    profiles = catalog()["profiles"]
+    rows = profiles.get(name, profiles.get(kind, {}))
+    return {asset: rows.get(asset, {"status": "unavailable", "why": "no pinned source"})
+            for asset in preset(name)["assets"]}
 
 
 def _request(cluster, profile, asset, machine_id):
@@ -69,14 +84,18 @@ def _request(cluster, profile, asset, machine_id):
     files = [{"repo": row["repo"], "revision": row["revision"], "file": item["file"], "bytes": item["bytes"],
               "sha256": item["sha256"], "directory": str(directory),
               "destination": str(directory / PurePosixPath(item["file"]).name)} for item in row["files"]]
-    return machine, {"root": machine.install_root, "lab_dir": orchestrate._lab(cluster, machine_id), "files": files}, row
+    request = {"root": machine.install_root, "lab_dir": orchestrate._lab(cluster, machine_id), "files": files}
+    if row.get("merge") and not row.get("after"):
+        request["merge"] = {"kind": row["merge"], "destination": manifest["path"],
+                            "expected": row.get("merged", {key: manifest[key] for key in ("bytes", "sha256")})}
+    return machine, request, row
 
 
 def plan(cluster, profile, asset, machine_id):
     machine, payload, row = _request(cluster, profile, asset, machine_id)
     result = orchestrate._call(orchestrate._client(machine), "download-plan", payload)
     return {"machine": machine.id, "asset": asset, "profile": profile, "files": result["files"],
-            "disk": result["disk"], "after": row.get("after"), "confirm": result["confirm"],
+            "disk": result["disk"], "after": row.get("after"), "merge": result.get("merge"), "confirm": result["confirm"],
             "next": f"hydraweave assets download {profile} {asset} --machine {machine.id} --confirm {result['confirm']}"}
 
 

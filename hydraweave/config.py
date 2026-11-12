@@ -170,7 +170,7 @@ def read_json(path):
 
 
 # Every launchable preset; the engine family of each (its "family" key, else its name) is in engines.FAMILIES.
-PRESET_NAMES = ("qwen-replicas", "ds41-pair", "ds41-pair-long", "qwen-replicas-w5", "ds41-pair-w5", "minimax-pair")
+PRESET_NAMES = ("qwen-replicas", "qwen-starter", "ds41-pair", "ds41-pair-long", "qwen-replicas-w5", "ds41-pair-w5", "minimax-pair")
 
 
 def preset(name):

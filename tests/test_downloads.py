@@ -54,6 +54,26 @@ class NodeDownloadCase(unittest.TestCase):
 
 
 class NodePlanTests(NodeDownloadCase):
+    def test_split_merge_plan_space_pin_confirmation_and_paths(self):
+        first = self.item()
+        second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
+        merge = {"kind": "gguf-split", "destination": str(self.assets / "merged.gguf"), "expected": None}
+        payload = self.payload(first, second, merge=merge)
+        result = node.plan(payload, self.root)
+        assert result["merge"] == merge
+        assert result["disk"][0]["required_bytes"] == len(BODY) * 4
+        pin = {"bytes": 123, "sha256": "c" * 64}
+        pinned = node.plan({**payload, "merge": {**merge, "expected": pin}}, self.root)
+        assert result["confirm"] != pinned["confirm"]
+        assert pinned["disk"][0]["required_bytes"] == len(BODY) * 2 + 123
+        for change in ({"destination": str(self.base / "escape.gguf")}, {"destination": first["destination"]},
+                       {"kind": "command"}, {"expected": {"bytes": 1, "sha256": "invalid"}}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                node.plan({**payload, "merge": {**merge, **change}}, self.root)
+        Path(merge["destination"] + ".partial").touch()
+        with self.assertRaisesRegex(ValueError, "partial already exists"):
+            node.plan(payload, self.root)
+
     def test_plan_is_exact_and_deterministic(self):
         first = node.run("download-plan", self.payload())
         self.assertNotIn("error", first)
@@ -241,7 +261,8 @@ class ControlTests(unittest.TestCase):
         rows = downloads.sources(parse(self.obj), "qwen-replicas")
         self.assertEqual(rows["model"]["revision"], "38bb39ee97821de2c9009abb7e93950eec396e66")
         self.assertEqual(len(rows["model"]["files"]), 4)
-        self.assertIn("documented only", rows["model"]["after"])
+        self.assertEqual(rows["model"]["merge"], "gguf-split")
+        self.assertNotIn("after", rows["model"])
         self.assertEqual(rows["sidecar"]["status"], "unavailable")
         pair = downloads.sources(parse(self.obj), "ds41-pair")
         self.assertTrue(all(row["status"] == "unavailable" for row in pair.values()))

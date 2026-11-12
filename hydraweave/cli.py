@@ -468,6 +468,9 @@ def build_parser(parser_class=argparse.ArgumentParser):
     parser = parser_class(prog="hydraweave")
     parser.add_argument("--version", action=_VersionAction)
     commands = parser.add_subparsers(dest="command", required=True)
+    merge = commands.add_parser("gguf-merge", help="merge ordered GGUF v3 split parts locally")
+    merge.add_argument("parts", nargs="+", type=Path)
+    merge.add_argument("-o", "--output", required=True, type=Path)
     ui = commands.add_parser("ui", help="open the portal (loopback unless --listen says otherwise)")
     ui.add_argument("--listen", metavar="ADDR",
                     help="address to bind (default: pc.ui_listen, else 127.0.0.1); 0.0.0.0 or :: serves every "
@@ -872,7 +875,10 @@ def main(argv=None):
         if getattr(args, "ext_run", None) is not None:
             return args.ext_run(args)
         release = _admission_hold(args)
-        if args.command == "ui":
+        if args.command == "gguf-merge":
+            from .gguf_merge import merge
+            print(json.dumps(merge(args.parts, args.output)))
+        elif args.command == "ui":
             if args.port is not None and not 0 <= args.port <= 65535:
                 raise ValueError("ui port must be in 0..65535")
             listen = None if args.listen is None else _module("hydraweave.bind").address(args.listen, "--listen")
