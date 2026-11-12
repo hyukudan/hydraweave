@@ -34,7 +34,7 @@ try{
   vc.on("error",(...e)=>errors.push(e.join(" ")));
   dom=await JSDOM.fromURL(origin+"/",{
     resources:"usable",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole:vc,
-    beforeParse(w){
+    beforeParse(w){ w.scrollTo=()=>{};
       w.fetch=(input,init={})=>{
         const headers=new Headers(init.headers||{});
         if(init.method && init.method!=="GET")headers.set("Origin",origin);
@@ -57,6 +57,14 @@ try{
   const go=async route=>{w.location.hash="#/"+route;await until(()=>d.body.dataset.page===route.split("?")[0] && d.querySelector("main").getAttribute("aria-busy")==="false","route "+route);await w.Hydraweave.refresh();};
   const api=path=>w.Hydraweave.request(path);
   await until(()=>w.Hydraweave && d.querySelector('[data-page-action="cc-initialize"]'),"first-run Home");
+  const primaryLinks=[...d.querySelectorAll("#navigation .nav-links a")];
+  assert.deepEqual(primaryLinks.map(a=>a.textContent.trim()),["Home","Models","Chat","Nodes","Updates","Settings"]);
+  click('#navigation [data-shell="advanced"]');
+  assert.ok(d.querySelectorAll("#navigation .nav-links a").length>6,"Advanced reveals feature pages");
+  for(const group of ["Monitoring","Benchmarks","Lab tools"])assert.ok(d.querySelector(`#navigation .nav-group[data-group="${group}"]`),"Missing Advanced group "+group);
+  assert.doesNotMatch(d.body.textContent,/TM-R\d|later phase|Phase \d/);
+  assert.equal(d.querySelectorAll(".disabled-control").length,0,"no disabled later placeholders on Home");
+  click('#navigation [data-shell="advanced"]');
   assert.equal((await api("setup")).configuration.state,"missing");
   assert.equal(d.querySelector("#page-title").textContent,"Home");
   click('[data-page-action="cc-initialize"]');
