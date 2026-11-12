@@ -273,6 +273,33 @@ def test_usb4_identity_reuses_existing_reader():
     reader.read.assert_called_once_with("/sys/bus/thunderbolt/devices/0-0/unique_id")
 
 
+def test_install_service_restarts_running_agent_but_refuses_while_lease_live(tmp_path, capsys):
+    root = tmp_path / "hydraweave"
+    (root / "run").mkdir(parents=True)
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0)  # the agent unit is active
+
+    with patch.object(Path, "home", return_value=tmp_path):
+        node_agent.install_service(root, None, run=run)
+        assert ["systemctl", "--user", "restart", "hydraweave-node.service"] in calls
+        (root / "run/lease-old.json").write_text(json.dumps({"label": "old", "state": "stopped"}))
+        (root / "run/lease-hl-qwen.json").write_text(json.dumps({"label": "hl-qwen", "state": "ready"}))
+        assert node_agent.live_leases(root) == ["hl-qwen"]
+        calls.clear()
+        with pytest.raises(node_agent.LeaseLive, match=r"a lease is live \(hl-qwen\).*--force"):
+            node_agent.install_service(root, None, run=run)
+        assert all(call[2] == "is-active" for call in calls)
+        with patch.object(node_agent.subprocess, "run", run), patch.object(node_agent.sys, "platform", "linux"):
+            assert node_agent.main(["install-service", "--root", str(root)]) == 3
+            assert "--force" in capsys.readouterr().err
+            calls.clear()
+            assert node_agent.main(["install-service", "--root", str(root), "--force"]) == 0
+        assert ["systemctl", "--user", "restart", "hydraweave-node.service"] in calls
+
+
 def test_prepare_preserves_real_layout_and_user_unit(tmp_path):
     root = tmp_path / "hydraweave"
     (root / "etc").mkdir(parents=True)
@@ -284,6 +311,8 @@ def test_prepare_preserves_real_layout_and_user_unit(tmp_path):
     calls = []
     with patch.object(Path, "home", return_value=tmp_path):
         node_agent.install_service(root, str(tmp_path / "lab"), run=lambda args, **kwargs: calls.append(args))
+    assert calls[0][2] == "is-active"
+    calls = calls[1:]
     assert (root / "etc/settings.json").read_text() == "keep settings"
     assert (root / "log/node.log").read_text() == "keep logs"
     assert (root / "etc/agent-id").read_text() == first

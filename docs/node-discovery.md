@@ -39,6 +39,8 @@ hydraweave-node install-service
 `pipx install` installs entry points; the second command registers the service. The optional `node` extra
 installs python-zeroconf plus user-local CMake/Ninja, avoiding Ubuntu 22's older CMake. Without zeroconf the
 stdlib mDNS implementation advertises the same DNS-SD service.
+Rerunning `install-service` restarts a running agent so it picks up upgraded code. It refuses (exit 3) while an
+engine lease started through the agent is still live; stop the engine first or pass `--force`.
 Opt out persistently with `hydraweave-node install-service --no-announce`, or set
 `HYDRAWEAVE_NO_ANNOUNCE=1` in the user unit environment. Foreground agents accept `serve --no-announce`.
 `HYDRAWEAVE_NO_DISCOVERY=1` disables controller browsing.

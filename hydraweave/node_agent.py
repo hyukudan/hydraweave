@@ -296,9 +296,39 @@ def default_lab_dir():
     return str(path)
 
 
-def install_service(root, lab_dir=None, *, no_announce=False, run=None):
+LEASE_TERMINAL = {"stopped", "failed", "aborted", "cancelled"}
+
+
+def live_leases(root):
+    """Labels of non-terminal lease records under root/run (engines started through the agent)."""
+    labels = []
+    for path in sorted((Path(root) / "run").glob("lease-*.json")):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and state.get("state") not in LEASE_TERMINAL:
+            labels.append(str(state.get("label") or path.stem[len("lease-"):]))
+    return labels
+
+
+class LeaseLive(RuntimeError):
+    pass
+
+
+def install_service(root, lab_dir=None, *, no_announce=False, force=False, run=None):
+    """Write and enable the agent unit; restart a running agent so it loads the new code.
+
+    A restart is refused while a lease is live unless force: the unit uses KillMode=process,
+    so engines survive, but the restarted agent would serve them with a different release.
+    """
     run = run or subprocess.run
     root = prepare(root)
+    status = run(["systemctl", "--user", "is-active", "--quiet", "hydraweave-node.service"], check=False, **no_window())
+    active = getattr(status, "returncode", 1) == 0
+    leases = live_leases(root) if active else []
+    if leases and not force:
+        raise LeaseLive("a lease is live (" + ", ".join(leases) + "); stop it or rerun install-service with --force")
     lab_dir = lab_dir or default_lab_dir()
     candidate = Path(sys.executable).with_name("hydraweave-node" + (".exe" if os.name == "nt" else ""))
     executable = str(candidate) if candidate.is_file() else (shutil.which("hydraweave-node") or str(candidate))
@@ -320,6 +350,8 @@ def install_service(root, lab_dir=None, *, no_announce=False, run=None):
     (directory / "hydraweave-node.service").write_text(unit)
     run(["systemctl", "--user", "daemon-reload"], check=True, **no_window())
     run(["systemctl", "--user", "enable", "--now", "hydraweave-node.service"], check=True, **no_window())
+    if active:
+        run(["systemctl", "--user", "restart", "hydraweave-node.service"], check=True, **no_window())
     try:
         run(["loginctl", "enable-linger", os.environ.get("USER", Path.home().name)], check=True, **no_window())
     except (OSError, subprocess.SubprocessError):
@@ -364,6 +396,7 @@ def main(argv=None):
     parser.add_argument("--listen", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=18701)
     parser.add_argument("--no-announce", action="store_true", default=os.environ.get("HYDRAWEAVE_NO_ANNOUNCE") == "1")
+    parser.add_argument("--force", action="store_true", help="install-service: restart the agent even while a lease is live")
     args = parser.parse_args(argv)
     if args.operation is None:
         parser.print_help()
@@ -377,7 +410,11 @@ def main(argv=None):
         return 0
     args.lab_dir = args.lab_dir or default_lab_dir()
     if args.operation == "install-service":
-        install_service(args.root, args.lab_dir, no_announce=args.no_announce)
+        try:
+            install_service(args.root, args.lab_dir, no_announce=args.no_announce, force=args.force)
+        except LeaseLive as error:
+            print("hydraweave-node: " + str(error), file=sys.stderr)
+            return 3
         return 0
     args.listen = bind.address(args.listen)
     root = prepare(args.root)
