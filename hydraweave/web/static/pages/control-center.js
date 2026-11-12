@@ -72,7 +72,7 @@
     const bootstrap = sha256 ? `<p>On each worker: <code>curl -fsSL ${esc(typeof location === "undefined" ? "" : location.origin)}/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=${esc(sha256)} sh</code></p><p class="hint">Package SHA-256: <code>${esc(sha256)}</code></p>` : "<p>Open the live portal to get the verified node bootstrap command.</p>";
     return H().card("Discovered on your LAN", `${bootstrap}${d.error ? `<p role="alert">${esc(d.error)}</p>` : ""}${pairText}${rows.map(n => {
       const profiles = (doc().profiles || []).filter(p => (p.machines || p.nodes || []).includes(n.machine));
-      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
+      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state === "adopted" && (n.version_status === "outdated" || n.version_mismatch) ? action("Update node", "update-node", {machine:n.machine}, H().mutationReason()) : ""}${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
     }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs.${(d.nodes || []).some(n => n.lab_mode === true) ? " Engines use configured GPU slots when launched." : ""}</p>`);
   }
   function render() {
@@ -216,6 +216,7 @@
       else if (a === "cc-add-node") openAddNode();
       else if (a === "cc-add-manual") await openMachine();
       else if (a === "cc-adopt") openAddNode(button.dataset.id);
+      else if (a === "cc-update-node") await H().mutate("discovery/update", {machine:mid,origin:window.location.origin});
       else if (a === "cc-provision") await H().mutate("discovery/provision", {machine:mid,profile:button.dataset.profile});
       else if (a === "cc-edit-node") await openMachine(mid);
       else if (a === "cc-trust-node") await trustNode(mid);

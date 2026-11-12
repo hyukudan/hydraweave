@@ -124,6 +124,18 @@ hloom render qwen-replicas
 
 **Hardware acceptance covers phases 1a and 2, with a partial portal smoke test;** see the acceptance documents. The staged install/start/stop workflow and its constraints are explained in [the detailed quick start](docs/README-technical.md#quick-start). Not every documented future option is implemented: notably `--plan` and `--allow-partial` are planned.
 
+### Updating Hydraweave
+
+On Linux, run `hydraweave update --check` to check published releases, then
+`hydraweave update` to stage and activate a verified release with automatic
+rollback on a failed health check. The portal's Updates page offers the same
+**Update** action and shows progress and the result. No published release is
+reported clearly until the first release is available.
+
+Use `hydraweave releases list|activate|remove` to manage side-by-side releases;
+current and previous versions are retained for rollback. See
+[release management](docs/install.md#linux-releases-updates-and-rollback).
+
 ## Current status
 
 | Phase | Status |

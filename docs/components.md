@@ -1,5 +1,19 @@
 # Components and updates
 
+The Updates page's **Update** action installs the verified Hydraweave release
+side by side, including its compatible package resources and lock file. It
+activates the new release, checks its CLI and any active portal user service,
+and automatically rolls back if health checks fail. Progress and the final
+**updated** or **rolled back** result (with the failure reason) appear on the
+same page, including after the portal reconnects. See
+[Linux releases, updates and rollback](install.md#linux-releases-updates-and-rollback).
+
+**Advanced: Check upstream HEAD** remains beside the update action and on each
+component card. It compares upstream source revisions; it does not install a
+Hydraweave release or change a profile's integration pins. In the control center,
+discovered paired agents with a version/commit mismatch offer **Update node**;
+live GPU leases or turns block that maintenance action with an explanation.
+
 The component center separates four different facts: **the revision a profile
 requires**, **the revision now available upstream**, **source downloaded on the
 controller**, and **the revision recorded in an engine launch**. Downloading a
@@ -19,7 +33,8 @@ tool remains responsible for node builds and activation.
 
 | Action | Location | Effect |
 |---|---|---|
-| Check for updates | Controller → each fixed Git remote | Records upstream HEAD and time, without changing checkouts or pins |
+| Update | Controller release environments | Verifies, stages and activates a release; health failure restores the previous release |
+| Advanced: Check upstream HEAD | Controller → each fixed Git remote | Records upstream HEAD and time, without changing checkouts or pins |
 | Download source | Controller component cache | Stages the exact chosen Git commit in a new directory |
 | Install profile | Selected SSH build node, then its peers | Downloads the profile's pins, builds, verifies and distributes a complete release |
 | Activate the built profile | Inference nodes | Existing installer checks require the profile to be stopped |

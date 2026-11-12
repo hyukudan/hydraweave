@@ -88,6 +88,10 @@ class PortalServer(ThreadingHTTPServer):
             self.access_token = store.ensure("portal-access")
         super().__init__((self.listen_address, port), Handler)
         self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
+        try:
+            self.api.portal_health_url = self.origin + "/api/health"
+        except AttributeError:  # API stubs without attributes
+            pass
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
 
     def host_allowed(self, header):
@@ -215,6 +219,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             parsed = urlsplit(self.path)
+            if parsed.path == "/api/health":
+                from hydraweave import __version__
+                from hydraweave.discovery import controller_commit
+                self._send(200, {"status": "ok", "version": __version__, "commit": controller_commit()}, head=head)
+                return
             if self._login(parsed):
                 return
             if parsed.path in {"/node/bootstrap.sh", "/node/package.tar.gz"}:

@@ -39,6 +39,7 @@ jobs:
         run: |
           python -m pip install build
           python tools/make_release.py --wheels > release-build.log 2>&1 || { tail -20 release-build.log; exit 1; }
+          python -c "import json, os, pathlib; pathlib.Path('hydraweave/data/_build.json').write_text(json.dumps({'commit': os.environ['GITHUB_SHA']}))"
           python -m build > python-build.log 2>&1 || { tail -20 python-build.log; exit 1; }
           cp install.sh dist/install.sh
           python tools/make_release.py --checksums-only
