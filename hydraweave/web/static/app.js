@@ -438,6 +438,7 @@
         body = await response.json();
       }
     }
+    if (response.status === 401) window.HydraweaveLogin?.();
     if (!response.ok) throw Object.assign(new Error(body.error || `HTTP ${response.status}`), {status: response.status});
     return body;
   }

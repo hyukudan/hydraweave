@@ -211,8 +211,29 @@ hloom status qwen-replicas
 hloom endpoint qwen-replicas                    # the router address for clients
 hloom down qwen-replicas
 hloom ui                                        # the portal on http://127.0.0.1:18700
-hloom ui --listen 0.0.0.0 --no-browser          # headless machine: the portal on every interface, NO login
+hloom ui --listen 0.0.0.0 --no-browser          # every interface; console prints a token login URL
 ```
+
+### LAN access security
+
+Non-loopback portal binds protect mutations with a generated access token. Open the console's
+`http://HOST:PORT/?token=...` URL to log in: it sets an `HttpOnly; SameSite=Strict` session cookie and
+redirects to a URL without the token. Pages remain readable without login; actions return 401 and show
+a small login form. API clients can send `Authorization: Bearer <portal-token>` instead. Cookie requests
+retain Origin and CSRF checks; explicit bearer credentials do not need browser CSRF headers.
+
+The token is reused across starts from `~/.config/hydraweave/secrets/portal-access` (0600 on POSIX), or
+`%APPDATA%\hydraweave\secrets\portal-access` (user-scoped DPAPI and private ACL on Windows).
+Loopback binds keep their existing behavior. To allow unauthenticated LAN control explicitly, use
+`hloom ui --listen 0.0.0.0 --no-auth` or `HYDRAWEAVE_NO_AUTH=1`. The console and portal display a warning.
+
+For workers, copy the bootstrap command and package SHA-256 from the portal. It uses
+`curl -fsSL http://HOST:PORT/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<hex> sh`.
+The script downloads the package to a temporary file and verifies it before installing with pip; a mismatch
+aborts installation. If the environment variable is missing, the script prints a note and uses its embedded
+hash. Bootstrap/package downloads stay public, while worker pairing and agent calls keep their own
+pairing-code/bearer authentication. Use a trusted LAN or secure tunnel because HTTP carries scripts and
+tokens without encryption. See [Node discovery — security](node-discovery.md#portal-access-security).
 
 ## 8. Upgrade, roll back, uninstall
 

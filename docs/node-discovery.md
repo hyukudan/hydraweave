@@ -10,8 +10,8 @@ The controller is installed as in [Installation](install.md) section 3 and serve
 Log into each Ubuntu worker as its ordinary user, not root:
 
 ```sh
-curl -fsSL http://CONTROLLER:18700/node/bootstrap.sh | sh
-# lab mode: curl -fsSL http://CONTROLLER:18700/node/bootstrap.sh | HYDRAWEAVE_LAB_DIR="$HOME/<lab>" sh
+curl -fsSL http://CONTROLLER:18700/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<sha256-from-portal> sh
+# Lab mode: also set HYDRAWEAVE_LAB_DIR="$HOME/<lab>" before sh.
 journalctl --user -u hydraweave-node -n 20 --no-pager
 ```
 
@@ -114,6 +114,38 @@ If controller credentials are lost: stop the agent, remove only `etc/agent-pairi
 pair again. Retain `etc/agent-id` and all other configuration/logs.
 
 Use a trusted controller: bootstrap, pairing and agent control currently use private-LAN HTTP without TLS.
+The portal shows the source package's SHA-256 next to the bootstrap command. Copy the complete command:
+the script downloads to a private temporary file, checks SHA-256 using `sha256sum`, `shasum -a 256`, or
+Python 3, and aborts on mismatch before creating a venv or running pip. The temporary download is removed
+on exit. Without `HYDRAWEAVE_PKG_SHA256`, it prints a note and checks the hash embedded in the served script.
+The controller caches the exact package and digest until source file mtimes, sizes, or the file list change.
+Reload the portal and copy a fresh command after updating controller sources.
+
+### Portal access security
+
+On a non-loopback bind the portal generates an access token on first start and prints
+`http://HOST:PORT/?token=...`. Open that URL once to receive an `HttpOnly; SameSite=Strict` session cookie;
+the redirect removes the token from the address bar. Pages remain readable without login. Mutating portal
+requests require that cookie or `Authorization: Bearer <portal-token>`; the UI shows a login form after a
+401 response. Browser cookies also retain the existing Origin and CSRF checks. Bearer callers supply
+the explicit credential instead of browser CSRF headers.
+
+The token persists in `~/.config/hydraweave/secrets/portal-access` with mode 0600 on POSIX. Windows stores
+it in `%APPDATA%\hydraweave\secrets\portal-access`, protected by the current user's DPAPI and private ACL.
+Loopback binds need no access token. `--no-auth` or `HYDRAWEAVE_NO_AUTH=1` disables portal authentication
+and shows both a console warning and a visible LAN warning banner.
+
+Agent/bootstrap routes retain their own access rules:
+
+- Portal `GET`/`HEAD /node/bootstrap.sh` and `/node/package.tar.gz`: public, so unpaired workers can install.
+- Worker `POST /pair`: the worker's short-lived, single-use console pairing code.
+- Worker `POST /call`: the worker's paired bearer token, distinct from the portal token.
+- Portal adoption/provisioning actions: authenticated portal mutations, including `discovery/adopt` and
+  `discovery/provision`.
+
+Use a trusted LAN or a secure tunnel: the downloaded script, login token, and agent credentials still
+travel over HTTP. The package hash assumes the displayed hash and bootstrap script came from your trusted controller.
+
 Discovery uses IPv4 mDNS/DNS-SD `_hydraweave._tcp.local.` on UDP 5353. Workers default to TCP 18701;
 controller UI/bootstrap uses TCP 18700. Allow these only between trusted hosts. mDNS generally does not
 cross VLANs; retain explicit SSH configuration there. If the default worker port is occupied, the agent

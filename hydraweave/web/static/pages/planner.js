@@ -26,6 +26,7 @@
     const response = await fetch("/hydraweave/api/" + endpoint, {method: "POST", credentials: "same-origin", cache: "no-store",
       headers: {"Content-Type": "application/json", "X-Hydraweave-CSRF": token}, body: JSON.stringify(args), signal: AbortSignal.timeout(POST_S * 1000)});
     const body = await response.json();
+    if (response.status === 401) window.HydraweaveLogin?.();
     if (!response.ok && body.exit_code === undefined) throw new Error(body.error || `HTTP ${response.status}`);
     return body;
   }
