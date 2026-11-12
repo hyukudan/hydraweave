@@ -1,6 +1,7 @@
 """Session cache A1 contract, transport bounds, credentials and passive GET."""
 import contextlib
 import io
+import itertools
 import json
 from pathlib import Path
 import time
@@ -273,7 +274,7 @@ class CollectorTests(unittest.TestCase):
         self.assertIn("loopback", row["sources"][0]["why"]["collection"])
 
     def test_budget_exhaustion_is_disclosed(self):
-        with patch.object(sc.time, "monotonic", side_effect=[0, observe.RUN_BUDGET_S + 1]),                 patch.object(sc, "_http", side_effect=AssertionError("budget")):
+        with patch.object(sc.time, "monotonic", side_effect=itertools.chain([0], itertools.repeat(observe.RUN_BUDGET_S + 1))),                 patch.object(sc, "_http", side_effect=AssertionError("budget")):
             sc.collect(self.api, 1000, self.store)
         row = sc.document(self.api, {}, self.store)["profiles"][0]
         self.assertIsNone(row["supported"])
