@@ -55,7 +55,7 @@ same node verbs as the SSH route, so pair only controllers you would give SSH ac
 The one-use pairing reply includes a best-effort inventory: lowercase OS name, machine architecture, and device
 records with stable per-reply IDs, type, vendor, name, memory in bytes, and driver. The agent probes AMD sysfs
 and `nvidia-smi` without root and uses short timeouts; unavailable probes are ignored. A host with no detected
-GPU reports a CPU device. Device types are `amd`, `nvidia`, `intel`, `apple`, `cpu`, and `other`. Older agents
+GPU reports a CPU device. Adoption writes device types `amd`, `nvidia`, `intel`, `apple`, `cpu` or `other` (an unknown reported type becomes `other`; hand-written configs may keep older free-text types). Older agents
 that omit inventory are adopted with the legacy Linux/AMD placeholder.
 
 Open `http://CONTROLLER:18700`. Home shows **discovered, not adopted** nodes. Click Adopt and enter the

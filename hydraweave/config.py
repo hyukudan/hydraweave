@@ -62,6 +62,7 @@ MAX_CONFIG_BYTES = 256 * 1024
 BROKER_HOST = re.compile(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
                          r"[A-Za-z0-9])?)*|[0-9A-Fa-f:.]{2,45}")
 DEFAULT_DEVICE_POLICIES = ()
+# Types written by node adoption. Hand-written configs may keep older free-text types (e.g. "igpu").
 DEVICE_TYPES = frozenset(("amd", "nvidia", "intel", "apple", "cpu", "other"))
 PRESETS = Path(__file__).with_name("presets")
 
@@ -285,8 +286,6 @@ def parse(obj: dict) -> Cluster:
             for key in ("type", "uuid", "name", "pci", "arch", "driver"):
                 if key in device:
                     text(device[key], f"device.{key}")
-            if "type" in device and device["type"] not in DEVICE_TYPES:
-                raise ConfigError(f"device.type: expected one of {', '.join(sorted(DEVICE_TYPES))}")
             if "vendor" in device:
                 text(device["vendor"], "device.vendor")
             if "memory_bytes" in device:
