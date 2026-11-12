@@ -23,6 +23,14 @@ the tuned presets remains a [user decision](docs/hosting-options.md).
 
 ## What problem does it solve?
 
+## Get and start a model
+
+Open **Models** to review configured profiles, their declared files and node placement. Choose **Start** only when the required files are present. The current portal does not yet provide a browser download flow; use the confirmed `hydraweave assets download` plan described in [model downloads](docs/model-downloads.md). Downloads start only after you review and confirm that plan.
+
+## Chat and API
+
+After a profile is running, open its chat from Models. The Chat page sends requests to the running OpenAI-compatible router and shows copyable curl, Python and JavaScript examples. Use the router URL shown there and supply your own API key when the router requires one.
+
 Large models, fast prefill, and high-throughput decoding may need different hardware. Running each engine manually across multiple machines means coordinating versions, network endpoints, model files, launches, GPU reservations, and failures yourself.
 
 Hydraweave is the **integration and orchestration layer**, not another inference engine. It connects:
