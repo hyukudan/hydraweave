@@ -46,21 +46,13 @@ class Adapter:
     capabilities: tuple
 
 
-FAMILIES = {
-    "qwen-replicas": Adapter("qwen-replicas", "strix-hip-decode-token", ("strix-hip-decode-token",), "replicas",
-                             "qwen-stderr", "/health", "sigterm", "lan", True, None, "hl-qwen", None,
-                             ("http-serve", "key-file", "metrics", "api-status", "service-unit")),
-    "ds41-pair": Adapter("ds41-pair", "strix-deepseek41-serve", ("strix-deepseek41-serve",), "pair",
-                         "ds41-json", "/health", "admin-drain", "lan", True, "ds41", "hl-ds41", "1",
-                         # import-state-parked: an import parks in a free slot and is taken only by a prompt that starts
-                         # with its tokens (apps/deepseek41_serve_main.cpp:61-70 at the pinned engine); recipes need it
-                         # for offload routes.
-                         ("http-serve", "key-file", "metrics", "api-status", "admin-drain", "import-state",
-                          "import-state-parked")),
-    "minimax-pair": Adapter("minimax-pair", "strix-minimax-serve", ("strix-minimax-serve",), "pair",
-                            "minimax-stdout", "/health", "leader-first", "loopback", False, "minimax", "hl-mm", "1",
-                            ("http-serve", "metrics")),
-}
+from .backends import registry as backend_registry
+
+FAMILIES = {family: Adapter(family, row.adapter["binary"], row.adapter["targets"], row.adapter["topology"],
+                             row.adapter["ready"], row.adapter["health_path"], row.adapter["drain"],
+                             row.adapter["bind"], row.adapter["key_file"], row.adapter["trellis"],
+                             row.adapter["label"], row.adapter["layout_required"], row.adapter["capabilities"])
+            for row in backend_registry().values() for family in row.families if family != "llamacpp"}
 
 # PRESET_NAMES (from config) lists every launchable preset; the RTX prefill service preset is a separate schema.
 SHA = re.compile(r"[0-9a-f]{40}")

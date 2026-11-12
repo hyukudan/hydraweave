@@ -36,6 +36,10 @@ def run(args):
         # Held like copies between machines: refused before the configuration is read or any machine is called.
         print("hydraweave: " + downloads.VERIFY_HELD, file=sys.stderr)
         return 1
+    if operation == "registry":
+        from hydraweave.backends import model_registry
+        _print(model_registry(user_dir=cli.config_path().parent / "models"))
+        return 0
     cluster = _cluster()
     if operation == "list":
         store = _store(create=args.refresh)
@@ -89,6 +93,7 @@ def add(commands):
     listing = operations.add_parser("list", help="model units per machine (the last scan, or --refresh)")
     listing.add_argument("--machine")
     listing.add_argument("--refresh", action="store_true", help="scan now (read-only on every machine)")
+    operations.add_parser("registry", help="list declared model metadata")
     verify = operations.add_parser("verify", help="not available in this release (refused)")
     verify.add_argument("machine")
     verify.add_argument("model_root")

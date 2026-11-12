@@ -170,13 +170,22 @@ def read_json(path):
 
 
 # Every launchable preset; the engine family of each (its "family" key, else its name) is in engines.FAMILIES.
-PRESET_NAMES = ("qwen-replicas", "qwen-starter", "ds41-pair", "ds41-pair-long", "qwen-replicas-w5", "ds41-pair-w5", "minimax-pair")
+def preset_names():
+    """Discover repo and user presets; user data lives beside the existing runtime state."""
+    from . import secrets
+    names = {path.stem for directory in (PRESETS, secrets.runtime_dir() / "presets")
+             for path in directory.glob("*.json") if path.stem != "sources"}
+    return tuple(sorted(names))
+
+PRESET_NAMES = preset_names()
 
 
 def preset(name):
-    if name not in PRESET_NAMES:
+    if name not in preset_names():
         raise ConfigError(f"unknown preset: {name}")
-    return read_json(PRESETS / f"{name}.json")
+    from . import secrets
+    user_path = secrets.runtime_dir() / "presets" / f"{name}.json"
+    return read_json(user_path if user_path.is_file() else PRESETS / f"{name}.json")
 
 
 def family(name):

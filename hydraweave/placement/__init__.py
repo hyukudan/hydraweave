@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from .. import vramplan
 
-ENGINES = ("minimax-rtx-prefill", "qwen-rtx-prefill", "ds41-rtx-prefill", "ds41-rtx-front", "ds41-rtx-hot",
-           "ds41-node", "desc-v1")
+from ..backends import registry as backend_registry
+ENGINES = tuple(sorted({name for backend in backend_registry().values() for name in backend.placement_engines} | {"desc-v1"}))
 
 
 def plan(engine, model, inputs, **params):
