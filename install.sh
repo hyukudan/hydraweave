@@ -176,6 +176,26 @@ def operation_lock(root: Path):
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+
+def _swap_link(temporary: Path, current: Path):
+    """Point ``current`` at ``temporary``'s target.
+
+    POSIX renames over an existing symlink atomically. Windows refuses to
+    replace a directory symlink, so the old link is moved aside first and
+    restored if the final rename fails.
+    """
+    if os.name != "nt" or not current.is_symlink():
+        os.replace(temporary, current)
+        return
+    aside = current.with_name(".current-old-" + uuid.uuid4().hex)
+    os.rename(current, aside)
+    try:
+        os.replace(temporary, current)
+    except BaseException:
+        os.rename(aside, current)
+        raise
+    os.unlink(aside)
+
 class ReleaseManager:
     def __init__(self, prefix: Path | None = None, *, runner=None, keep: int = 3):
         self.prefix = Path(prefix if prefix is not None else default_prefix()).expanduser().absolute()
@@ -234,7 +254,7 @@ class ReleaseManager:
             temporary.symlink_to(Path("venvs") / rid, target_is_directory=True)
             atomic_write(self.root / "previous", old or "")
             try:
-                os.replace(temporary, self.root / "current")
+                _swap_link(temporary, self.root / "current")
             except BaseException:
                 atomic_write(self.root / "previous", saved_previous or "")
                 raise
