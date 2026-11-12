@@ -414,7 +414,7 @@ class LeaseProcessTests(LeaseFixture):
         super().setUp()
         self.boot = self.base / "boot"
         self.boot.mkdir()
-        for name in ("hydraweave-node", "hydraweave_compat.py", "hydraweave_lease.py", "hydraweave_rocm.py"):
+        for name in ("hydraweave-node", "hydraweave_common.py", "hydraweave_compat.py", "hydraweave_lease.py", "hydraweave_rocm.py"):
             shutil.copyfile(REPO / "node" / name, self.boot / name)
             (self.boot / name).chmod(0o700)
         for name in ("gpu-turn.sh", "gpu-turn-pair.sh"):
