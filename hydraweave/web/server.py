@@ -226,6 +226,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self._login(parsed):
                 return
+            if parsed.path == "/metrics":
+                if getattr(self.server, "lan", False) and not self._authorized():
+                    self._unauthorized()
+                    return
+                from hydraweave.metrics_export import collect
+                body = collect(config_path=self.server.api.config_path)
+                self._send(200, body, "text/plain; version=0.0.4; charset=utf-8", head=head)
+                return
             if parsed.path in {"/node/bootstrap.sh", "/node/package.tar.gz"}:
                 from hydraweave import bootstrap
                 data, digest = bootstrap.package()

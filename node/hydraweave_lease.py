@@ -18,6 +18,14 @@ import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 import uuid
+try:
+    import hydraweave_common
+except ImportError:  # direct-file loading by the host-side test harness
+    import importlib.util
+    _common_spec = importlib.util.spec_from_file_location(
+        "hydraweave_common", Path(__file__).with_name("hydraweave_common.py"))
+    hydraweave_common = importlib.util.module_from_spec(_common_spec)
+    _common_spec.loader.exec_module(hydraweave_common)
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -101,16 +109,7 @@ def decode(raw):
 
 
 def atomic(filename, raw):
-    temporary = filename.with_name(filename.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, filename)
-    finally:
-        temporary.unlink(missing_ok=True)
+    hydraweave_common.atomic_bytes(filename, raw, mode=0o600)
 
 
 def write_json(filename, value):

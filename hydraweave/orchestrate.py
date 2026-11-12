@@ -44,19 +44,14 @@ def _state_path(profile):
 
 def _write(path, value):
     from .paths import prepare_write
+    from .store import write_json
     prepare_write(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
-        # The prefill helper reads this file every 2 s; Windows refuses a replace while it is open.
-        rtx._retry(lambda: temporary.replace(path))
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_json(path, value)
 
 
 def _read(path):
-    return rtx._retry(lambda: json.loads(path.read_text(encoding="utf-8")))
+    from .store import read_json
+    return read_json(path)
 
 
 def config_record(config_path):
@@ -143,14 +138,11 @@ def _known_hosts():
 
 
 def _client(machine, known_hosts=None):
-    if machine.access == "agent":
-        from .onboarding import Client
-        from .recipes.service import configured_file
-        from .cli import config_path
-        return Client(machine, configured_file() or config_path())
-    if machine.access != "ssh":
-        raise OrchestrationError(f"{machine.id}: Phase 1a node work requires ssh access")
-    return remote.Remote(machine, known_hosts or _known_hosts())
+    from .transport import for_machine
+    try:
+        return for_machine(machine, known_hosts=known_hosts or _known_hosts())
+    except ValueError as exc:
+        raise OrchestrationError(f"{machine.id}: Phase 1a node work requires ssh or agent access") from exc
 
 
 def _call(client, verb, payload, timeout=60):

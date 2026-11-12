@@ -13,6 +13,14 @@ import stat
 import subprocess
 import sys
 import tempfile
+try:
+    import hydraweave_common
+except ImportError:  # direct-file loading by the host-side test harness
+    import importlib.util
+    _common_spec = importlib.util.spec_from_file_location(
+        "hydraweave_common", Path(__file__).with_name("hydraweave_common.py"))
+    hydraweave_common = importlib.util.module_from_spec(_common_spec)
+    _common_spec.loader.exec_module(hydraweave_common)
 import threading
 import time
 import unicodedata
@@ -74,16 +82,7 @@ def read_json(path):
 
 
 def atomic_json(path, obj):
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            os.chmod(temporary, 0o600)
-            stream.write(canonical(obj) + b"\n")
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    hydraweave_common.atomic_json(path, obj, canonical=canonical)
 
 
 def inside(root, *parts):

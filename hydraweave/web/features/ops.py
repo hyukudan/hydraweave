@@ -1000,60 +1000,7 @@ def validate_config(api, arguments):
     return {"valid": True, "error": None}
 
 
-_write_lock = threading.Lock()
-
-
-def write_config(path, raw):
-    """Atomic replace: a unique temporary file in the same directory (O_EXCL, the current file's permissions,
-    fsync), the previous file kept as <name>.prev, os.replace retried on sharing violations, the temporary removed
-    on failure. Returns the new version (sha256 of the bytes)."""
-    path = Path(path)
-    data = (json.dumps(raw, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    if len(data) > config_module.MAX_CONFIG_BYTES:
-        raise ValueError("configuration would exceed 256 KiB")
-    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if path.exists():
-            previous = path.with_name(path.name + ".prev")
-            content = retry_sharing(path.read_bytes)
-            retry_sharing(lambda: previous.write_bytes(content))
-        retry_sharing(lambda: os.replace(temporary, path))
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
-    return hashlib.sha256(data).hexdigest()
-
-
-class ConfigLock:
-    """Cross-process lock around a configuration edit (re-read .. replace), retried up to 5 s."""
-
-    def __init__(self, config_path, wait_s=5.0):
-        from hydraweave import procs
-        self.lock = procs.InstanceLock(Path(config_path).with_name(Path(config_path).name + ".lock"))
-        self.wait_s = wait_s
-
-    def __enter__(self):
-        from hydraweave import procs
-        end = time.monotonic() + self.wait_s
-        while True:
-            try:
-                self.lock.acquire()
-                return self
-            except procs.ProcessError:
-                if time.monotonic() >= end:
-                    raise PermissionError("another process is editing the configuration; retry") from None
-                time.sleep(0.1)
-
-    def __exit__(self, *exc):
-        self.lock.close()
+from hydraweave.store import ConfigLock, _write_lock, write_config
 
 
 def save_config(api, arguments):

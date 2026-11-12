@@ -35,7 +35,7 @@ POLL_DEADLINE_S = 20.0
 POLL_REPLY = 1024 * 1024
 # Extension modules shipped beside this file (copied together by bootstrap). Each exposes
 # VERBS (set of names) and run(verb, payload: dict) -> dict; they get the raw JSON payload.
-EXTENSIONS = ("hydraweave_rocm", "hydraweave_compat", "hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service",
+EXTENSIONS = ("hydraweave_rocm", "hydraweave_compat", "hydraweave_common", "hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service",
               "hydraweave_observe", "hydraweave_usb4", "hydraweave_turns", "hydraweave_models", "hydraweave_logsearch",
               "hydraweave_gguf_merge")
 

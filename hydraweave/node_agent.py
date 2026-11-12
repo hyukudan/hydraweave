@@ -10,6 +10,7 @@ import importlib.machinery
 import importlib.util
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -21,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import Counter
 from urllib.request import Request, urlopen
 import urllib.parse
 import urllib.request
@@ -29,6 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import __version__, bind, discovery
 from .paths import repo_root
 from .winproc import no_window
+
+_request_metrics_lock = threading.Lock()
+_request_count = Counter()
+_request_duration_ms = 0.0
 
 
 def load_tool():
@@ -319,7 +325,54 @@ class AgentHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass                      # pairing codes and bearer tokens never enter access logs
 
+    def send_response(self, code, message=None):
+        self._response_status = code
+        return super().send_response(code, message)
+
     def do_POST(self):
+        global _request_duration_ms
+        started = time.monotonic()
+        self._response_status = 500
+        try:
+            self._do_post()
+        finally:
+            elapsed = (time.monotonic() - started) * 1000
+            with _request_metrics_lock:
+                _request_count[(self._response_status, "ok" if self._response_status < 400 else "error")] += 1
+                _request_duration_ms += elapsed
+            logging.getLogger("hydraweave.agent").info(
+                "request method=%s outcome=%s status=%s duration_ms=%.1f",
+                self.command, "ok" if self._response_status < 400 else "error",
+                self._response_status, elapsed)
+
+    def do_GET(self):
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or not bind.host_allowed(hosts[0], "0.0.0.0", self.server.server_port, names=set()):
+            self.send_error(403)
+            return
+        expected = "Bearer " + (self.server.token or secrets.token_urlsafe())
+        if not self.server.token or not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+            self.send_error(401)
+            return
+        if self.path != "/metrics":
+            self.send_error(404)
+            return
+        with _request_metrics_lock:
+            rows = list(_request_count.items())
+            elapsed = _request_duration_ms
+        lines = ["# TYPE hydraweave_agent_requests_total counter"]
+        lines.extend(f'hydraweave_agent_requests_total{{status="{status}",outcome="{outcome}"}} {count}'
+                     for (status, outcome), count in rows)
+        lines.extend(("# TYPE hydraweave_agent_request_duration_ms_sum counter",
+                      f"hydraweave_agent_request_duration_ms_sum {elapsed:.3f}"))
+        body = ("\n".join(lines) + "\n").encode("ascii")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _do_post(self):
         try:
             # The controller addresses agents by IP literal only; refusing every DNS name means a web page
             # cannot rebind its own name to this agent (the portal's Host rule, without its host names).
@@ -481,7 +534,12 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=18701)
     parser.add_argument("--no-announce", action="store_true", default=os.environ.get("HYDRAWEAVE_NO_ANNOUNCE") == "1")
     parser.add_argument("--force", action="store_true", help="install-service: restart the agent even while a lease is live")
+    parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--log-json", action="store_true")
     args = parser.parse_args(argv)
+    if args.operation == "serve":
+        from .log import setup
+        setup(args.log_level, args.log_json, Path(args.root) / "state" / "hydraweave.log")
     if args.operation is None:
         parser.print_help()
         return 0
