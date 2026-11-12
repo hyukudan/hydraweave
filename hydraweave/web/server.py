@@ -88,7 +88,10 @@ class PortalServer(ThreadingHTTPServer):
             self.access_token = store.ensure("portal-access")
         super().__init__((self.listen_address, port), Handler)
         self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
-        self.api.portal_health_url = self.origin + "/api/health"
+        try:
+            self.api.portal_health_url = self.origin + "/api/health"
+        except AttributeError:  # API stubs without attributes
+            pass
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
 
     def host_allowed(self, header):
