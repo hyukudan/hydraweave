@@ -225,7 +225,9 @@ def validate_process(proc):
     path(argv[0])
     environment(proc.get("env", {}))
     proc.setdefault("env", {})
-    if proc.get("ready") not in READY_ADAPTERS:
+    if isinstance(proc.get("ready"), dict):
+        proc["ready"] = validate_ready(proc["ready"])
+    elif proc.get("ready") not in READY_ADAPTERS:
         raise ValueError("unknown readiness adapter")
     health_url(proc.get("health_url"))
     proc["ready_timeout_s"] = number(proc.get("ready_timeout_s", 120), "ready_timeout_s")
@@ -555,7 +557,43 @@ def tail_file(filename, count=MAX_LOG):
         return ""
 
 
+def validate_ready(spec):
+    if not isinstance(spec, dict) or not (len(spec) == 1 or
+                                         (len(spec) == 2 and "stream" in spec and "regex" in spec)):
+        raise ValueError("ready must contain exactly one readiness rule")
+    if "http" in spec:
+        value = spec["http"]
+        if not isinstance(value, str) or not value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("ready http path must start with / and contain no parent traversal")
+        return {"http": value}
+    if "stream" in spec:
+        stream, pattern = spec["stream"], spec.get("regex")
+        if stream not in {"stdout", "stderr"} or not isinstance(pattern, str) or not pattern or len(pattern) > 256:
+            raise ValueError("ready regex requires stdout or stderr and a pattern of at most 256 characters")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError("invalid ready regex") from exc
+        return {"stream": stream, "regex": pattern}
+    if spec == {"json_event": "READY"}:
+        return dict(spec)
+    raise ValueError("unsupported readiness rule")
+
+
 def adapter_ready(adapter, stdout, stderr, rank=0):
+    if isinstance(adapter, dict):
+        if "stream" in adapter:
+            return bool(re.search(adapter["regex"], stdout if adapter["stream"] == "stdout" else stderr))
+        if "json_event" in adapter:
+            for line in stdout.splitlines():
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(event, dict) and event.get("event") == adapter["json_event"]:
+                    return True
+            return False
+        return True
     if adapter == "http-health":
         return True
     if adapter == "qwen-stderr":
@@ -672,6 +710,10 @@ class Child:
                      for stream in ("stdout", "stderr"))
 
     def check_ready(self):
+        if isinstance(self.proc["ready"], dict) and "http" in self.proc["ready"]:
+            base = urlsplit(self.proc["health_url"])
+            endpoint = urlunsplit(base._replace(path=self.proc["ready"]["http"], query="", fragment=""))
+            return http(endpoint)
         stdout, stderr = self.logs()
         return (adapter_ready(self.proc["ready"], stdout, stderr, rank_of(self.proc))
                 and http(self.proc["health_url"]))

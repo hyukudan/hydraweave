@@ -331,8 +331,7 @@ def _hosts(args):
     return {"machine": machine.id, "pinned": match[0].sha256_fingerprint, "algorithm": match[0].algorithm}
 
 
-VRAMPLAN_ENGINES = ("minimax-rtx-prefill", "qwen-rtx-prefill", "ds41-rtx-prefill", "ds41-rtx-front", "ds41-rtx-hot",
-                    "ds41-node", "desc-v1")
+from .placement import ENGINES as VRAMPLAN_ENGINES
 
 
 def _vramplan(args):

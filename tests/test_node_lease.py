@@ -176,6 +176,17 @@ class LeaseLogicTests(LeaseFixture):
         self.assertFalse(lease.adapter_ready("ds41-json", "", ds41))
         self.assertFalse(lease.adapter_ready("ds41-json", '{"event":"POISONED"}', ""))
 
+    def test_data_readiness_validation_and_matching(self):
+        self.assertEqual(lease.validate_ready({"stream": "stderr", "regex": "READY.*"}),
+                         {"stream": "stderr", "regex": "READY.*"})
+        self.assertTrue(lease.adapter_ready({"stream": "stderr", "regex": "READY.*"}, "", "READY now"))
+        self.assertTrue(lease.adapter_ready({"json_event": "READY"}, '{"event":"READY"}', ""))
+        self.assertEqual(lease.validate_ready({"http": "/health"}), {"http": "/health"})
+        for bad in ({"http": "health"}, {"http": "/../bad"}, {"stream": "stderr", "regex": "x" * 257},
+                    {"stream": "pipe", "regex": "ok"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                lease.validate_ready(bad)
+
     def test_readiness_requires_both_event_and_health(self):
         child = lease.Child(self.root, "abc", self.spec["processes"][0])
         qwen = "strix serve: listening on 127.0.0.1:18501 model synthetic"

@@ -27,7 +27,7 @@ testpaths = ["tests"]
 norecursedirs = ["third_party", ".*"]
 
 [tool.setuptools.package-data]
-hydraweave = ["presets/*.json", "data/*.json", "web/static/*", "web/static/pages/*", "web/static/assets/*", "bench/data/*.json", "recipes/builtin.json", "recipes/examples/*.toml", "recipes/examples/pending/*.toml"]
+hydraweave = ["presets/*.json", "models/*.json", "backends/profiles/*.json", "data/*.json", "web/static/*", "web/static/pages/*", "web/static/assets/*", "bench/data/*.json", "recipes/builtin.json", "recipes/examples/*.toml", "recipes/examples/pending/*.toml"]
 
 [tool.setuptools.data-files]
 "share/hydraweave/node" = ["node/hydraweave-node", "node/*.py", "node/build-node.sh"]

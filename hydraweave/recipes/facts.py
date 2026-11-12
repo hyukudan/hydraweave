@@ -19,9 +19,9 @@ from . import apply, probe
 from .reader import RecipeError
 
 # The model id each engine family serves (equals `match.model` of its recipes) and the asset that holds the model.
-FAMILY_MODELS = {"qwen-replicas": ("qwen3.8-flash-next", "model"),
-                 "ds41-pair": ("deepseek-v4.1-flash", "ds41_model"),
-                 "minimax-pair": ("minimax-m3.1-flash", "mm_model")}
+from ..backends import registry as backend_registry
+FAMILY_MODELS = {family: backend.family_models for backend in backend_registry().values()
+                 for family in backend.families if family != "llamacpp"}
 FAMILY_MODELS_BY_ID = {model: asset for model, asset in FAMILY_MODELS.values()}
 DEFAULT_HOST_OVERHEAD_GIB = 4.0
 # The decode engine's per-sequence context and its concurrent sequences: (flag, engine default or None = unknown).
