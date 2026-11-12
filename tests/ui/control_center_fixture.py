@@ -40,7 +40,7 @@ def main():
         stack.enter_context(patch.object(remote.Remote, "call", no_remote))
         stack.enter_context(patch.object(API, "_probe", lambda *a, **k: None))
         stack.enter_context(patch.object(API, "_node", lambda *a, **k: {
-            "leases": [], "why": "DOM fixture: no hardware observation"
+            "leases": [], "lab_mode": False, "why": "DOM fixture: no hardware observation"
         }))
         api = API(root / "config" / "cluster.json", audit_path=root / "audit.jsonl")
         with create_server(0, api=api) as server:
