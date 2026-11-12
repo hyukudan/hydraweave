@@ -5,7 +5,12 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import pytest
+try:
+    import pytest
+except ImportError as exc:  # stdlib unittest discovery runs before test extras
+    import unittest
+
+    raise unittest.SkipTest("pytest is required") from exc
 
 from hydraweave import cli, node_agent, uninstall
 

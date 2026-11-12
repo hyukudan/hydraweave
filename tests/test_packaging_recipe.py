@@ -5,7 +5,12 @@ from pathlib import Path
 import runpy
 from unittest.mock import patch
 
-import pytest
+try:
+    import pytest
+except ImportError as exc:  # stdlib unittest discovery runs before test extras
+    import unittest
+
+    raise unittest.SkipTest("pytest is required") from exc
 
 
 ROOT = Path(__file__).resolve().parents[1]
