@@ -57,7 +57,13 @@ package_dir=$(mktemp -d)
 trap 'rm -rf "$package_dir"' EXIT
 trap 'exit 1' HUP INT TERM
 package="$package_dir/package.tar.gz"
-curl -fsSL '""" + origin.rstrip("/") + """/node/package.tar.gz' -o "$package"
+if [ -n "${HYDRAWEAVE_PORTAL_TOKEN:-}" ]; then
+    # A token-protected portal: the header goes through a config on stdin, never the command line or a URL.
+    printf 'header = "Authorization: Bearer %s"\\n' "$HYDRAWEAVE_PORTAL_TOKEN" | \\
+        curl -fsSL -K - '""" + origin.rstrip("/") + """/node/package.tar.gz' -o "$package"
+else
+    curl -fsSL '""" + origin.rstrip("/") + """/node/package.tar.gz' -o "$package"
+fi
 if command -v sha256sum >/dev/null 2>&1; then
     actual=$(sha256sum "$package")
 elif command -v shasum >/dev/null 2>&1; then

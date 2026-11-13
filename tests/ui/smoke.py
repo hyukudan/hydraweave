@@ -90,7 +90,7 @@ def eventually(check, timeout=15):
 class FixtureServer:
     """A separate process runs the real CLI/server, with backend calls replaced."""
 
-    def __init__(self, *, blocked=False, port=None, launch_fixture=False):
+    def __init__(self, *, blocked=False, port=None, launch_fixture=False, signed_out=False):
         self.temporary = tempfile.TemporaryDirectory(prefix="hydraweave-ui-")
         self.directory = Path(self.temporary.name)
         self.port = port or free_port()
@@ -103,6 +103,8 @@ class FixtureServer:
             command.append("--blocked")
         if launch_fixture:
             command.append("--launch-fixture")
+        if signed_out:
+            command.append("--signed-out")
         self.process = subprocess.Popen(command, cwd=ROOT, stdout=self.output, stderr=self.output)
         try:
             eventually(self._ready)
@@ -399,6 +401,16 @@ def fixture_server(args):
 
             stack.enter_context(patch.object(web_api.API, "__init__", launch_init))
             stack.enter_context(patch.object(web_api.API, "_profiles", launch_profiles))
+        if args.signed_out:
+            # A token-protected portal on loopback: only this fixture forces one (a real loopback bind has no token).
+            from hydraweave.web import server as portal
+            created = portal.PortalServer.__init__
+
+            def protected(self, *a, **kw):
+                created(self, *a, **kw)
+                self.access_token = SIGN_IN_TOKEN
+
+            stack.enter_context(patch.object(portal.PortalServer, "__init__", protected))
         return cli.main(["ui", "--port", str(args.port), "--no-browser"])
 
 
@@ -1374,8 +1386,76 @@ def launch_walkthrough(client, server, output):
     print("PASS launch timeline, Engines, historical ETA, missing history, cancel/stop controls", flush=True)
 
 
+SIGN_IN_TOKEN = "5" * 64        # fixture-only access token
+
+
+def signed_out_walkthrough(client, server, output):
+    """A visitor without the token sees the sign-in screen and no data; a wrong token is refused with a message;
+    the right one opens the portal without ever appearing in the URL; a session that ends returns to sign-in."""
+    def wait(expression, timeout=30):
+        try:
+            eventually(lambda: client.evaluate(expression), timeout=timeout)
+        except AssertionError:
+            raise AssertionError("signed-out walkthrough: timed out waiting for " + expression + "; body: "
+                                 + str(client.evaluate("document.body.innerText.slice(0, 300)"))) from None
+
+    def shot(name):
+        png = base64.b64decode(client.call("Page.captureScreenshot", format="png", captureBeyondViewport=False)["data"])
+        (output / f"signin-{name}.png").write_bytes(png)
+
+    def submit(token):
+        client.evaluate("(() => { const f = document.querySelector('section[aria-label=\"Portal sign-in\"] form');"
+                        " f.querySelector('input').value = " + json.dumps(token) + "; f.requestSubmit(); })()")
+
+    form = "!!document.querySelector('section[aria-label=\"Portal sign-in\"] form input[type=password]')"
+    status = "fetch(%s, {cache: 'no-store'}).then(r => r.status)"
+    client.call("Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False)
+    client.call("Page.navigate", url=server.url + "#/devices")
+    wait("document.readyState === 'complete' && " + form)
+    page = client.evaluate("({text: document.body.innerText, scripts: [...document.scripts].map(s => s.getAttribute('src')).filter(src => src && src.startsWith('/')),"
+                           " nav: !!document.querySelector('nav'), app: typeof window.HydraweavePages})")
+    if "Signed out" not in page["text"] or "Sign in to view this portal" not in page["text"]:
+        raise AssertionError("signed-out page has no clear message: " + page["text"][:300])
+    if page["scripts"] != ["/security.js"] or page["nav"] or page["app"] != "undefined":
+        raise AssertionError("signed-out page loaded the application: " + json.dumps(page))
+    for path in ("/hydraweave/api/devices", "/hydraweave/api/logs", "/hydraweave/api/stream", "/hyperloom/api/devices",
+                 "/app.js", "/metrics", "/node/bootstrap.sh"):
+        code = client.evaluate(status % json.dumps(path))
+        if code != 401:
+            raise AssertionError(f"signed-out visitor read {path}: HTTP {code}")
+    if client.evaluate(status % json.dumps("/api/health")) != 200:
+        raise AssertionError("health is not public")
+    shot("signed-out")
+    submit("0" * 64)
+    wait("!document.querySelector('#signin-error').hidden")
+    refused = client.evaluate("({error: document.querySelector('#signin-error').textContent, url: location.href,"
+                              " value: document.querySelector('section[aria-label=\"Portal sign-in\"] input').value})")
+    if "not valid" not in refused["error"] or refused["value"] or "token" in refused["url"] or "?" in refused["url"]:
+        raise AssertionError("wrong token: " + json.dumps(refused))
+    shot("refused")
+    submit(SIGN_IN_TOKEN)
+    wait("!document.querySelector('meta[name=\"hydraweave-login\"]') && typeof window.HydraweavePages === 'object'"
+         " && !!document.querySelector('main') && document.body.innerText.length > 100")
+    url = client.evaluate("location.href")
+    if SIGN_IN_TOKEN in url or "?" in url or not url.endswith("#/devices"):
+        raise AssertionError("signed-in URL: " + url)
+    if client.evaluate(status % json.dumps("/hydraweave/api/devices")) != 200:
+        raise AssertionError("signed-in page cannot read its data")
+    if SIGN_IN_TOKEN in client.evaluate("document.cookie + document.documentElement.outerHTML"):
+        raise AssertionError("the access token is readable by page scripts")
+    shot("signed-in")
+    # The session ends (as after a token rotation): the next poll answers 401 and the page returns to sign-in.
+    client.call("Network.clearBrowserCookies")
+    wait("!!document.querySelector('meta[name=\"hydraweave-login\"]') && " + form)
+    if client.evaluate("!!document.querySelector('nav') || typeof window.HydraweavePages !== 'undefined'"):
+        raise AssertionError("an ended session left the application on screen")
+    if client.errors:
+        raise AssertionError("signed-out walkthrough: console/exception errors: " + json.dumps(client.errors))
+    print("PASS signed-out walkthrough: sign-in screen only, wrong token refused, sign-in, session end", flush=True)
+
+
 def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False, recipes_only=False,
-                  launch_only=False, refusals_only=False):
+                  launch_only=False, refusals_only=False, signin_only=False):
     with tempfile.TemporaryDirectory(prefix="hydraweave-chrome-", ignore_cleanup_errors=True) as profile:
         port = free_port()
         command = [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
@@ -1407,6 +1487,9 @@ def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False
                 if launch_only:
                     launch_walkthrough(client, server, output)
                     return 1
+                if signin_only:
+                    signed_out_walkthrough(client, server, output)
+                    return 0
                 captures = 0
                 for width in (() if keyboard_only or recipes_only or refusals_only else (1440, 390)):
                     client.call("Emulation.setDeviceMetricsOverride", width=width, height=1000,
@@ -1529,6 +1612,8 @@ def main():
     parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--blocked", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--launch-fixture", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--signed-out", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--signin-only", action="store_true", help="run only the signed-out / sign-in walkthrough")
     args = parser.parse_args()
     if args.fixture_server:
         return fixture_server(args)
@@ -1551,6 +1636,11 @@ def main():
     output = args.output or Path(tempfile.mkdtemp(prefix="hydraweave-ui-screenshots-"))
     output.mkdir(parents=True, exist_ok=True)
     print("Screenshots: " + str(output), flush=True)
+    with FixtureServer(signed_out=True) as server:
+        browser_smoke(chrome, server, output, signin_only=True)
+    if args.signin_only:
+        print("PASS requested walkthrough; no console errors")
+        return 0
     with FixtureServer() as server:
         count = browser_smoke(chrome, server, output, keyboard=args.keyboard, keyboard_only=args.keyboard_only,
                               recipes_only=args.recipes_only, refusals_only=args.refusals_only)

@@ -186,24 +186,32 @@ def test_lan_mutations_without_credentials_are_401(method):
     server.api.mutate.assert_not_called()
 
 
-def test_pages_remain_readable_and_expose_package_digest(package_cache):
+BROWSER = {"Origin": "http://127.0.0.1:18700", "X-Hydraweave-CSRF": CSRF}
+
+
+def sign_in(server, token=ACCESS, headers=BROWSER):
+    return request(server, "POST", "/hydraweave/api/login", headers=headers, body={"token": token})
+
+
+def test_signed_out_page_is_the_sign_in_screen_only(package_cache):
     server, _ = make_server()
     status, _, body = request(server)
     assert status == 200 and CSRF.encode() in body
-    assert bootstrap.package_sha256().encode() in body
-    assert b'/security.js' in body
+    assert b'/security.js' in body and b'name="hydraweave-login"' in body and b"Signed out" in body
     assert ACCESS.encode() not in body
-    assert b'name="hydraweave-login"' in body
-    cookie = request(server, path="/?token=" + ACCESS)[1]["Set-Cookie"].split(";", 1)[0]
-    assert b'name="hydraweave-login"' not in request(server, headers={"Cookie": cookie})[2]
-    assert request(server, path="/hydraweave/api/up")[0] == 405
+    # No application shell, scripts or deployment details before sign-in.
+    assert b"app.js" not in body and bootstrap.package_sha256().encode() not in body
+    cookie = sign_in(server)[1]["Set-Cookie"].split(";", 1)[0]
+    body = request(server, headers={"Cookie": cookie})[2]
+    assert b'name="hydraweave-login"' not in body and bootstrap.package_sha256().encode() in body
+    assert request(server, path="/hydraweave/api/up")[0] == 401
+    assert request(server, path="/hydraweave/api/up", headers={"Cookie": cookie})[0] == 405
 
 
-def test_login_cookie_redirect_and_cookie_mutation(package_cache):
+def test_sign_in_sets_cookie_and_cookie_mutation(package_cache):
     server, _ = make_server()
-    status, headers, body = request(server, path="/?token=" + ACCESS)
-    assert status == 303 and not body
-    assert headers["Location"] == "/"
+    status, headers, body = sign_in(server)
+    assert status == 200 and json.loads(body) == {"signed_in": True, "required": True}
     cookie = headers["Set-Cookie"]
     assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "Path=/" in cookie
     status, _, _ = request(server, "POST", "/hydraweave/api/up", headers={
@@ -214,13 +222,49 @@ def test_login_cookie_redirect_and_cookie_mutation(package_cache):
     assert request(server, "POST", "/hydraweave/api/up", headers={"Cookie": cookie})[0] == 403
 
 
-@pytest.mark.parametrize("query", ["token=wrong", "token=", "token=" + ACCESS + "&token=" + ACCESS,
-                                  "token=%C3%B1"])
-def test_invalid_login_never_sets_cookie(query):
+@pytest.mark.parametrize("query", ["token=wrong", "token=", "token=" + ACCESS, "token=%C3%B1"])
+def test_token_in_a_url_is_refused_and_never_sets_cookie(query):
     server, _ = make_server()
-    status, headers, _ = request(server, path="/?" + query)
-    assert status == 401
-    assert headers["Set-Cookie"] is None
+    for path in ("/?" + query, "/hydraweave/api/devices?" + query):
+        status, headers, body = request(server, path=path)
+        assert status == 400 and b"never accepted in a URL" in body
+        assert headers["Set-Cookie"] is None
+    assert request(server, "POST", "/hydraweave/api/login?" + query, headers=BROWSER,
+                   body={"token": ACCESS})[0] == 404
+
+
+@pytest.mark.parametrize("token,headers,expected", [
+    ("wrong", BROWSER, 401), ("", BROWSER, 401), ("\u00f1" * 64, BROWSER, 401), (None, BROWSER, 400),
+    (ACCESS, {}, 403), (ACCESS, {"Origin": "http://evil.example", "X-Hydraweave-CSRF": CSRF}, 403),
+    (ACCESS, {"Origin": "http://127.0.0.1:18700", "X-Hydraweave-CSRF": "wrong"}, 403)])
+def test_invalid_sign_in_never_sets_cookie(token, headers, expected):
+    server, _ = make_server()
+    status, fields, _ = sign_in(server, token, headers)
+    assert status == expected
+    assert fields["Set-Cookie"] is None
+
+
+def test_rotation_invalidates_cookie_and_bearer_live(tmp_path, monkeypatch):
+    monkeypatch.setattr(secrets, "_directory", lambda: tmp_path / "secrets")
+    with mock.patch.object(portal.ThreadingHTTPServer, "__init__",
+                           lambda server, *_: setattr(server, "server_port", 18700)):
+        server = portal.create_server(18700, api=SimpleNamespace(read=mock.Mock(return_value={"ok": True})),
+                                      listen="0.0.0.0")
+    server.csrf_token = CSRF
+    old = server.access_token
+    cookie = sign_in(server, old)[1]["Set-Cookie"].split(";", 1)[0]
+    for headers in ({"Cookie": cookie}, {"Authorization": "Bearer " + old}):
+        assert request(server, path="/hydraweave/api/devices", headers=headers)[0] == 200
+    new = secrets.rotate("portal-access")
+    assert new != old
+    for headers in ({"Cookie": cookie}, {"Authorization": "Bearer " + old}):
+        assert request(server, path="/hydraweave/api/devices", headers=headers)[0] == 401
+    assert b'name="hydraweave-login"' in request(server, headers={"Cookie": cookie})[2]
+    assert sign_in(server, old)[0] == 401
+    assert request(server, path="/hydraweave/api/devices", headers={"Authorization": "Bearer " + new})[0] == 200
+    # A secret that disappears closes the portal; it never falls back to open access.
+    (tmp_path / "secrets" / "portal-access").unlink()
+    assert request(server, path="/hydraweave/api/devices", headers={"Authorization": "Bearer " + new})[0] == 401
 
 
 @pytest.mark.parametrize("headers", [{"Cookie": "hydraweave-access=wrong"},
@@ -266,15 +310,18 @@ def test_no_auth_lan_has_visible_warning_and_loopback_does_not(package_cache):
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
-def test_bootstrap_endpoints_need_no_portal_cookie(method, package_cache):
+def test_bootstrap_endpoints_need_the_portal_token(method, package_cache):
     server, _ = make_server()
     data, digest = bootstrap.package()
     for path, expected in [("/node/package.tar.gz", data),
                            ("/node/bootstrap.sh", bootstrap.script(server.origin, digest))]:
-        status, headers, body = request(server, method, path)
+        assert request(server, method, path)[0] == 401
+        status, headers, body = request(server, method, path, headers={"Authorization": "Bearer " + ACCESS})
         assert status == 200
         assert headers["Set-Cookie"] is None
         assert body == (expected if method == "GET" else b"")
+    script = bootstrap.script(server.origin, digest).decode()
+    assert "HYDRAWEAVE_PORTAL_TOKEN" in script and "curl -fsSL -K -" in script and ACCESS not in script
 
 
 def test_agent_pair_and_call_keep_their_own_authentication():
@@ -299,7 +346,7 @@ def test_cli_passes_no_auth():
     assert serve.call_args.kwargs["no_auth"] is True
 
 
-def test_console_prints_login_url_and_browser_uses_it(capsys):
+def test_console_prints_token_and_browser_url_has_no_token(capsys):
     fake = mock.MagicMock()
     fake.__enter__.return_value = fake
     fake.lan, fake.no_auth, fake.access_token = True, False, ACCESS
@@ -311,10 +358,9 @@ def test_console_prints_login_url_and_browser_uses_it(capsys):
             mock.patch.object(portal.webbrowser, "open") as browse:
         portal.serve(listen="192.0.2.10")
     captured = capsys.readouterr()
-    url = fake.origin + "/?token=" + ACCESS
-    assert url in captured.out
-    assert "without authentication" not in captured.err
-    browse.assert_called_once_with(url)
+    assert "access token (enter it on the sign-in screen): " + ACCESS in captured.out
+    assert "?token=" not in captured.out and "without authentication" not in captured.err
+    browse.assert_called_once_with(fake.origin + "/")
 
 
 def test_ui_prompts_for_login_in_each_mutation_transport():
@@ -323,6 +369,7 @@ def test_ui_prompts_for_login_in_each_mutation_transport():
         source = (root / name).read_text(encoding="utf-8")
         assert "response.status === 401" in source and "window.HydraweaveLogin?.()" in source
     login = (root / "security.js").read_text(encoding="utf-8")
-    assert 'name="token" type="password"' in login and 'form action="/" method="get"' in login
+    assert 'name="token" type="password"' in login and 'method="post"' in login
+    assert 'method="get"' not in login and "?token" not in login and "location.reload()" in login
     control = (root / "pages/control-center.js").read_text(encoding="utf-8")
     assert "HYDRAWEAVE_PKG_SHA256=" in control and "Package SHA-256:" in control

@@ -331,11 +331,13 @@ hloom ui --listen 0.0.0.0 --no-browser          # every interface; console print
 
 ### LAN access security
 
-Non-loopback portal binds protect mutations with a generated access token. Open the console's
-`http://HOST:PORT/?token=...` URL to log in: it sets an `HttpOnly; SameSite=Strict` session cookie and
-redirects to a URL without the token. Pages remain readable without login; actions return 401 and show
-a small login form. API clients can send `Authorization: Bearer <portal-token>` instead. Cookie requests
-retain Origin and CSRF checks; explicit bearer credentials do not need browser CSRF headers.
+Non-loopback portal binds protect reads and actions alike with a generated access token, printed on the
+console at start. Without it a visitor reaches only the health/version document and the sign-in screen: no
+inventory, logs, settings, jobs, history, exports, metrics or event stream. Type the token into the sign-in
+screen; it is posted in a request body, kept in an `HttpOnly; SameSite=Strict` session cookie and never
+placed in a URL. API clients send `Authorization: Bearer <portal-token>` instead. Cookie requests retain
+Origin and CSRF checks; explicit bearer credentials do not need browser CSRF headers. Rotating the token
+(`hloom keys rotate portal-access`) signs every session out at once, without a restart.
 
 The token is reused across starts from `~/.config/hydraweave/secrets/portal-access` (0600 on POSIX), or
 `%APPDATA%\hydraweave\secrets\portal-access` (user-scoped DPAPI and private ACL on Windows).
@@ -343,10 +345,12 @@ Loopback binds keep their existing behavior. To allow unauthenticated LAN contro
 `hloom ui --listen 0.0.0.0 --no-auth` or `HYDRAWEAVE_NO_AUTH=1`. The console and portal display a warning.
 
 For workers, copy the bootstrap command and package SHA-256 from the portal. It uses
-`curl -fsSL http://HOST:PORT/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<hex> sh`.
+`curl -fsSL http://HOST:PORT/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<hex> sh`; on a token-protected
+portal first `export HYDRAWEAVE_PORTAL_TOKEN=<portal-token>` on the worker and add
+`-H "Authorization: Bearer $HYDRAWEAVE_PORTAL_TOKEN"` to that `curl`.
 The script downloads the package to a temporary file and verifies it before installing with pip; a mismatch
 aborts installation. If the environment variable is missing, the script prints a note and uses its embedded
-hash. Bootstrap/package downloads stay public, while worker pairing and agent calls keep their own
+hash. Bootstrap/package downloads need the portal token, while worker pairing and agent calls keep their own
 pairing-code/bearer authentication. Use a trusted LAN or secure tunnel because HTTP carries scripts and
 tokens without encryption. See [Node discovery — security](node-discovery.md#portal-access-security).
 
