@@ -23,7 +23,8 @@
   const history = () => {
     const id = machineId();
     if (!id) return {};
-    const series = ["node_gpu_busy_percent", "node_gpu_power_watts", "node_gpu_power_limit_watts", "node_gpu_temp_celsius", "node_cpu_busy_percent"];
+    const series = ["node_gpu_busy_percent", "node_gpu_power_watts", "node_gpu_power_limit_watts", "node_gpu_temp_celsius", "node_cpu_busy_percent",
+      "node_gpu_mem_used_bytes", "node_gpu_mem_total_bytes", "node_mem_available_bytes", "node_mem_total_bytes"];
     return Object.fromEntries(series.map(s => [s, TS().endpoint(s, {range: view.range, labels: {machine: id}})]));
   };
   const v = (value, unit, digits = 0, why = "not reported") => num(value) ? H().esc(`${value.toFixed(digits)}${unit ? " " + unit : ""}`) : H().unavailable(why);
@@ -76,8 +77,61 @@
     const get = name => docs[ep[name]];
     const devices = (d.gpus || []).map(g => g.device);
     const color = labels => colors[Math.max(0, devices.indexOf(labels.device)) % colors.length];
+    const ranger = `<div class="row" role="group" aria-label="History range">${ranges.map(([l, s]) => `<button type="button" class="btn sm ${s === view.range ? "pri" : ""}" data-page-action="mc-range" data-range="${s}" aria-pressed="${s === view.range}">${esc(l)}</button>`).join("")}</div>`;
+    const footer = `<p class="hint">Gaps are periods without samples (never zeros). Stored in UTC; shown in this browser's time zone.</p>`;
+    // Each chart has its own state: a failed request shows its reason and Retry (never a permanent "loading"),
+    // a missing history store shows its reason (never "No samples").
+    const stateOf = name => window.HydraweaveNodeTiles.seriesState(ep[name]);
+    const problem = (title, names) => {
+      const states = names.map(stateOf), failed = states.find(s => s.error), missing = states.find(s => s.unavailable);
+      const figure = (kind, text, retry) => `<figure class="ts ts-empty ts-problem" data-mc-chart-state="${kind}"><figcaption>${esc(title)}</figcaption><p><span class="unavailable">${esc(text)}</span>${retry ? ` <button type="button" class="btn sm" data-page-action="mc-retry">Retry</button>` : ""}</p></figure>`;
+      if (failed) return figure("error", `History request failed · ${failed.error}`, true);
+      if (states.some(s => s.loading)) return figure("loading", "Loading history…");
+      if (missing) return figure("unavailable", `History unavailable · ${missing.unavailable}`);
+      return "";
+    };
+    const emptyWhy = doc => `No samples in this range · ${doc?.why?.lines || "nothing recorded for this series"} (unavailable, not zero)`;
+    const frame = doc => ({step: doc.step || 2, cadence: doc.tier === "raw" ? doc.interval_s || 0 : 0, start: doc.start, end: doc.end, group: "machine", empty: emptyWhy(doc)});
+    const pts = line => line.points.map(p => [p[0], p[1], p[7] ?? null, p[8] ?? null]);
+    const combine = window.HydraweaveNodeTiles.combine, sum = values => values.reduce((a, b) => a + b, 0);
+    const extra = [];
+    // GPU memory: the driver's domains as reported (VRAM and GTT), and their sum per card where both exist. On
+    // unified-memory hardware that sum is what the GPU can address; it is not RAM on top of system memory.
+    const memTitle = "GPU memory by domain (used)";
+    const memProblem = problem(memTitle, ["node_gpu_mem_used_bytes", "node_gpu_mem_total_bytes"]);
+    if (memProblem) extra.push(memProblem);
+    else {
+      const used = get("node_gpu_mem_used_bytes"), total = get("node_gpu_mem_total_bytes"), lines = [];
+      const label = l => `${(d.gpus || []).find(g => g.device === l.device)?.name || l.device || ""} · ${String(l.domain || "").toUpperCase()}`;
+      (used.lines || []).forEach((line, i) => lines.push({label: `${label(line.labels)} used`, color: colors[i % colors.length], points: pts(line)}));
+      for (const device of new Set((used.lines || []).map(l => l.labels.device))) {
+        const own = (used.lines || []).filter(l => l.labels.device === device), all = (total.lines || []).filter(l => l.labels.device === device);
+        const name = (d.gpus || []).find(g => g.device === device)?.name || device || "";
+        if (own.length > 1) lines.push({label: `${name} · ${own.map(l => String(l.labels.domain).toUpperCase()).sort().reverse().join(" + ")} used`, color: colors[(lines.length) % colors.length], points: combine(own.map(pts), sum)});
+        if (all.length) lines.push({label: `${name} · ${all.map(l => String(l.labels.domain).toUpperCase()).sort().reverse().join(" + ")} total`, color: colors[(lines.length) % colors.length], points: combine(all.map(pts), sum)});
+      }
+      extra.push(TS().chart({...frame(used), title: memTitle, unit: "bytes", lines}));
+    }
+    const sysTitle = "System memory used";
+    const sysProblem = problem(sysTitle, ["node_mem_available_bytes", "node_mem_total_bytes"]);
+    if (sysProblem) extra.push(sysProblem);
+    else {
+      const free = get("node_mem_available_bytes"), all = get("node_mem_total_bytes");
+      const lines = free.lines?.[0] && all.lines?.[0] ? [{label: "used (total − available)", color: colors[0], points: combine([pts(all.lines[0]), pts(free.lines[0])], ([t, a]) => t - a)},
+        {label: "total", color: colors[1], points: pts(all.lines[0])}] : [];
+      extra.push(TS().chart({...frame(free), title: sysTitle, unit: "bytes", lines}));
+    }
+    const cpuTitle = "CPU busy (%)";
+    const cpuProblem = problem(cpuTitle, ["node_cpu_busy_percent"]);
+    if (cpuProblem) extra.push(cpuProblem);
+    else {
+      const doc = get("node_cpu_busy_percent");
+      extra.push(TS().chart({...frame(doc), title: cpuTitle, unit: "%", max: 100, lines: (doc.lines || []).map((line, i) => ({label: "CPU busy", color: colors[i % colors.length], points: pts(line)}))}));
+    }
+    const links = `<p class="hint"><a href="#/history?series=node_gpu_mem_used_bytes">Open GPU memory in Metrics history</a> · <a href="#/history?series=node_mem_available_bytes">Open system memory in Metrics history</a></p>`;
+    const gpuProblem = problem("GPU busy, power and temperature", ["node_gpu_busy_percent", "node_gpu_power_watts", "node_gpu_power_limit_watts", "node_gpu_temp_celsius"]);
+    if (gpuProblem) return card("History", ranger + `<div class="mc-charts">${gpuProblem}${extra.join("")}</div>${links}${footer}`);
     const busy = get("node_gpu_busy_percent"), power = get("node_gpu_power_watts"), limit = get("node_gpu_power_limit_watts"), temp = get("node_gpu_temp_celsius");
-    if (!busy || !power || !limit || !temp) return card("History", `<p class="hint">loading history…</p>`);
     const name = labels => (d.gpus || []).find(g => g.device === labels.device)?.name || labels.device || "";
     const util = [];
     for (const line of busy.lines || []) util.push({label: `${name(line.labels)} · busy`, color: color(line.labels), points: line.points.map(p => [p[0], p[1], p[7] ?? null, p[8] ?? null])});
@@ -89,12 +143,11 @@
       util.push({label: `${name(line.labels)} · power % of limit`, color: colors[(devices.indexOf(line.labels.device) + 2) % colors.length],
         points: line.points.filter(p => num(lim.get(p[0])) && lim.get(p[0]) > 0).map(p => [p[0], p[1] / lim.get(p[0]) * 100, p[7] ?? null, p[8] ?? null])});
     }
-    const common = {step: busy.step || 2, cadence: busy.tier === "raw" ? busy.interval_s || 0 : 0, start: busy.start, end: busy.end, group: "machine"};
-    const ranger = `<div class="row" role="group" aria-label="History range">${ranges.map(([l, s]) => `<button type="button" class="btn sm ${s === view.range ? "pri" : ""}" data-page-action="mc-range" data-range="${s}" aria-pressed="${s === view.range}">${esc(l)}</button>`).join("")}</div>`;
+    const common = frame(busy);
     const parts = [TS().chart({...common, title: "GPU busy and power as % of limit (%)", unit: "%", lines: util, max: 100})];
     parts.push(TS().chart({...common, title: "GPU temperature (°C)", unit: "°C", lines: (temp.lines || []).map(line => ({label: `${name(line.labels)} · ${line.labels.sensor || ""}`, color: color(line.labels), points: line.points.map(p => [p[0], p[1], p[7] ?? null, p[8] ?? null])}))}));
     if (noLimit.length) parts.push(TS().chart({...common, title: "GPU power (W) · no readable power limit", unit: "W", lines: noLimit.map(line => ({label: `${name(line.labels)} · ${line.labels.sensor || "power"}`, color: color(line.labels), points: line.points.map(p => [p[0], p[1], p[7] ?? null, p[8] ?? null])}))}));
-    return card("History", ranger + `<div class="mc-charts">${parts.join("")}</div><p class="hint">Gaps are periods without samples (never zeros). Stored in UTC; shown in this browser's time zone.</p>`);
+    return card("History", ranger + `<div class="mc-charts">${parts.join("")}${extra.join("")}</div>${links}${footer}`);
   }
   function memory(d) {
     const {card, table, cells, esc, unavailable} = H(), m = d.memory || {};
@@ -165,8 +218,9 @@
       const ids = d.machines || [id];
       const picker = `<label class="field mc-pick" for="mc-machine">Machine <select class="inp" id="mc-machine" data-page-action="mc-machine">${ids.map(m => `<option value="${esc(m)}"${m === id ? " selected" : ""}>${esc(m)}</option>`).join("")}</select></label>`;
       const up = num(d.uptime_s) ? `${Math.floor(d.uptime_s / 86400)} d ${Math.floor(d.uptime_s % 86400 / 3600)} h` : null;
-      const header = `<section class="card"><div class="row between">${picker}<div class="row">${statusPill({online: "online", stale: "stale", offline: "offline", unknown: "no data yet"}[d.status] || d.status)}${d.status_why ? `<span class="hint">${esc(d.status_why)}</span>` : ""}<span class="hint">${esc(d.machine?.os || "")} · ${d.machine?.control ? "control machine" : "node"} · uptime ${up ? esc(up) : unavailable(d.why?.host || "not reported")}</span></div></div>${d.why?.host ? `<p class="hint">${unavailable(d.why.host)}</p>` : ""}</section>`;
-      return `${header}${gpuBlock(d)}${charts(d)}<div class="grid g2">${memory(d)}${processes(d)}</div><div class="grid g2">${cpu(d)}${network(d)}</div><div class="grid g2">${disks(d)}${engines(d)}</div>${events(d)}`;
+      const header = `<section class="card"><div class="row between">${picker}<div class="row">${d.node_status ? H().nodeStatusPill(d.node_status) : statusPill({online: "online", stale: "stale", offline: "offline", unknown: "no data yet"}[d.status] || d.status)}${!d.node_status && d.status_why ? `<span class="hint">${esc(d.status_why)}</span>` : ""}<span class="hint">${esc(d.machine?.os || "")} · ${d.machine?.control ? "control machine" : "node"} · uptime ${up ? esc(up) : unavailable(d.why?.host || "not reported")}</span></div></div>${d.why?.host ? `<p class="hint">${unavailable(d.why.host)}</p>` : ""}</section>`;
+      const status = d.node_status ? H().card("Status", H().nodeStatus(d.node_status) + H().controllerNote(d.controller)) : "";
+      return `${header}${status}${gpuBlock(d)}${charts(d)}<div class="grid g2">${memory(d)}${processes(d)}</div><div class="grid g2">${cpu(d)}${network(d)}</div><div class="grid g2">${disks(d)}${engines(d)}</div>${events(d)}`;
     },
     after(main) { TS().bind(main); },
   };
@@ -175,6 +229,7 @@
     const control = event.target.closest('[data-page-action^="mc-"]');
     if (!control) return;
     const id = machineId(), action = control.dataset.pageAction;
+    if (action === "mc-retry") { H().refresh(); return; }
     if (action === "mc-range") view.range = Number(control.dataset.range);
     else if (action === "mc-hide-iface") (view.hiddenIfaces[id] ||= []).includes(control.dataset.iface) || view.hiddenIfaces[id].push(control.dataset.iface);
     else if (action === "mc-show-ifaces") delete view.hiddenIfaces[id];

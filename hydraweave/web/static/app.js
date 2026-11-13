@@ -39,7 +39,7 @@
   const titleOf = id => navTitles[id] || (coreOrder.includes(id) ? t("route." + id, null, routes[id]) : routes[id]);
   const homeRoute = pages["control-center"] ? "control-center" : Object.keys(pages).find(id => pages[id]?.home && Object.hasOwn(routes, id)) || "devices";
   const pageOf = name => coreOrder.includes(name) ? null : pages[name] || null;
-  const pageEndpoints = name => { try { return (pageOf(name)?.endpoints?.() || []).filter(e => typeof e === "string" && e); } catch (_) { return []; } };
+  const pageEndpoints = name => { try { return ((name === "devices" ? window.HydraweaveNodeTiles : pageOf(name))?.endpoints?.() || []).filter(e => typeof e === "string" && e); } catch (_) { return []; } };
   const api = "/hydraweave/api/";
   const state = {docs: {}, fetched: {}, errors: {}, fresh: false, busy: false, job: null, selected: "", dialog: null, returnFocus: null, logProcess: "all", logLevel: "warnings", logText: "", range: 900, warnings: new Set(), generation: 0, operation: 0, switching: false,
     optional: {}, absent: {}, filters: {}, prefs: null};
@@ -149,20 +149,50 @@
     value = unwrap(value);
     return typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) / 1000 : NaN;
   }
+  /* ONE node status model, produced by the back end (features/nodestatus.py) and shown the same way by the
+     sidebar, Nodes and Machine: reachability with the real time of the last successful contact, and each telemetry
+     source's freshness with its reason and what the operator can do. */
+  const nodeStateText = s => ({reachable: {ok: "Reachable", paused: "Reachable · telemetry paused", version: "Reachable · node tool differs", warning: "Reachable · warning"}[s.code] || "Reachable · check telemetry",
+    stale: "Not contacted recently", unreachable: "Unreachable", unpaired: "Not paired", unknown: s.code === "paused" ? "Telemetry paused" : "No data yet"})[s.state] || String(s.state);
+  const nodeLevel = s => ({ok: "ok", warn: "warn", err: "err", info: "info"})[s.level] || "off";
+  function nodeStatusPill(s) {
+    return `<span class="pill p-${nodeLevel(s)}" data-node-state="${esc(s.state)}" data-node-code="${esc(s.code)}" title="${esc(s.summary || "")}">${esc(nodeStateText(s))}</span>`;
+  }
+  function nodeStatus(s) {
+    if (!object(s)) return "";
+    const at = v => typeof v === "number" ? clockTime(v) : null;
+    const sample = s.code !== "ok" && at(s.last_sample) ? ` (last sample ${at(s.last_sample)})` : "";
+    const until = !s.paused ? "" : at(s.paused.until) ? ` · the slot ends ${at(s.paused.until)}` : s.paused.next_check_s ? ` · checked again every ${Math.round(s.paused.next_check_s)} s` : "";
+    const word = {fresh: "fresh", stale: "stale since", paused: "paused · last sample", failed: "failed", never: "never collected"};
+    const sources = Object.values(s.sources || {}).map(x => {
+      const time = x.state === "fresh" ? at(x.at) : x.state === "stale" ? at(x.since) : x.state === "paused" ? at(x.at) || "none yet" : x.state === "failed" && at(x.at) ? `· last good ${at(x.at)}` : null;
+      const why = x.state === "fresh" ? rows(x.missing).map(m => `${m.label} unreadable: ${m.why}`).join("; ") : x.state === "paused" ? "" : x.why;
+      return `<li data-node-source="${esc(x.source)}" data-source-state="${esc(x.state)}"><b>${esc(x.label)}</b> ${esc(word[x.state] || x.state)}${time ? ` ${esc(time)}` : ""}${why ? ` · <span class="unavailable">${esc(why)}</span>` : ""}</li>`;
+    }).join("");
+    const contact = at(s.last_contact) ? `Last successful contact ${at(s.last_contact)}` : "No successful contact yet";
+    const tool = s.version?.match === false ? ` · node tool ${String(s.version.deployed).slice(0, 12)}, this controller expects ${String(s.version.expected).slice(0, 12)}` : "";
+    const action = s.action ? ` <a class="btn sm" href="${esc(s.action.href)}">${esc(s.action.label)}</a>` : "";
+    return `<div class="node-status" data-node-status="${esc(s.code)}"><p class="node-summary">${esc(`${s.summary}${sample}${until}`)}${action}</p><p class="hint">${esc(contact + tool)}</p><ul class="node-sources hint">${sources}</ul></div>`;
+  }
+  function controllerNote(c) {
+    if (!object(c)) return "";
+    const store = c.store === "open" ? "its own history store is open" : `its history store is ${c.store || "unknown"}`;
+    return `<p class="hint controller-note" data-controller>Served by the controller on <b>${esc(c.host || "this machine")}</b>${c.config ? ` (configuration ${esc(c.config)})` : ""}; ${esc(store)}. Each node's portal can be a separate controller with its own pairing and history: a node paired or sampled from another controller has no data here.</p>`;
+  }
   function renderDevices() {
     const d = doc("devices"), all = machines();
     const discovered = rows(d.discovered);
     const summary = d.summary || {};
     const kpis = `<div class="grid g4 kpis">${kpi("Machines online", field(summary, "online", "", reason(d, "machines")), `${all.length} configured · ${discovered.length} discovered`, null, t("info.machines_online"))}${kpi("Accelerators in use", field(summary, "accelerators_in_use"), field(summary, "excluded_reason"), null, t("info.accelerators"))}${kpi("GPU memory headroom", field(summary, "memory_free_bytes", "bytes"), `Minimum per device: ${field(summary, "minimum_headroom_bytes", "bytes")}`, null, t("info.headroom"))}${kpi("Links", field(summary, "links_healthy"), field(summary, "links_summary"), null, t("info.links"))}</div>`;
     const cards = all.map(m => deviceCard(m, d)).join("");
-    return `${discovered.length ? `<div class="banner info">${discovered.length} discovered, unpaired. Discovery only announces; it never grants access. ${later("Pair", "later phase · TensorMeld agent")}</div>` : ""}${kpis}${all.length ? `<div class="grid g3">${cards}</div>` : empty("Add the first machine", "Add a configured machine by address and confirm its SSH host-key fingerprint.", button("Add by address", "add", {style: "pri"}))}${card("Discovered, not paired", discovered.length ? table(["Name", "OS", "Accelerators", "Fingerprint", "Action"], discovered.map(m => cells([field(m, "name"), field(m, "os"), field(m, "accelerators"), field(m, "fingerprint"), later("Pair", "later phase · TensorMeld agent")])).join("")) : unavailable(reason(d, "discovered", "later phase · TM-R13")), "later phase · TensorMeld agent")}`;
+    return `${discovered.length ? `<div class="banner info">${discovered.length} discovered, unpaired. Discovery only announces; it never grants access. ${later("Pair", "later phase · TensorMeld agent")}</div>` : ""}${kpis}${window.HydraweaveNodeTiles?.render() || ""}${controllerNote(d.controller)}${all.length ? `<div class="grid g3">${cards}</div>` : empty("Add the first machine", "Add a configured machine by address and confirm its SSH host-key fingerprint.", button("Add by address", "add", {style: "pri"}))}${card("Discovered, not paired", discovered.length ? table(["Name", "OS", "Accelerators", "Fingerprint", "Action"], discovered.map(m => cells([field(m, "name"), field(m, "os"), field(m, "accelerators"), field(m, "fingerprint"), later("Pair", "later phase · TensorMeld agent")])).join("")) : unavailable(reason(d, "discovered", "later phase · TM-R13")), "later phase · TensorMeld agent")}`;
   }
   function deviceCard(m, d) {
     const health = m.health, offline = health === "offline", unpaired = health === "unpaired";
     const accelerators = rows(m.accelerators), usb = m.usb4;
     const last = m.last_seen == null ? unavailable(reason(m, "last_seen")) : `${Math.max(0, Math.floor(d.server_time - m.last_seen))} s ago · ${esc(clockTime(m.last_seen))}`;
     const roles = rows(m.roles).map(r => tag(`${r.profile ? r.profile + " · " : ""}${r.role || r.name || r.id}${offline ? " · unreachable" : ""}`)).join(" ");
-    return `<section class="card dev ${offline ? "offline" : ""}"><div class="hd"><div class="osi" aria-hidden="true">${/win/i.test(String(unwrap(m.os))) ? "WIN" : "LNX"}</div><div><div class="row between"><span class="nm">${esc(m.name || m.id)}</span>${statusPill(health, reason(m, "health"))}</div><div class="meta">${field(m, "os")}${!unpaired ? ` · ${field(m, "cpu_model")} · last seen ${last}` : ""}</div></div></div>${unpaired ? "" : `<div class="row">${roles}</div>${kv(m, [["Host RAM", "ram_summary"], ["Disk free", "disk_free_bytes", "bytes"], ["NICs", "nics_summary"]])}`}
+    return `<section class="card dev ${offline ? "offline" : ""}"><div class="hd"><div class="osi" aria-hidden="true">${/win/i.test(String(unwrap(m.os))) ? "WIN" : "LNX"}</div><div><div class="row between"><span class="nm">${esc(m.name || m.id)}</span>${object(m.node_status) ? nodeStatusPill(m.node_status) : statusPill(health, reason(m, "health"))}</div><div class="meta">${field(m, "os")}${!unpaired ? ` · ${field(m, "cpu_model")} · last contact ${last}` : ""}</div></div></div>${nodeStatus(m.node_status)}${unpaired ? "" : `<div class="row">${roles}</div>${kv(m, [["Host RAM", "ram_summary"], ["Disk free", "disk_free_bytes", "bytes"], ["NICs", "nics_summary"]])}`}
       ${accelerators.length ? accelerators.map(g => {
         const name = g.name || g.id, excluded = g.excluded;
         return `<div class="accel"><div class="an">${name ? esc(name) : unavailable(reason(g, "name"))}${excluded ? statusPill("Excluded") : ""}</div>${unpaired ? "" : excluded ? `<p class="hint">${field(g, "policy_reason")}</p>` : `<div class="hint">${esc(g.memory_kind || "VRAM")}</div>${meter("GPU memory", g.memory_used_bytes, g.memory_total_bytes, "bytes", reason(g, "memory_used_bytes"), offline, t("info.gpu_memory"))}${meter("GPU", g.utilization_pct, 100, "%", reason(g, "utilization_pct"), offline, t("info.gpu_busy"))}${kv(g, [["Temperature", "temperature_c", "°C", t("info.temperature")], ["Power", "power_w", "W", t("info.power")], ...(!m.rocm ? [["Driver", "driver"]] : [])])}`}</div>`;
@@ -1121,10 +1151,12 @@
     const all = machines();
     const target = id => pages.machine && Object.hasOwn(routes, "machine") ? `#/machine?id=${encodeURIComponent(id)}` : "#/devices";
     const html = all.length ? `<h2 class="nav-title"><span class="lbl">${esc(t("nav.machines", null, "Machines"))}</span></h2>${all.map(m => {
-      const fleet = overviewSummary(m.id) || {}, health = String(fleet.status || unwrap(m.health) || "unknown");
-      const style = /^(online|ok|ready|up)$/i.test(health) ? "ok" : /degraded|warn|stale/i.test(health) ? "warn" : /offline|error|down/i.test(health) ? "err" : "off";
+      // The same back-end status model as Nodes and Machine (never a second "online" definition).
+      const fleet = overviewSummary(m.id) || {}, model = object(m.node_status) ? m.node_status : object(fleet.node_status) ? fleet.node_status : null;
+      const health = model ? nodeStateText(model).toLowerCase() : String(fleet.status || unwrap(m.health) || "unknown");
+      const style = model ? ({ok: "ok", info: "ok", warn: "warn", err: "err"}[model.level] || "off") : /^(online|ok|ready|up)$/i.test(health) ? "ok" : /degraded|warn|stale/i.test(health) ? "warn" : /offline|error|down/i.test(health) ? "err" : "off";
       const note = [...(typeof fleet.rate === "number" ? [`${Number(fleet.rate.toFixed(1)).toLocaleString()} tok/s`] : []), ...(fleet.followers || [])].join(" · ");
-      return `<a class="nav-machine" href="${target(m.id)}" title="${esc(`${m.name || m.id} · ${health}`)}"><i class="dot dot-${style}" aria-hidden="true"></i><span class="lbl"><span class="nm">${esc(m.name || m.id)}</span><span class="hint">${esc(health)}${note ? ` · ${esc(note)}` : ""}</span></span></a>`;
+      return `<a class="nav-machine" href="${target(m.id)}" title="${esc(`${m.name || m.id} · ${model?.summary || health}`)}"><i class="dot dot-${style}" aria-hidden="true"></i><span class="lbl"><span class="nm">${esc(m.name || m.id)}</span><span class="hint">${esc(health)}${note ? ` · ${esc(note)}` : ""}</span></span></a>`;
     }).join("")}` : "";
     if ($("nav-machines").innerHTML !== html) $("nav-machines").innerHTML = html;
   }
@@ -1529,7 +1561,7 @@
   window.Hydraweave = {esc, display, unavailable, statusPill, tag, button, card, table, cells, kv, empty, rows, own,
     request, mutate, refresh, render, announce, mutationReason, capability, profiles, profileId, state, activeJob,
     doc, machines, meter, kpi, chart, lineChart, spark, field, route, routes, pages, download, explainError, fixHref,
-    info, problem, filter, filterValue, matches, prefs, setPref, temperature, time: formatTime, zone, t, i18n,
+    info, problem, nodeStatus, nodeStatusPill, controllerNote, clockTime, filter, filterValue, matches, prefs, setPref, temperature, time: formatTime, zone, t, i18n,
     palette: openPalette, toggleSidebar,
     csrf: () => document.querySelector('meta[name="hydraweave-csrf"]')?.content};
   render(); resetPolling();

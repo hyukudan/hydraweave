@@ -7,7 +7,13 @@
   const save = () => { try { localStorage.setItem("hydraweave-history", JSON.stringify(view)); } catch (_) {} };
   const H = () => window.Hydraweave;
   const names = () => H().state.docs.history?.series || [];
-  const current = () => view.series && names().includes(view.series) ? view.series : names()[0] || "";
+  // #/history?series=<name> (the tiles' "Open in Metrics history") selects that series once; the picker then rules.
+  let linked = null;
+  function adopt() {
+    const wanted = new URLSearchParams(location.hash.split("?")[1] || "").get("series");
+    if (wanted && wanted !== linked && /^[A-Za-z0-9_:.-]{1,96}$/.test(wanted)) { linked = wanted; view.series = wanted; save(); }
+  }
+  const current = () => { adopt(); return view.series && names().includes(view.series) ? view.series : names()[0] || ""; };
   const seriesEndpoint = () => current() ? window.HydraweaveTS.endpoint(current(), {range: view.range}) : null;
 
   (window.HydraweavePages ||= {}).history = {

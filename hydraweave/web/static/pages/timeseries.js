@@ -3,7 +3,8 @@
    HydraweaveTS.lines(historyDoc, {value, label})        -> [{label, color, points: [[t, v], ...]}]
                                                            (value defaults to the document's kind: gauge avg,
                                                            delta sum, state last)
-   HydraweaveTS.chart({title, unit, lines, step, cadence, start, end, height, max, min, group}) -> HTML (SVG + legend + table)
+   HydraweaveTS.chart({title, unit, lines, step, cadence, start, end, height, max, min, group, width, empty}) -> HTML (SVG + legend + table;
+                                                           empty: the reason shown when there is no sample)
    HydraweaveTS.bind(root)                               -> shared crosshair for charts with the same group
    Gaps: consecutive points further apart than 2.5 x the expected spacing (the bucket step, or the sampling
    cadence when it is longer) are not joined; an isolated point is drawn as a dot (offline time is a gap, never a
@@ -39,15 +40,15 @@
     }));
   }
   let counter = 0;
-  function chart({title = "", unit = "", lines: series = [], step = 2, cadence = 0, start, end, height = 180, max, min = 0, group = ""} = {}) {
+  function chart({title = "", unit = "", lines: series = [], step = 2, cadence = 0, start, end, height = 180, max, min = 0, group = "", width, empty} = {}) {
     const all = series.flatMap(s => s.points).filter(p => Number.isFinite(p[1]));
     const id = `ts-${++counter}`;
-    if (!all.length) return `<figure class="ts ts-empty"><figcaption>${esc(title)}</figcaption><p class="muted">No samples in this range (unavailable, not zero).</p></figure>`;
+    if (!all.length) return `<figure class="ts ts-empty"><figcaption>${esc(title)}</figcaption><p class="muted">${esc(empty || "No samples in this range (unavailable, not zero).")}</p></figure>`;
     const t0 = start ?? Math.min(...all.map(p => p[0])), t1 = end ?? Math.max(...all.map(p => p[0]));
     const span = Math.max(1, t1 - t0);
     const top = max ?? (Math.max(...all.map(p => p[1])) * 1.1 || 1), bottom = Math.min(min, ...all.map(p => p[1]));
     // Drawn at the container's real width so axis text keeps its size on any screen.
-    const W = Math.round(Math.max(300, Math.min(1600, (document.querySelector("main")?.clientWidth || 700) - 64))), H = height, L = 52, R = 8, T = 8, B = 22;
+    const W = Math.round(width || Math.max(300, Math.min(1600, (document.querySelector("main")?.clientWidth || 700) - 64))), H = height, L = 52, R = 8, T = 8, B = 22;
     const x = t => L + (t - t0) / span * (W - L - R), y = v => T + (1 - (v - bottom) / ((top - bottom) || 1)) * (H - T - B);
     // Per pair of points the expected spacing is the cadence recorded with them (sampling-interval changes keep
     // their own history); the `cadence` passed in is only a fallback for points recorded without one; never less
