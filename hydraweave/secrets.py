@@ -117,16 +117,6 @@ def get(name):
     return value
 
 
-def signature(name):
-    """A cheap change marker for a stored secret (None when absent); never the secret itself."""
-    path = paths.read_user_path(_directory() / _name(name), paths.legacy_config_dir() / "secrets" / _name(name))
-    try:
-        status = path.stat()
-    except OSError:
-        return None
-    return (str(path), status.st_mtime_ns, status.st_size, status.st_ino)
-
-
 def ensure(name):
     _name(name)
     value = get(name)

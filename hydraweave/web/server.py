@@ -33,6 +33,7 @@ ASSET_DIRS = ("pages", "assets")
 # needs the token. A new route is closed unless it is added here (tests/test_route_matrix.py pins this set).
 PUBLIC_GET = frozenset({"/api/health", "/", "/index.html", "/hydraweave/", "/hydraweave/index.html",
                         "/app.css", "/hydraweave/app.css", "/security.js", "/favicon.ico"})
+NODE_PACKAGE = "/node/package.tar.gz"      # also readable by a paired node agent with its pairing credential
 PUBLIC_POST = frozenset({"/hydraweave/api/login"})
 LOGIN_REQUIRED = "Portal sign-in required: enter the access token printed on the portal console."
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
@@ -106,11 +107,9 @@ class PortalServer(ThreadingHTTPServer):
         self.lan = not bind.is_loopback(self.listen_address)
         self.no_auth = no_auth or getenv("HYDRAWEAVE_NO_AUTH") == "1"
         self.access_token = None
-        self._access_signature = None
         if self.lan and not self.no_auth:
             from hydraweave import secrets as store
             self.access_token = store.ensure("portal-access")
-            self._access_signature = store.signature("portal-access")
         super().__init__((self.listen_address, port), Handler)
         self.origin = "http://" + bind.url_host(bind.browse_address(self.listen_address), self.server_port)
         try:
@@ -120,19 +119,17 @@ class PortalServer(ThreadingHTTPServer):
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
 
     def current_access(self):
-        """The access token in force now. The stored secret is re-read whenever its file changes, so a rotation
-        (from this portal or from the command line) invalidates every cookie and bearer at once; a secret
-        that became unreadable closes the portal ("" matches nothing) instead of opening it."""
+        """The access token in force now. The stored secret is read for every authorisation decision, so a
+        rotation (from this portal or from the command line) invalidates every cookie and bearer at once, and
+        a secret that became absent, invalid or unreadable - including by a permission change that leaves
+        its content untouched - closes the portal ("" matches nothing) instead of opening it."""
         if self.access_token is None:
             return None
         from hydraweave import secrets as store
-        signature = store.signature("portal-access")
-        if signature != self._access_signature:
-            try:
-                value = store.get("portal-access") or ""
-            except (OSError, ValueError):
-                value = ""
-            self.access_token, self._access_signature = value, signature
+        try:
+            self.access_token = store.get("portal-access") or ""
+        except (OSError, ValueError):
+            self.access_token = ""
         return self.access_token
 
     def host_allowed(self, header):
@@ -189,8 +186,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         if getattr(self, "_login_cookie", None):
             self.send_header("Set-Cookie", self._login_cookie)
-        if getattr(self, "_login_location", None):
-            self.send_header("Location", self._login_location)
         self.end_headers()
         self.close_connection = True
         if not head:
@@ -242,11 +237,31 @@ class Handler(BaseHTTPRequestHandler):
         except CookieError:
             return False
 
+    def _paired_node(self):
+        """A paired node agent fetching the node package with its own pairing credential (the bearer the
+        controller uses to call it). It opens that one download and nothing else."""
+        values = self.headers.get_all("Authorization", [])
+        if len(values) != 1 or not values[0].startswith("Bearer "):
+            return False
+        offered = values[0][7:].encode("utf-8")
+        try:
+            from hydraweave import onboarding
+            saved = onboarding.credentials(self.server.api.config_path).values()
+            tokens = [row["token"].encode("utf-8") for row in saved if isinstance(row.get("token"), str) and row["token"]]
+        except Exception:         # no or unreadable pairing state: no node is recognised
+            return False
+        return any([hmac.compare_digest(offered, token) for token in tokens])
+
     def _gate(self, public):
         """The one authorisation decision for every method and route: a path outside the explicit public set
         needs the access token (bearer or session cookie), exactly as actions do."""
-        if urlsplit(self.path).path not in public and not self._authorized():
-            raise APIError(LOGIN_REQUIRED, 401)
+        path = urlsplit(self.path).path
+        if path in public or self._authorized():
+            return
+        # The one credential besides the portal token, for the one read a node agent makes: its own package.
+        if public is PUBLIC_GET and path == NODE_PACKAGE and self._paired_node():
+            return
+        raise APIError(LOGIN_REQUIRED, 401)
 
     def _sign_in(self, arguments):
         """POST /hydraweave/api/login {"token": ...}: the credential travels in the body, never in a URL."""
@@ -258,7 +273,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._matches_access(token):
             raise APIError("invalid portal access token", 401)
-        self._login_cookie = "hydraweave-access=" + self._access_token() + "; Path=/; HttpOnly; SameSite=Strict"
+        # The cookie carries the value that was just compared, never a second read of the secret: a rotation
+        # in between must not hand the new token to a holder of the old one.
+        self._login_cookie = "hydraweave-access=" + token + "; Path=/; HttpOnly; SameSite=Strict"
         self._send(200, {"signed_in": True, "required": True})
 
     def _get(self, head=False):

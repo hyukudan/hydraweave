@@ -159,8 +159,11 @@ constant-time. Browser cookies retain the existing Origin and CSRF checks; beare
 credential instead of browser CSRF headers. A signed-in page that receives 401 reloads into the sign-in screen.
 
 Rotation: `hloom keys rotate portal-access` (or the portal's key rotation) takes effect on the next request
-without a restart. The server re-reads the stored secret whenever its file changes, so every existing cookie
-and bearer stops working and open event streams end; if the secret becomes unreadable the portal stays closed.
+without a restart (the rotation reply says `restart_required: false` for this key). The server reads the
+stored secret for every authorisation decision, so every existing cookie and bearer stops working and open
+event streams end; if the secret becomes absent or unreadable - including by a permission change alone - the
+portal stays closed. A sign-in cookie always carries the value that was checked, so a rotation during a
+sign-in cannot give the new token to a holder of the old one.
 
 The token persists in `~/.config/hydraweave/secrets/portal-access` with mode 0600 on POSIX. Windows stores
 it in `%APPDATA%\hydraweave\secrets\portal-access`, protected by the current user's DPAPI and private ACL.
@@ -173,6 +176,12 @@ Agent/bootstrap routes retain their own access rules:
   On the worker, `export HYDRAWEAVE_PORTAL_TOKEN=<portal-token>` and add
   `-H "Authorization: Bearer $HYDRAWEAVE_PORTAL_TOKEN"` to the `curl` of the bootstrap command; the script
   sends the same header for the package download. Loopback and `--no-auth` portals need neither.
+- Portal `GET`/`HEAD /node/package.tar.gz` during **Update node**: a paired node agent presents its own
+  pairing bearer token (the one the controller uses for `/call`) and the portal accepts it for this one
+  download only; it opens no other route, and it is sent only to the controller origin, never across a
+  redirect. A node agent installed before this change downloads without a credential and gets 401 from a
+  token-protected portal: re-run the bootstrap command on that worker once (with `HYDRAWEAVE_PORTAL_TOKEN`,
+  as above); later updates work from the portal.
 - Worker `POST /pair`: the worker's short-lived, single-use console pairing code.
 - Worker `POST /call`: the worker's paired bearer token, distinct from the portal token.
 - Portal adoption/provisioning actions: authenticated portal mutations, including `discovery/adopt` and

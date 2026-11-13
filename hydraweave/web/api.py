@@ -1919,7 +1919,8 @@ class API:
             return self.orchestrate.down(args["profile"], force=args.get("force", False))
         if action == "keys/rotate":
             secrets.rotate(args["name"])
-            return {"name": args["name"], "rotated": True, "restart_required": True}
+            # The portal re-reads its own access token for every request; the other keys are read at launch.
+            return {"name": args["name"], "rotated": True, "restart_required": args["name"] != "portal-access"}
         if action == "doctor" and "machine" not in args:
             from types import SimpleNamespace
             return self._node(SimpleNamespace(access="local"), "doctor")

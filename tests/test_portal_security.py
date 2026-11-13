@@ -38,6 +38,10 @@ def make_server(*, listen="0.0.0.0", no_auth=False):
             mock.patch.object(secrets, "ensure", return_value=ACCESS) as ensure:
         server = portal.create_server(18700, api=api, listen=listen, no_auth=no_auth)
     server.csrf_token = CSRF
+    if server.access_token is not None:
+        # The portal reads the stored secret for every decision; this fixture server has a fixed one and never
+        # touches the host's store (the live-store tests below use the real read).
+        server.current_access = lambda: ACCESS
     return server, ensure
 
 
@@ -242,6 +246,59 @@ def test_invalid_sign_in_never_sets_cookie(token, headers, expected):
     status, fields, _ = sign_in(server, token, headers)
     assert status == expected
     assert fields["Set-Cookie"] is None
+
+
+def live_server(tmp_path, monkeypatch, **api):
+    monkeypatch.setattr(secrets, "_directory", lambda: tmp_path / "secrets")
+    with mock.patch.object(portal.ThreadingHTTPServer, "__init__",
+                           lambda server, *_: setattr(server, "server_port", 18700)):
+        server = portal.create_server(18700, api=SimpleNamespace(read=mock.Mock(return_value={"ok": True}), **api),
+                                      listen="0.0.0.0")
+    server.csrf_token = CSRF
+    return server
+
+
+def test_rotation_between_comparison_and_cookie_never_discloses_the_new_token():
+    server, _ = make_server()
+    new = "d" * 64
+    reads = iter([ACCESS, ACCESS])                  # the "is a token required" check, then the comparison
+    server.current_access = lambda: next(reads, new)        # every later read sees the rotated secret
+    status, fields, _ = sign_in(server, ACCESS)
+    assert status == 200
+    assert new not in str(fields) and fields["Set-Cookie"].startswith("hydraweave-access=" + ACCESS + ";")
+    # The cookie the old holder got is the old token: it opens nothing after the rotation.
+    cookie = fields["Set-Cookie"].split(";", 1)[0]
+    assert request(server, path="/hydraweave/api/devices", headers={"Cookie": cookie})[0] == 401
+
+
+@pytest.mark.skipif(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="needs POSIX file modes and a non-root user")
+def test_permission_loss_closes_the_portal_with_unchanged_content(tmp_path, monkeypatch):
+    server = live_server(tmp_path, monkeypatch)
+    bearer = {"Authorization": "Bearer " + server.access_token}
+    assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 200
+    stored = tmp_path / "secrets" / "portal-access"
+    before = stored.stat()
+    stored.chmod(0)
+    try:
+        after = stored.stat()
+        assert (after.st_mtime_ns, after.st_size, after.st_ino) == (before.st_mtime_ns, before.st_size, before.st_ino)
+        assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 401
+        assert sign_in(server, bearer["Authorization"][7:])[0] == 401
+    finally:
+        stored.chmod(0o600)
+    assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 200
+
+
+def test_unreadable_secret_closes_the_portal_on_the_next_request(tmp_path, monkeypatch):
+    """The same decision on every platform: a read that fails is never answered from a remembered token."""
+    server = live_server(tmp_path, monkeypatch)
+    bearer = {"Authorization": "Bearer " + server.access_token}
+    assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 200
+    with mock.patch.object(secrets, "get", side_effect=PermissionError("denied")):
+        assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 401
+        assert request(server, "POST", "/hydraweave/api/up", headers=bearer)[0] == 401
+    assert request(server, path="/hydraweave/api/devices", headers=bearer)[0] == 200
 
 
 def test_rotation_invalidates_cookie_and_bearer_live(tmp_path, monkeypatch):

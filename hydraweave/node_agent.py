@@ -330,7 +330,9 @@ class Agent(ThreadingHTTPServer):
             try:
                 self._update_command(["systemctl", "--user", "is-active", "hydraweave-node.service"])
                 with tempfile.TemporaryDirectory(prefix="hydraweave-node-update-") as directory:
-                    data = self.download(origin.rstrip("/") + "/node/package.tar.gz")
+                    # The package route is closed to anonymous readers; this node presents its own pairing
+                    # credential to the controller that issued it (and already holds it).
+                    data = self.download(origin.rstrip("/") + "/node/package.tar.gz", self.token)
                     if hashlib.sha256(data).hexdigest() != digest:
                         raise ValueError("Node package SHA256 mismatch; nothing was installed")
                     package = Path(directory) / "package.tar.gz"
@@ -361,8 +363,16 @@ class Agent(ThreadingHTTPServer):
             raise ValueError("wrong lab directory")
 
 
-def download_package(url):
-    with urllib.request.urlopen(url, timeout=60) as response:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_, **__):
+        return None               # the credential is for the controller origin only
+
+
+def download_package(url, token=None):
+    request = urllib.request.Request(url)
+    if token:
+        request.add_unredirected_header("Authorization", "Bearer " + token)
+    with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
         data = response.read(64 * 1024 * 1024 + 1)
     if len(data) > 64 * 1024 * 1024:
         raise ValueError("Node package exceeds 64 MiB")
