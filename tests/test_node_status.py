@@ -58,6 +58,31 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(model["paused"]["until"], NOW + 300)
         self.assertIn("paused while the GPU runs a job", nodestatus.source_why(model, "gpu"))
 
+    def test_held_node_whose_turn_checks_fail_is_not_reachable(self):
+        paused = "paused: a GPU turn holds n2 (job); node reads wait for its end"
+        model = nodestatus.build(now=NOW, reads=reads(NOW - 9900, NOW - 9900, NOW - 9900), paused=paused,
+                                 turn_at=NOW - 9900, turn_error="TimeoutError: no answer", turn_interval=60)
+        self.assertEqual((model["state"], model["code"], model["reachable"]), ("unreachable", "unreachable", False))
+        self.assertIn("TimeoutError: no answer", model["summary"])
+        self.assertEqual(model["last_contact"], NOW - 9900)          # the failed checks did not renew it
+        # The pause of the node's other reads is still reported, apart from reachability.
+        self.assertEqual(model["sources"]["gpu"]["state"], "paused")
+        self.assertEqual(model["paused"]["why"], paused)
+        self.assertEqual(nodestatus.health(model), "offline")
+        # A failure right after the holder was seen ends it too: no grace on a known failure.
+        recent = nodestatus.build(now=NOW, reads={}, paused=paused, turn_at=NOW - 30, turn_error="refused",
+                                  turn_interval=60)
+        self.assertEqual(recent["state"], "unreachable")
+
+    def test_expired_turn_reading_no_longer_proves_reachability(self):
+        paused = "paused: a GPU turn holds n2 (job); node reads wait for its end"
+        for age, state, reachable in ((180, "reachable", True), (181, "stale", None), (9900, "stale", None)):
+            model = nodestatus.build(now=NOW, reads={}, paused=paused, turn_at=NOW - age, turn_interval=60)
+            self.assertEqual((model["state"], model["reachable"], model["last_contact"]),
+                             (state, reachable, NOW - age), age)
+        self.assertEqual((model["code"], model["sources"]["doctor"]["state"]), ("stale", "paused"))
+        self.assertIn("180 s", model["detail"])
+
     def test_paused_without_any_contact_is_not_called_reachable(self):
         model = nodestatus.build(now=NOW, reads={}, paused="paused: a GPU turn holds n2")
         self.assertEqual((model["state"], model["reachable"], model["last_contact"]), ("unknown", None, None))
@@ -191,6 +216,28 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(model["last_contact"], NOW - 400)          # the cached inventory did not renew it
         self.assertEqual(model["sources"]["host"]["why"], "TimeoutError: no answer")
         self.assertEqual(model["sources"]["gpu"]["state"], "stale")
+
+    def test_holder_seen_then_failed_turn_polls(self):
+        from hydraweave import pollbudget
+        from hydraweave.web.features import turns
+        api = SimpleNamespace(_inspections={("n2", "paused"): None}, _contacts={}, config_path=None)
+        machine = SimpleNamespace(id="n2", access="agent", os="linux", lab_dir="/lab")
+        pollbudget.note_holder(api, "n2", "job", now=100)
+        try:
+            held = nodestatus.collect(api, machine, 130, store=Store(None))
+            self.assertEqual((held["state"], held["code"], held["last_contact"]), ("reachable", "paused", 100))
+            turns.record(api, machine, None, "TimeoutError: no answer", 9990, 10000)
+            model = nodestatus.collect(api, machine, 10000, store=Store(None))
+            self.assertEqual((model["reachable"], model["state"], model["last_contact"]), (False, "unreachable", 100))
+            self.assertIn("TimeoutError: no answer", model["summary"])
+            self.assertEqual(model["sources"]["gpu"]["state"], "paused")       # the budget still holds the reads
+            self.assertIsNotNone(pollbudget.for_api(api).turn("n2"))
+            # No failure recorded but no answer either (the poller stopped): the old reading expires.
+            turns._replies.pop(id(api), None)
+            silent = nodestatus.collect(api, machine, 10000, store=Store(None))
+            self.assertEqual((silent["reachable"], silent["state"]), (None, "stale"))
+        finally:
+            turns._replies.pop(id(api), None)
 
     def test_missing_store_is_named(self):
         api = self.api(NOW - 8)

@@ -450,6 +450,9 @@
       }
       if (scroll != null && $("main").querySelector(".log")) $("main").querySelector(".log").scrollTop = scroll;
       if (feature?.after) { try { feature.after($("main")); } catch (error) { console.error(error); } }
+      // Nodes is a core route (no feature.after): its trend tiles get their chart crosshair and readout here,
+      // after every render (a refresh replaces the charts).
+      if (page === "devices") { try { window.HydraweaveNodeTiles?.bind?.($("main")); } catch (error) { console.error(error); } }
       deepLink(page);
     } else if (external && external.error()) {
       state.lastExternal = null;       // the next successful render must replace this, even with unchanged content

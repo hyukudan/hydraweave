@@ -48,38 +48,54 @@
     }
     return out;
   }
-  const last = points => points.filter(p => num(p[1])).at(-1)?.[1];
+  /* The CURRENT value of a line for a headline: its last sample, only while that sample is recent against the
+     end of the requested range (within FRESH_SPACINGS x the bucket step or the sampling cadence recorded with it).
+     An older sample stays on the chart as history and is never presented as "now". */
+  const FRESH_SPACINGS = 3;
+  function current(points, doc) {
+    const p = points.filter(p => num(p[1])).at(-1);
+    if (!p) return undefined;
+    const spacing = Math.max(doc?.step || 2, p[3] || (doc?.tier === "raw" ? doc?.interval_s || 0 : 0));
+    const end = num(doc?.end) ? doc.end : Date.now() / 1000;
+    return end - p[0] <= FRESH_SPACINGS * spacing ? p[1] : undefined;
+  }
+  // Which contributors a headline leaves out, by name: a headline over fewer nodes than the chart says so.
+  const without = names => names.length ? `no current sample: ${names.join(", ")}` : "";
+  const notes = (...parts) => parts.filter(Boolean).join(" · ");
   const colorOf = i => TS().colors[i % TS().colors.length];
   function gpuMemory(docs) {
     const used = byMachine(docs.node_gpu_mem_used_bytes), total = byMachine(docs.node_gpu_mem_total_bytes);
-    const lines = [], latest = [];
+    const lines = [], latest = [], stale = [], doc = docs.node_gpu_mem_used_bytes, totalDoc = docs.node_gpu_mem_total_bytes;
     [...used.keys()].sort().forEach((id, i) => {
       const domains = [...new Set(used.get(id).map(l => l.labels?.domain).filter(Boolean))].sort().reverse();
       const points = combine(used.get(id).map(pointsOf), sum);
       const totals = combine((total.get(id) || []).map(pointsOf), sum);
       lines.push({label: `${id} · ${domains.map(d => d.toUpperCase()).join(" + ") || "GPU memory"}`, color: colorOf(i), points});
-      latest.push([last(points), last(totals)]);
+      latest.push([current(points, doc), current(totals, totalDoc)]);
+      if (!num(latest.at(-1)[0])) stale.push(id);
     });
     const known = latest.filter(([u]) => num(u));
     const u = known.length ? sum(known.map(([x]) => x)) : null, t = known.length && known.every(([, x]) => num(x)) ? sum(known.map(([, x]) => x)) : null;
-    return {lines, unit: "bytes", value: num(u) ? `${TS().fmt(u, "bytes")}${num(t) ? ` / ${TS().fmt(t, "bytes")}` : ""}` : null};
+    return {lines, unit: "bytes", value: num(u) ? `${TS().fmt(u, "bytes")}${num(t) ? ` / ${TS().fmt(t, "bytes")}` : ""}` : null, note: without(stale)};
   }
   function systemMemory(docs) {
     const available = byMachine(docs.node_mem_available_bytes), total = byMachine(docs.node_mem_total_bytes);
-    const lines = [], latest = [];
+    const lines = [], latest = [], stale = [];
     [...total.keys()].sort().forEach((id, i) => {
       if (!available.has(id)) return;
       const points = combine([pointsOf(total.get(id)[0]), pointsOf(available.get(id)[0])], ([all, free]) => all - free);
       lines.push({label: `${id} · used`, color: colorOf(i), points});
-      latest.push([last(points), last(pointsOf(total.get(id)[0]))]);
+      latest.push([current(points, docs.node_mem_total_bytes), current(pointsOf(total.get(id)[0]), docs.node_mem_total_bytes)]);
+      if (!(num(latest.at(-1)[0]) && num(latest.at(-1)[1]))) stale.push(id);
     });
     const known = latest.filter(([u, t]) => num(u) && num(t));
-    return {lines, unit: "bytes", value: known.length ? `${TS().fmt(sum(known.map(([x]) => x)), "bytes")} / ${TS().fmt(sum(known.map(([, x]) => x)), "bytes")}` : null};
+    return {lines, unit: "bytes", value: known.length ? `${TS().fmt(sum(known.map(([x]) => x)), "bytes")} / ${TS().fmt(sum(known.map(([, x]) => x)), "bytes")}` : null, note: without(stale)};
   }
   function busy(docs) {
     const lines = (docs.node_gpu_busy_percent.lines || []).map((line, i) => ({label: `${line.labels?.machine || ""} · ${line.labels?.device || ""}`, color: colorOf(i), points: pointsOf(line)}));
-    const values = lines.map(l => last(l.points)).filter(num);
-    return {lines, unit: "%", max: 100, value: values.length ? `${Math.max(...values).toFixed(0)} %` : null, note: lines.length > 1 ? "highest now" : ""};
+    const now = lines.map(l => current(l.points, docs.node_gpu_busy_percent)), values = now.filter(num);
+    return {lines, unit: "%", max: 100, value: values.length ? `${Math.max(...values).toFixed(0)} %` : null,
+      note: notes(values.length > 1 ? "highest now" : "", without(lines.filter((_, i) => !num(now[i])).map(l => l.label)))};
   }
   function temperature(docs) {
     const lines = [];
@@ -87,8 +103,9 @@
       // One line per node: its hottest reporting GPU sensor at each bucket.
       lines.push({label: `${id} · hottest GPU sensor`, color: colorOf(i), points: highest(sensors.map(pointsOf))});
     });
-    const values = lines.map(l => last(l.points)).filter(num);
-    return {lines, unit: "°C", value: values.length ? `${Math.max(...values).toFixed(0)} °C` : null, note: lines.length > 1 ? "hottest now" : ""};
+    const now = lines.map(l => current(l.points, docs.node_gpu_temp_celsius)), values = now.filter(num);
+    return {lines, unit: "°C", value: values.length ? `${Math.max(...values).toFixed(0)} °C` : null,
+      note: notes(values.length > 1 ? "hottest now" : "", without(lines.filter((_, i) => !num(now[i])).map(l => l.label)))};
   }
   const TILES = [
     {id: "gpu-memory", title: "GPU memory", needs: ["node_gpu_mem_used_bytes", "node_gpu_mem_total_bytes"], build: gpuMemory, open: "node_gpu_mem_used_bytes",
@@ -129,5 +146,5 @@
     if (!event.target.closest?.('[data-page-action="nt-retry"]')) return;
     H().refresh();
   });
-  window.HydraweaveNodeTiles = {endpoints, render, combine, seriesState, bind: root => TS().bind(root)};
+  window.HydraweaveNodeTiles = {endpoints, render, combine, seriesState, current, bind: root => TS().bind(root)};
 })();

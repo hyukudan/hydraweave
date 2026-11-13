@@ -7,8 +7,11 @@
   const save = () => { try { localStorage.setItem("hydraweave-history", JSON.stringify(view)); } catch (_) {} };
   const H = () => window.Hydraweave;
   const names = () => H().state.docs.history?.series || [];
-  // #/history?series=<name> (the tiles' "Open in Metrics history") selects that series once; the picker then rules.
+  // #/history?series=<name> (the tiles' "Open in Metrics history") selects that series once per visit; the picker
+  // then rules until the page is left. Leaving forgets the adopted link, so the same link selects it again.
   let linked = null;
+  const onPage = () => location.hash.replace(/^#\/?/, "").split("?")[0] === "history";
+  addEventListener("hashchange", () => { if (!onPage()) linked = null; });
   function adopt() {
     const wanted = new URLSearchParams(location.hash.split("?")[1] || "").get("series");
     if (wanted && wanted !== linked && /^[A-Za-z0-9_:.-]{1,96}$/.test(wanted)) { linked = wanted; view.series = wanted; save(); }

@@ -1481,6 +1481,23 @@ def node_tiles_walkthrough(client, server):
     # The tile link opens that series in Metrics history.
     go("#/history?series=node_gpu_mem_used_bytes")
     wait("document.getElementById('history-series')?.value === 'node_gpu_mem_used_bytes'")
+    # The picker rules during the visit; leaving and returning through the same link selects its series again.
+    client.evaluate("(() => { const s = document.getElementById('history-series'); s.value = 'node_mem_total_bytes'; "
+                    "s.dispatchEvent(new Event('change', {bubbles: true})); return true; })()")
+    wait("document.getElementById('history-series')?.value === 'node_mem_total_bytes'")
+    go("#/devices")
+    wait((tile % "gpu-memory") + "?.querySelector('svg[data-ts] path') !== null")
+    # The Nodes charts are bound after every render: hovering one shows its readout, also after a refresh.
+    hover = ("(() => { const svg = " + (tile % "gpu-memory") + ".querySelector('svg[data-ts]'), box = svg.getBoundingClientRect(); "
+             "svg.dispatchEvent(new MouseEvent('mousemove', {clientX: box.left + box.width * 0.6, clientY: box.top + 10, bubbles: true})); "
+             "return (svg.parentElement.querySelector('.ts-readout')?.textContent || '').length > 0; })()")
+    for attempt in ("first render", "after a refresh"):
+        if not client.evaluate(hover):
+            raise AssertionError("nodes tiles: hovering a chart shows no readout (" + attempt + ")")
+        client.evaluate("(window.Hydraweave.refresh(), true)")
+        wait((tile % "gpu-memory") + "?.querySelector('svg[data-ts] path') !== null")
+    go("#/history?series=node_gpu_mem_used_bytes")
+    wait("document.getElementById('history-series')?.value === 'node_gpu_mem_used_bytes'")
     client.evaluate("true")
     if client.errors:
         raise AssertionError("node tiles walkthrough: browser errors: " + json.dumps(client.errors))

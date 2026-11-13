@@ -88,11 +88,14 @@ def source_state(name, read, now, interval, paused=None, until=None, next_check_
 
 
 def build(*, now, reads, access="ssh", intervals=None, paused=None, turn_at=None, until=None, next_check_s=None,
-          version=None, ignore=None, warnings=()):
+          version=None, ignore=None, warnings=(), turn_error=None, turn_interval=None):
     """The status document of one node.
 
     reads: {source: {ok_at, tried_at, error, value, never_why}}; paused: the reason node reads are held (a GPU slot);
     turn_at: when the slot's holder was last seen on the node (a real contact); version: {deployed, expected}.
+    turn_error: why the latest turn check failed (after turn_at); turn_interval: the cadence of that check. A
+    holder seen once proves the node reachable only while the check keeps answering: a failed check, or no
+    answer within FRESH_INTERVALS checks, ends it. The pause of the node's reads is reported regardless.
     """
     intervals = intervals or {}
     ignore = ignore or {}
@@ -104,6 +107,9 @@ def build(*, now, reads, access="ssh", intervals=None, paused=None, turn_at=None
     last_sample = max(oks) if oks else None
     contacts = oks + ([turn_at] if paused and _finite(turn_at) else [])
     local = access == "local"
+    turn_seen = bool(paused) and _finite(turn_at)
+    turn_expired = turn_seen and _finite(turn_interval) and now - turn_at > FRESH_INTERVALS * turn_interval
+    turn_live = turn_seen and not turn_error and not turn_expired
     last_contact = now if local else (max(contacts) if contacts else None)
     by = lambda state: [row for row in rows if row["state"] == state]      # noqa: E731
     fresh, failed, stale, never = by("fresh"), by("failed"), by("stale"), by("never")
@@ -122,7 +128,7 @@ def build(*, now, reads, access="ssh", intervals=None, paused=None, turn_at=None
     if not local and not fresh and any(_matches(why, UNPAIRED) for why in errors):
         state, code, level = "unpaired", "unpaired", "info"
         summary, detail = "Not paired with this controller", errors[0]
-    elif local or fresh or (is_paused and _finite(turn_at)):
+    elif local or fresh or (is_paused and turn_live):
         state = "reachable"
         if mismatch or (old_tool and not local):
             code, level, summary = "version", "warn", "Node tool version differs: update"
@@ -153,6 +159,14 @@ def build(*, now, reads, access="ssh", intervals=None, paused=None, turn_at=None
     elif failed:
         state, code, level = "unreachable", "unreachable", "err"
         summary, detail = f"Unreachable: {errors[0]}", errors[0]
+    elif is_paused and turn_error:
+        state, code, level = "unreachable", "unreachable", "err"
+        detail = str(turn_error)[:300]
+        summary = f"Unreachable: the GPU turn check failed: {detail}"
+    elif is_paused and turn_expired:
+        state, code, level = "stale", "stale", "warn"
+        summary = "Not contacted recently - telemetry was paused for a GPU job when the node last answered"
+        detail = f"no GPU turn reading for more than {int(FRESH_INTERVALS * turn_interval)} s"
     elif is_paused:
         state, code, level = "unknown", "paused", "info"
         summary, detail = "Telemetry paused while the GPU runs a job - node not contacted yet", str(paused)
@@ -241,7 +255,7 @@ def collect(api, machine, now, *, store=None, until=None, probe=None):
     skip = (entry or {}).get("skip_why")
     if not paused and isinstance(skip, str) and skip.startswith("paused"):
         paused = skip
-    turn_at = None
+    turn_at = turn_error = None
     if machine.access != "local":
         try:
             reading = pollbudget.for_api(api).turn_reading(machine.id)
@@ -249,6 +263,14 @@ def collect(api, machine, now, *, store=None, until=None, probe=None):
             reading = None
         if reading is not None and reading[0] is not None:
             turn_at = reading[2]
+            try:                    # the turn check's own latest outcome: a failure after the holder was seen
+                from hydraweave.web.features import turns
+                last = turns.latest(api, machine.id) or {}
+                tried = last.get("fetched_at")
+                if last.get("error") and _finite(tried) and tried >= turn_at:
+                    turn_error = last["error"]
+            except Exception:
+                turn_error = None
             paused = paused or f"paused: a GPU turn holds {machine.id} ({reading[0]}); node reads wait for its end"
         elif paused and not (isinstance(skip, str) and skip.startswith("paused")):
             paused = None           # the slot ended: the next read is simply pending
@@ -270,7 +292,8 @@ def collect(api, machine, now, *, store=None, until=None, probe=None):
     return build(now=now, reads=reads, access=machine.access,
                  intervals={"doctor": pollbudget.CYCLE_S, "gpu": pollbudget.CYCLE_S, "host": interval},
                  paused=paused, turn_at=turn_at, until=until, next_check_s=pollbudget.TURN_CHECK_S,
-                 version=_version(api, machine), ignore=ignore, warnings=warnings)
+                 version=_version(api, machine), ignore=ignore, warnings=warnings,
+                 turn_error=turn_error, turn_interval=pollbudget.TURN_CHECK_S)
 
 
 def controller(api):
