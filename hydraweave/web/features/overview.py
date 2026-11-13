@@ -72,7 +72,7 @@ def card(api, machine, store, now, snapshot, records, control_id):
         why["gpus"] = fleet._why(checks.get("gpus"), view["status_why"] or "no GPU reported")
     engines = view["engines"]
     return {"id": machine.id, "os": machine.os, "access": machine.access, "status": view["status"],
-            "status_why": view["status_why"], "last_ok": (entry or {}).get("last_ok"), "roles": badges,
+            "node_status": view["node_status"], "status_why": view["status_why"], "last_ok": (entry or {}).get("last_ok"), "roles": badges,
             "idle": not role_rows, "uptime_s": uptime, "headroom": {"limiting": view["limiting"],
                                                                      "why": view["limiting_why"],
                                                                      "domains": view["domains"]},

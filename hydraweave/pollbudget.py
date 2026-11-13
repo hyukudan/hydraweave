@@ -62,6 +62,12 @@ class Budget:
         with self._lock:
             return self._turn(machine_id, self._now(now))
 
+    def turn_reading(self, machine_id):
+        """(holder, own, read_at) of the latest turn reading of this machine, or None: when the holder was SEEN."""
+        with self._lock:
+            reading = self._turns.get(machine_id)
+            return None if reading is None else tuple(reading)
+
     def note_turn(self, machine_id, holder, own=False, now=None):
         """Record a turn reading of a machine: the holder's label (None: the GPU is free) and whether the holder is
         a lease of this portal's own launches."""
