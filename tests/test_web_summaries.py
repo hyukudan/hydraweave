@@ -93,7 +93,7 @@ class SummaryTests(unittest.TestCase):
     def test_unified_memory_sums_vram_and_gtt_for_headroom(self):
         gpu = self.inventory()[1]["accelerators"][0]
         self.assertEqual(gpu["name"], "Radeon 8060S · gfx1151")
-        self.assertEqual(gpu["memory_kind"], "unified · GPU-visible")
+        self.assertEqual(gpu["memory_kind"], "unified · GPU-visible (VRAM + GTT)")
         self.assertEqual(gpu["memory_total_bytes"], 125536870912)
         self.assertEqual(gpu["memory_used_bytes"], 40200000000)
         self.assertEqual(gpu["memory_free_bytes"], 85336870912)

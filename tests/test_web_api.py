@@ -261,7 +261,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(row["health"], "offline")
         self.assertEqual(row["last_seen"], first["last_seen"])
         self.assertIsNone(row["accelerators"])
-        self.assertEqual(row["why"]["accelerators"], "machine offline")
+        self.assertEqual(row["why"]["accelerators"], "GPU counters unreadable: machine offline")
 
     def test_unpinned_machine_is_unpaired_and_trusted_alias_is_not_an_address(self):
         self.remote.Remote.return_value.call.side_effect = RuntimeError("unknown host key; confirm a fingerprint before connecting")

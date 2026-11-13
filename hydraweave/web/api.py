@@ -39,6 +39,7 @@ from hydraweave.stats import Window
 from hydraweave.winproc import no_window
 from hydraweave.web import recipes as recipe_web
 from hydraweave.web import features as feature_registry
+from hydraweave.web.features import nodestatus
 
 
 # Token counts (a recipe's prompt_tokens_min, max_copies_per_token) are measurements; a key that also names a secret
@@ -375,7 +376,13 @@ def _accelerator(raw, doctor, gpu, declared):
            "driver": raw.get("driver_version"), "runtime": _rocm(doctor) if amd else raw.get("cuda_version"),
            "kernel": _value(gpu.get("kernel")), "usb4_driver": _value(doctor.get("usb4", {}).get("module")),
            "layout": _value(doctor.get("usb4", {}).get("layout")), "raw": raw, "why": {}}
-    row.update(name=name, memory_kind="unified · GPU-visible" if unified else "VRAM")
+    row.update(name=name, memory_kind="unified · GPU-visible (VRAM + GTT)" if unified else "VRAM")
+    if amd:
+        # Both driver domains as reported (never merged silently): on unified-memory hardware "GPU memory" is the
+        # VRAM carve-out plus GTT; this is driver accounting, not a second pool of RAM on top of the host's.
+        row["memory_domains"] = [{"domain": domain, "used_bytes": _value(raw.get(domain + "_used_bytes")),
+                                  "total_bytes": _value(raw.get(domain + "_total_bytes"))}
+                                 for domain in ("vram", "gtt") if raw.get(domain + "_total_bytes") is not None]
     if unified:
         used = [_value(raw.get(field)) for field in ("vram_used_bytes", "gtt_used_bytes")]
         row["memory_total_bytes"] = vram + gtt
@@ -395,8 +402,18 @@ def _accelerator(raw, doctor, gpu, declared):
         row["memory_used_bytes"] = row["memory_total_bytes"] - row["memory_free_bytes"]
     from ..device_policy import resolve
     row.update(resolve(dict(raw, name=row["name"]), declared))
+    # Every missing reading says why: the node's own reason for that counter when it gave one, else its source.
+    checks = {"memory_used_bytes": "vram_used_bytes", "memory_total_bytes": "vram_total_bytes", "utilization_pct": "busy_percent",
+              "temperature_c": "temperature_c", "power_w": "power_w"}
+    for field, key in checks.items():
+        check = raw.get(key) if amd else None
+        if row.get(field) is None and isinstance(check, dict) and check.get("status") != "ok" and check.get("why"):
+            row["why"].setdefault(field, str(check["why"])[:300])
+    if row.get("memory_free_bytes") is None:
+        row["why"].setdefault("memory_free_bytes", "needs both used and total memory" if amd else "not reported by the device probe")
     return _missing(row, ("id", "name", "memory_used_bytes", "memory_total_bytes", "memory_free_bytes", "utilization_pct",
-                          "temperature_c", "power_w", "driver", "runtime", "kernel", "usb4_driver", "layout", "policy_reason"))
+                          "temperature_c", "power_w", "driver", "runtime", "kernel", "usb4_driver", "layout", "policy_reason"),
+                    "not reported by the GPU driver's counters" if amd else "not reported by the device probe")
 
 
 def _http(endpoint, suffix, text=False):
@@ -438,6 +455,7 @@ class API:
         self._jobs = {}
         self._active = None
         self._seen = {}
+        self._contacts = {}             # (machine, verb) -> time of the last SUCCESSFUL node read (never renewed by a cached value)
         self._windows = {}
         self._history = deque(maxlen=1800)
         self._counters = {}
@@ -598,6 +616,7 @@ class API:
                     continue
                 if value is not None and compat_schema(value.get("schema")) == "hydraweave/node-v1" and not value.get("error"):
                     self._inspections[(machine.id, verb)] = {"value": value, "error": None, "at": at}
+                    self._contacts[(machine.id, verb)] = at
                     if verb == "doctor":
                         self._note_turn(machine, value, now)
                 else:
@@ -622,6 +641,7 @@ class API:
                 if compat_schema(value.get("schema")) != "hydraweave/node-v1":
                     raise ValueError("unknown node schema")
                 self._inspections[(machine.id, verb)] = {"value": value, "error": None, "at": now}
+                self._contacts[(machine.id, verb)] = now
                 if verb == "doctor":
                     self._note_turn(machine, value, now)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -720,7 +740,7 @@ class API:
                    "declared_devices": machine.devices, "os": None, "cpu_model": None,
                    "ram": None, "nics": None, "disk_free_bytes": None, "accelerators": None,
                    "doctor": None, "gpu": None, "probe": None, "roles": [], "leases": [],
-                   "last_seen": self._seen.get(mid), "health": "offline", "why": {}}
+                   "last_seen": None, "health": "offline", "why": {}}
             reads = {verb: self._inspections.get((mid, verb)) for verb in self._inspect(machine)}
             latest = max((read for read in reads.values() if read), key=lambda read: read["at"], default=None)
             for verb, inspection in reads.items():
@@ -739,15 +759,6 @@ class API:
                 row["probe"] = self._probe(machine)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
                 row["why"]["probe"] = str(exc)
-            if row["doctor"] or row["gpu"] or row["probe"]:
-                row["health"] = "online"
-                self._seen[mid] = row["last_seen"] = self.clock()
-            elif self._inspections.get((mid, "paused")) and pollbudget.for_api(self).turn(mid, now=self.clock()):
-                # Not read because a GPU turn holds it: the turn check that saw the holder is a fresh answer of the
-                # node, so it is online (busy), not offline; its details wait for the turn's end.
-                row["health"] = "online"
-            elif any("unknown host key" in why for why in row["why"].values()):
-                row["health"] = "unpaired"
             doctor = (row["doctor"] or {}).get("checks", {})
             gpu = (row["gpu"] or {}).get("checks", {})
             probe = row["probe"] or {}
@@ -777,8 +788,6 @@ class API:
             row["kernel_summary"] = (kernel or "") + (" · USB4 stream driver loaded" if row["usb4"] and row["usb4"]["driver_loaded"] else "") or None
             row["cpu"] = row["cpu_model"]
             row["warnings"] = row["usb4"]["warnings"] if row["usb4"] else []
-            if row["warnings"] and row["health"] == "online":
-                row["health"] = "degraded"
             if machine.access == "local":
                 row["roles"].append({"role": "portal"})
             for name, status in statuses.items():
@@ -790,11 +799,35 @@ class API:
                     for proc in lease.get("processes", []):
                         row["roles"].append({"profile": name, "role": proc.get("name")})
             row["lease"] = row["leases"][0] if row["leases"] else None
+            # ONE status model (features/nodestatus.py) for every page: reachability with the real time of the last
+            # successful contact (a cached answer never renews it) and the freshness of each telemetry source.
+            deadlines = [_value(lease.get("deadline")) if isinstance(lease.get("deadline"), dict) else lease.get("deadline")
+                         for lease in row["leases"]]
+            model = nodestatus.collect(self, machine, self.clock(), probe=row["probe"],
+                                       until=min((d for d in deadlines if _finite(d)), default=None))
+            row["node_status"] = model
+            row["health"] = nodestatus.health(model, row["warnings"])
+            row["last_seen"] = model["last_contact"]
+            sources = {"os": "doctor", "cpu_model": "doctor", "nics": "doctor", "disk_free_bytes": "doctor",
+                       "ram": "gpu", "accelerators": "gpu"}
             for field in ("os", "cpu_model", "ram", "nics", "disk_free_bytes", "accelerators", "probe", "last_seen"):
                 if row[field] is None:
-                    row["why"].setdefault(field, "machine offline" if row["health"] == "offline" else
-                                           "needs TM-R14" if field == "cpu_model" else "source unavailable")
-            machines.append(_missing(row, ("devices", "ram_bytes", "cpu", "release", "component_shas", "lease")))
+                    source = model["sources"].get(sources.get(field)) or {}
+                    if source and not (source["state"] == "fresh" and not source["missing"]):
+                        reason = nodestatus.source_why(model, sources[field])     # every "unavailable" says why
+                    elif field in ("last_seen", "probe") and model["state"] != "reachable":
+                        reason = model["summary"]
+                    else:
+                        reason = "needs TM-R14" if field == "cpu_model" else "not reported by the node"
+                    row["why"].setdefault(field, reason)
+            for field, origin in (("devices", "accelerators"), ("ram_bytes", "ram"), ("cpu", "cpu_model"),
+                                  ("ram_summary", "ram"), ("nics_summary", "nics")):
+                if row.get(field) is None and row["why"].get(origin):
+                    row["why"].setdefault(field, row["why"][origin])
+            if row.get("lease") is None:
+                row["why"].setdefault("lease", "no GPU slot held on this machine")
+            machines.append(_missing(row, ("devices", "ram_bytes", "cpu", "release", "component_shas", "lease"),
+                                     "not recorded for this machine"))
         return machines
 
     def _profiles(self, cluster, statuses):
@@ -1086,7 +1119,7 @@ class API:
             for machine in machines:
                 machine["roles"] = machine["leases"] = None
                 machine["why"].update(roles=status_error, leases=status_error)
-        documents["devices"].update(machines=machines, discovered=None)
+        documents["devices"].update(machines=machines, discovered=None, controller=nodestatus.controller(self))
         headroom = [device.get("memory_free_bytes") for machine in machines for device in machine["accelerators"] or [] if not device["excluded"]]
         all_memory = bool(headroom) and all(_finite(value) for value in headroom) and all(
             row["accelerators"] is not None and row["health"] != "offline" for row in machines)

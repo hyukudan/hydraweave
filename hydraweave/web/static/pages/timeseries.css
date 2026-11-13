@@ -7,3 +7,14 @@
 .ts-key i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .ts-readout{min-height:1.3em;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}
 .ts-empty .muted{color:var(--text-3)}
+/* Nodes trend tiles and per-chart states (pages/node-tiles.js, pages/machine.js) */
+.nt-tiles{margin-top:var(--gap,12px)}
+.nt-tile{min-width:0;overflow:hidden}
+.nt-tile .nt-val{font-size:18px;min-height:26px}
+.nt-tile .ts{margin:6px 0 2px}
+.nt-tile .ts figcaption{display:none}
+.nt-tile .ts svg{width:100%}
+.nt-tile .ts-legend{font-size:11px}
+.nt-state{font-size:13px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}
+.nt-open{display:inline-block;margin-top:4px}
+.ts-problem p{overflow-wrap:anywhere}

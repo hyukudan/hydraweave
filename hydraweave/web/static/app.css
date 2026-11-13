@@ -414,3 +414,10 @@ ul.related{margin:0;padding-left:18px;line-height:1.9}
   .info-btn span{width:24px;height:24px}
   dialog.palette{margin-top:4vh}
 }
+/* One node status model: summary, last real contact, per-source freshness (app.js nodeStatus) */
+.node-status{margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;overflow-wrap:anywhere}
+.node-status .node-summary{margin:0 0 4px;font-weight:550}
+.node-status .hint{margin:0}
+.node-sources{list-style:none;padding:0;margin:4px 0 0}
+.node-sources li{margin:2px 0}
+.controller-note{margin:8px 0}

@@ -135,6 +135,13 @@ def record(api, machine, reply, error, sent, received):
     return entry
 
 
+def latest(api, machine_id):
+    """The latest turn reading kept for a machine ({fetched_at, reply, error, ...}), or None."""
+    with _state_lock:
+        entry = _replies.get(id(api), {}).get(machine_id)
+        return dict(entry) if entry else None
+
+
 def sample(api, now):
     from hydraweave import nodepoll
     if nodepoll.of(api) is None:        # the portal's node poll already runs every turn check (no second session)

@@ -38,6 +38,7 @@ import time
 from hydraweave import nodegate, nodepoll, pollbudget, procs, secrets, telemetry
 from hydraweave.adapters import engine as engine_adapter
 from hydraweave.paths import repo_root
+from hydraweave.web.features import nodestatus
 from hydraweave.telemetry.store import BASELINES as BASELINE_NAMESPACE
 from hydraweave.winproc import no_window
 
@@ -1415,6 +1416,7 @@ def machine_view(api, machine, store, now, records, control_id):
     checks = ((entry or {}).get("host") or {}).get("checks") or {}
     engines = engine_rows(store, machine.id, records, control_id, now)
     return {"entry": entry, "checks": checks, "status": status, "status_why": status_why, "interval": interval,
+            "node_status": nodestatus.collect(api, machine, now, store=store),
             "limits": limits, "domains": domains, "limiting": limiting, "limiting_why": limiting_why,
             "engines": engines, "gpus": gpu_cards(checks, domains)}
 
@@ -1436,6 +1438,8 @@ def machine_document(api, rest, query):
         why["host"] = "telemetry store not open in this portal process (samplers disabled)"
     elif not entry:
         why["host"] = "no collection for this machine yet"
+    elif view["node_status"]["sources"]["host"]["state"] != "fresh":
+        why["host"] = nodestatus.source_why(view["node_status"], "host")
     nvidia = checks.get("nvidia")
     if nvidia is not None and _value(nvidia) is None:
         why["nvidia"] = _why(nvidia)
@@ -1513,6 +1517,7 @@ def machine_document(api, rest, query):
     return api.document(
         "machine", machine={"id": machine.id, "os": machine.os, "access": machine.access, "control": machine.access == "local"},
         status=view["status"], status_why=view["status_why"], last_ok=(entry or {}).get("last_ok"),
+        node_status=view["node_status"], controller=nodestatus.controller(api),
         uptime_s=_value(checks.get("uptime_s")), gpus=view["gpus"],
         memory={"domains": view["domains"], "limiting": view["limiting"], "limiting_why": view["limiting_why"],
                 "engine_report": engine_report(view["domains"], view["engines"])},

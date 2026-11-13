@@ -1454,8 +1454,138 @@ def signed_out_walkthrough(client, server, output):
     print("PASS signed-out walkthrough: sign-in screen only, wrong token refused, sign-in, session end", flush=True)
 
 
+def node_tiles_walkthrough(client, server):
+    """Node status and trend charts: the Nodes tiles with series, without series (no samples, no history store) and
+    with a failed request (reason + Retry, then recovery); the sidebar and the node cards show the same back-end
+    status; the Machine page draws GPU memory by domain, system memory and CPU busy, and a failed history request
+    shows its reason instead of a permanent "loading"."""
+    def wait(expression, timeout=30):
+        try:
+            return eventually(lambda: client.evaluate(expression), timeout=timeout)
+        except AssertionError:
+            raise AssertionError("node tiles walkthrough: timed out waiting for " + expression + " -- page: "
+                                 + str(client.evaluate("document.querySelector('main').innerText"))[:3000]) from None
+
+    def go(hash_):
+        client.call("Page.navigate", url=server.url + hash_)
+        wait("document.readyState === 'complete' && !!document.querySelector('main')")
+        wait("document.querySelector('main').getAttribute('aria-busy') === 'false'")
+        # Requests matching a rule are answered by the page itself: "fail" (HTTP 500), "empty" (no samples) or
+        # "nostore" (history store not open); every other request reaches the fixture portal.
+        client.evaluate("""(() => {
+          if (window.__hwFetch) return true;
+          window.__hwFetch = window.fetch.bind(window); window.__hwRules = {};
+          window.fetch = (input, init) => {
+            const url = String(input?.url || input), hit = Object.entries(window.__hwRules).find(([part]) => url.includes(part));
+            if (!hit) return window.__hwFetch(input, init);
+            if (hit[1] === "fail") return Promise.resolve(new Response(JSON.stringify({error: "history store read failed (fixture)"}), {status: 500, headers: {"Content-Type": "application/json"}}));
+            return window.__hwFetch(input, init).then(async response => {
+              const doc = await response.json();
+              doc.lines = hit[1] === "nostore" ? null : [];
+              doc.why = {...(doc.why || {}), lines: hit[1] === "nostore" ? "history store not open in this portal process (fixture)" : "no samples recorded for this series in the range"};
+              return new Response(JSON.stringify(doc), {status: 200, headers: {"Content-Type": "application/json"}});
+            });
+          };
+          return true; })()""")
+
+    def rules(value):
+        client.evaluate("(window.__hwRules = " + json.dumps(value) + ", window.Hydraweave.refresh(), true)")
+
+    tile = "document.querySelector('[data-nt-tile=\"%s\"]')"
+    client.call("Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False)
+    go("#/devices")
+    # 1. With series: four tiles, each a chart with finite points and a table alternative.
+    for name in ("gpu-memory", "memory", "busy", "temperature"):
+        wait((tile % name) + "?.querySelector('svg[data-ts] path')?.getAttribute('d')?.length > 10")
+        if not client.evaluate((tile % name) + ".querySelectorAll('details table tbody tr').length > 5"):
+            raise AssertionError("node tiles: no table alternative on " + name)
+        if client.evaluate((tile % name) + ".querySelector('[data-nt-state]') !== null"):
+            raise AssertionError("node tiles: a state message next to a drawn chart on " + name)
+    text = client.evaluate((tile % "gpu-memory") + ".innerText")
+    for needed in ("halo-1 · VRAM + GTT", "halo-2 · VRAM + GTT", "GiB", "Open in Metrics history"):
+        if needed not in text:
+            raise AssertionError("node tiles: GPU memory tile is missing " + needed + ": " + text[:600])
+    if client.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth"):
+        raise AssertionError("node tiles: the page overflows horizontally")
+    # One status model: every node card shows it, and the sidebar says the same as the card.
+    status = client.evaluate("""JSON.stringify({cards: [...document.querySelectorAll('.dev')].map(c => ({pill: c.querySelector('.hd .pill')?.textContent.toLowerCase(),
+      code: c.querySelector('[data-node-status]')?.dataset.nodeStatus, sources: c.querySelectorAll('[data-node-source]').length, summary: c.querySelector('.node-summary')?.textContent})),
+      nav: [...document.querySelectorAll('.nav-machine .hint')].map(h => h.textContent.toLowerCase()), controller: document.querySelector('[data-controller]')?.textContent || ''})""")
+    status = json.loads(status)
+    if not status["cards"] or any(card["sources"] != 3 or not card["code"] or not card["summary"] for card in status["cards"]):
+        raise AssertionError("node status: a node card lacks the status model: " + json.dumps(status))
+    if len(status["nav"]) != len(status["cards"]) or any(not nav.startswith(card["pill"]) for nav, card in zip(status["nav"], status["cards"])):
+        raise AssertionError("node status: sidebar and node cards disagree: " + json.dumps(status))
+    if client.evaluate("[...document.querySelectorAll('.dev')].map(c => c.querySelector('.hd .pill')?.dataset.nodeState + ':' + c.querySelectorAll('.banner.warn').length).join(',')") != "reachable:0,reachable:0,reachable:1":
+        raise AssertionError("node status: every fixture machine is reachable and only the one with a cable warning shows it: " + json.dumps(status))
+    if "Served by the controller on" not in status["controller"]:
+        raise AssertionError("node status: the serving controller is not named")
+    if "unavailable · source unavailable" in client.evaluate("document.querySelector('main').innerText"):
+        raise AssertionError("node status: an 'unavailable' without its reason")
+    # 2. Without series: no samples and a missing store are different, each with its reason; other tiles keep charts.
+    rules({"history/node_gpu_temp_celsius": "empty", "history/node_gpu_busy_percent": "nostore"})
+    wait((tile % "temperature") + "?.querySelector('[data-nt-state=\"empty\"]')?.textContent.includes('no samples recorded for this series')")
+    wait((tile % "busy") + "?.querySelector('[data-nt-state=\"unavailable\"]')?.textContent.includes('history store not open in this portal process (fixture)')")
+    if client.evaluate((tile % "temperature") + ".querySelector('svg') !== null") or not client.evaluate((tile % "memory") + ".querySelector('svg[data-ts] path') !== null"):
+        raise AssertionError("node tiles: the tiles without series must not draw, the others must")
+    # 3. Failed request: the reason and Retry, never a permanent "loading"; Retry recovers.
+    rules({"history/node_gpu_mem_used_bytes": "fail"})
+    wait((tile % "gpu-memory") + "?.querySelector('[data-nt-state=\"error\"]')?.textContent.includes('History request failed')")
+    if not client.evaluate((tile % "gpu-memory") + ".querySelector('[data-page-action=\"nt-retry\"]') !== null && "
+                           + (tile % "temperature") + ".querySelector('svg[data-ts] path') !== null"):
+        raise AssertionError("node tiles: a failed request needs Retry and must not take the other tiles down")
+    if "Loading history" in client.evaluate((tile % "gpu-memory") + ".innerText"):
+        raise AssertionError("node tiles: a failed request is shown as loading")
+    client.evaluate("(window.__hwRules = {}, " + (tile % "gpu-memory") + ".querySelector('[data-page-action=\"nt-retry\"]').click(), true)")
+    wait((tile % "gpu-memory") + "?.querySelector('svg[data-ts] path') !== null && " + (tile % "gpu-memory") + ".querySelector('[data-nt-state]') === null")
+    # Machine page: memory and CPU charts from the existing series, with the same per-chart states.
+    go("#/machine?id=halo-1")
+    captions = "[...document.querySelectorAll('.mc-charts figure')].filter(f => f.querySelector('svg[data-ts] path')).map(f => f.querySelector('figcaption').textContent)"
+    for title in ("GPU memory by domain (used)", "System memory used", "CPU busy (%)", "GPU temperature (°C)"):
+        wait(captions + ".includes(" + json.dumps(title) + ")")
+    body = client.evaluate("document.querySelector('main').innerText")
+    for needed in ("VRAM + GTT used", "VRAM + GTT total", "Last successful contact", "Served by the controller on"):
+        if needed not in body:
+            raise AssertionError("machine: missing " + needed)
+    if not client.evaluate("document.querySelectorAll('main [data-node-source]').length === 3"):
+        raise AssertionError("machine: the three telemetry sources are not listed")
+    rules({"history/node_cpu_busy_percent": "fail", "history/node_gpu_busy_percent": "fail", "history/node_mem_total_bytes": "nostore"})
+    wait("document.querySelectorAll('.mc-charts [data-mc-chart-state=\"error\"]').length === 2 && document.querySelectorAll('.mc-charts [data-mc-chart-state=\"unavailable\"]').length === 1")
+    body = client.evaluate("document.querySelector('.mc-charts').innerText")
+    if "oading history" in body or "History request failed" not in body or "history store not open in this portal process (fixture)" not in body:
+        raise AssertionError("machine: a failed history request must show its reason, not loading: " + body[:800])
+    if not client.evaluate(captions + ".includes('GPU memory by domain (used)')"):
+        raise AssertionError("machine: one failed series took the other charts down")
+    client.evaluate("(window.__hwRules = {}, document.querySelector('.mc-charts [data-page-action=\"mc-retry\"]').click(), true)")
+    wait("document.querySelectorAll('.mc-charts [data-mc-chart-state]').length === 0 && " + captions + ".includes('CPU busy (%)')")
+    # The tile link opens that series in Metrics history.
+    go("#/history?series=node_gpu_mem_used_bytes")
+    wait("document.getElementById('history-series')?.value === 'node_gpu_mem_used_bytes'")
+    # The picker rules during the visit; leaving and returning through the same link selects its series again.
+    client.evaluate("(() => { const s = document.getElementById('history-series'); s.value = 'node_mem_total_bytes'; "
+                    "s.dispatchEvent(new Event('change', {bubbles: true})); return true; })()")
+    wait("document.getElementById('history-series')?.value === 'node_mem_total_bytes'")
+    go("#/devices")
+    wait((tile % "gpu-memory") + "?.querySelector('svg[data-ts] path') !== null")
+    # The Nodes charts are bound after every render: hovering one shows its readout, also after a refresh.
+    hover = ("(() => { const svg = " + (tile % "gpu-memory") + ".querySelector('svg[data-ts]'), box = svg.getBoundingClientRect(); "
+             "svg.dispatchEvent(new MouseEvent('mousemove', {clientX: box.left + box.width * 0.6, clientY: box.top + 10, bubbles: true})); "
+             "return (svg.parentElement.querySelector('.ts-readout')?.textContent || '').length > 0; })()")
+    for attempt in ("first render", "after a refresh"):
+        if not client.evaluate(hover):
+            raise AssertionError("nodes tiles: hovering a chart shows no readout (" + attempt + ")")
+        client.evaluate("(window.Hydraweave.refresh(), true)")
+        wait((tile % "gpu-memory") + "?.querySelector('svg[data-ts] path') !== null")
+    go("#/history?series=node_gpu_mem_used_bytes")
+    wait("document.getElementById('history-series')?.value === 'node_gpu_mem_used_bytes'")
+    client.evaluate("true")
+    if client.errors:
+        raise AssertionError("node tiles walkthrough: browser errors: " + json.dumps(client.errors))
+    return "tiles with series, without series (no samples / no store), failed request + Retry; one status model in sidebar, Nodes and Machine; Machine memory and CPU charts"
+
+
 def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False, recipes_only=False,
-                  launch_only=False, refusals_only=False, signin_only=False):
+                  launch_only=False, refusals_only=False, signin_only=False, tiles_only=False):
     with tempfile.TemporaryDirectory(prefix="hydraweave-chrome-", ignore_cleanup_errors=True) as profile:
         port = free_port()
         command = [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
@@ -1490,6 +1620,9 @@ def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False
                 if signin_only:
                     signed_out_walkthrough(client, server, output)
                     return 0
+                if tiles_only:
+                    print("PASS node status and trend tiles: " + node_tiles_walkthrough(client, server), flush=True)
+                    return 0
                 captures = 0
                 for width in (() if keyboard_only or recipes_only or refusals_only else (1440, 390)):
                     client.call("Emulation.setDeviceMetricsOverride", width=width, height=1000,
@@ -1521,8 +1654,8 @@ def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False
                                 for text in ("PRETTY_NAME=", "gtt_total_bytes", "vEthernet", "/data0", "system: Windows"):
                                     if text in metrics["body"]:
                                         raise AssertionError("Raw probe detail reached device summary: " + text)
-                                if client.evaluate("[...document.querySelectorAll('.dev .hd .pill')].map(p => p.textContent).join(',')") != "online,online,degraded":
-                                    raise AssertionError("Only the machine with a cable warning should be degraded")
+                                if client.evaluate("[...document.querySelectorAll('.dev')].map(c => c.querySelector('.hd .pill')?.dataset.nodeState + ':' + c.querySelectorAll('.banner.warn').length).join(',')") != "reachable:0,reachable:0,reachable:1":
+                                    raise AssertionError("Every fixture machine is reachable and only the one with a cable warning shows it")
                                 if client.evaluate("document.querySelector('.packages')?.open"):
                                     raise AssertionError("ROCm package details should start collapsed")
                             if route == "sessioncache":
@@ -1568,6 +1701,7 @@ def browser_smoke(chrome, server, output, *, keyboard=False, keyboard_only=False
                         raise AssertionError("System light/dark preference did not change the rendered theme")
                 if not keyboard_only and not recipes_only and not refusals_only:
                     print("PASS shell walkthrough: " + shell_walkthrough(client, server, output), flush=True)
+                    print("PASS node status and trend tiles: " + node_tiles_walkthrough(client, server), flush=True)
                 if keyboard or keyboard_only:
                     # Desktop makes every opener visible; the manual walkthrough
                     # additionally covers the narrow navigation menu and NVDA.
@@ -1604,6 +1738,7 @@ def main():
     parser.add_argument("--keyboard-only", action="store_true", help="run the dialog keyboard pass without screenshots")
     parser.add_argument("--recipes-only", action="store_true", help="run only the Recipes & profiles walkthrough")
     parser.add_argument("--refusals-only", action="store_true", help="run only the synchronous launch refusal walkthrough")
+    parser.add_argument("--tiles-only", action="store_true", help="run only the node status and trend tiles walkthrough")
     parser.add_argument("--serve", action="store_true", help="keep a fake-backed UI running for keyboard review")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--chrome", help="Chrome/Chromium executable (or set CHROME)")
@@ -1639,6 +1774,11 @@ def main():
     with FixtureServer(signed_out=True) as server:
         browser_smoke(chrome, server, output, signin_only=True)
     if args.signin_only:
+        print("PASS requested walkthrough; no console errors")
+        return 0
+    if args.tiles_only:
+        with FixtureServer() as server:
+            browser_smoke(chrome, server, output, tiles_only=True)
         print("PASS requested walkthrough; no console errors")
         return 0
     with FixtureServer() as server:
