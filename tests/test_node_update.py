@@ -62,7 +62,7 @@ def test_update_repulls_verified_package_and_schedules_user_restart(tmp_path):
         with patch.object(node_agent, "load_tool", return_value=tool):
             result = agent.invoke("agent-update", payload)
         assert result == {"state": "updated", "restart": "scheduled"}
-        agent.download.assert_called_once_with(payload["origin"] + "/node/package.tar.gz")
+        agent.download.assert_called_once_with(payload["origin"] + "/node/package.tar.gz", agent.token)
         commands = [call.args[0] for call in agent.runner.call_args_list]
         assert commands[0] == ["systemctl", "--user", "is-active", "hydraweave-node.service"]
         assert "pip" in commands[1] and "package.tar.gz" in commands[1][-1]
@@ -152,3 +152,56 @@ def test_node_update_job_refuses_unpaired_and_browser_commands(tmp_path):
 def test_controller_packages_have_stable_digest_across_seconds():
     with patch("gzip.time.time", side_effect=[1000, 2000]):
         assert hashlib.sha256(bootstrap.source_package()).digest() == hashlib.sha256(bootstrap.source_package()).digest()
+
+
+def test_update_downloads_the_package_from_a_token_protected_portal_with_the_node_credential(tmp_path, monkeypatch):
+    """The real downloader against the real gated handler on loopback: the paired node's own credential opens
+    the package and nothing else; no credential, a wrong one or an unpaired node stay signed out."""
+    import threading
+    import urllib.error
+    import urllib.request
+    from hydraweave import secrets
+    from hydraweave.web import server as portal
+
+    portal_token, node_token, data = "a" * 64, "n" * 43, b"node package bytes"
+    monkeypatch.delenv("HYDRAWEAVE_NO_AUTH", raising=False)
+    monkeypatch.setattr(secrets, "get", lambda name: portal_token)
+    monkeypatch.setattr(bootstrap, "package", lambda: (data, hashlib.sha256(data).hexdigest()))
+    api = SimpleNamespace(config_path=tmp_path / "cluster.toml", read=Mock(return_value={"ok": True}))
+    server = portal.create_server(0, api=api, listen="127.0.0.1")
+    server.access_token = portal_token                # token-protected, as a LAN portal is
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+    agent, tool, payload = agent_at(tmp_path, turns={"present": True, "holder": None}, data=data)
+    agent.download, agent.token = node_agent.download_package, node_token
+    payload["origin"] = origin
+
+    def status(path, token=None):
+        request = urllib.request.Request(origin + path, headers={"Authorization": "Bearer " + token} if token else {})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    try:
+        with patch.object(node_agent, "load_tool", return_value=tool):
+            # Not paired with this controller: the node credential opens nothing.
+            with pytest.raises(urllib.error.HTTPError, match="401"):
+                agent.invoke("agent-update", payload)
+            assert not agent.updating
+            onboarding.credentials_path(api.config_path).write_text(json.dumps(
+                {"node-1": {"address": "127.0.0.1", "port": 1, "token": node_token}}))
+            assert agent.invoke("agent-update", payload) == {"state": "updated", "restart": "scheduled"}
+        assert status("/node/package.tar.gz") == 401
+        assert status("/node/package.tar.gz", "wrong") == 401
+        assert status("/node/package.tar.gz", portal_token) == 200
+        # The node credential is not a portal credential.
+        for path in ("/node/bootstrap.sh", "/hydraweave/api/devices", "/metrics", "/app.js"):
+            assert status(path, node_token) == 401, path
+        api.read.assert_not_called()
+    finally:
+        server.shutdown()
+        server.server_close()
+        agent.server_close()

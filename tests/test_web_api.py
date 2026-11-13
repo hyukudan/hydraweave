@@ -465,6 +465,9 @@ class APITests(unittest.TestCase):
             self.assertEqual(job["state"], "succeeded")
             rotate.assert_called_once_with("engine")
             self.assertNotIn("do-not-expose", self.api.audit_path.read_text())
+            # The portal's own token applies on the next request; every other key is read at launch.
+            self.assertIs(self.api._execute_action("keys/rotate", {"name": "engine"})["restart_required"], True)
+            self.assertIs(self.api._execute_action("keys/rotate", {"name": "portal-access"})["restart_required"], False)
         self.remote.keyscan.return_value = [SimpleNamespace(algorithm="ssh-ed25519", sha256_fingerprint="SHA256:fixture")]
         job = wait_job(self.api, self.api.mutate("hosts/pin", {"machine": "halo-1", "fingerprint": "SHA256:fixture"}))
         self.assertEqual(job["state"], "succeeded")

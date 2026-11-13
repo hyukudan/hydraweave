@@ -10,6 +10,7 @@ python -m pytest tests/test_web_security.py -q
 python tests/ui/smoke.py
 python tests/ui/smoke.py --keyboard
 python tests/ui/smoke.py --keyboard-only
+python tests/ui/smoke.py --signin-only
 python tests/ui/smoke.py --contrast-only
 python -m pytest -q
 wsl -e bash -lc 'cd "<repository>" && python3 -m pytest -q'

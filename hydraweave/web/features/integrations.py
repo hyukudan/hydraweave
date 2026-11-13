@@ -793,6 +793,11 @@ def serve_stream(handler, head=False, *, interval=None, max_s=None, heartbeat=No
             if ended.is_set():
                 write('event: end\ndata: {"why": "a newer page took this stream slot; reconnect"}\n\n')
                 return
+            authorized = getattr(handler, "_authorized", None)
+            if authorized is not None and not authorized():
+                # The access token was rotated under this stream: the session is over now, not at max_s.
+                write('event: end\ndata: {"why": "sign-in required"}\n\n')
+                return
             if now - started >= max_s:
                 write('event: end\ndata: {"why": "maximum connection time reached; reconnect"}\n\n')
                 return

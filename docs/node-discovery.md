@@ -10,7 +10,9 @@ The controller is installed as in [Installation](install.md) section 3 and serve
 Log into each Ubuntu worker as its ordinary user, not root:
 
 ```sh
-curl -fsSL http://CONTROLLER:18700/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<sha256-from-portal> sh
+export HYDRAWEAVE_PORTAL_TOKEN=<portal-access-token>   # token-protected (LAN) portal only
+curl -fsSL -H "Authorization: Bearer $HYDRAWEAVE_PORTAL_TOKEN" \
+  http://CONTROLLER:18700/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=<sha256-from-portal> sh
 # Lab mode: also set HYDRAWEAVE_LAB_DIR="$HOME/<lab>" before sh.
 journalctl --user -u hydraweave-node -n 20 --no-pager
 ```
@@ -131,12 +133,37 @@ Reload the portal and copy a fresh command after updating controller sources.
 
 ### Portal access security
 
-On a non-loopback bind the portal generates an access token on first start and prints
-`http://HOST:PORT/?token=...`. Open that URL once to receive an `HttpOnly; SameSite=Strict` session cookie;
-the redirect removes the token from the address bar. Pages remain readable without login. Mutating portal
-requests require that cookie or `Authorization: Bearer <portal-token>`; the UI shows a login form after a
-401 response. Browser cookies also retain the existing Origin and CSRF checks. Bearer callers supply
-the explicit credential instead of browser CSRF headers.
+On a non-loopback bind the portal generates an access token on first start and prints it on the console.
+**Nothing operational is readable without that token.** One authorisation gate in the server dispatch
+(`Handler._gate` in `hydraweave/web/server.py`) covers every method and route; the only routes it lets an
+unauthenticated visitor reach are the explicit allow-lists `PUBLIC_GET` and `PUBLIC_POST`:
+
+| Public route | What it returns |
+|---|---|
+| `GET`/`HEAD /api/health` | `status`, version and commit: liveness only |
+| `GET`/`HEAD /`, `/index.html`, `/hydraweave/`, `/hydraweave/index.html` | signed out: the sign-in screen, not the application shell |
+| `GET`/`HEAD /app.css`, `/hydraweave/app.css`, `/security.js`, `/favicon.ico` | the files the sign-in screen loads |
+| `POST /hydraweave/api/login` | exchanges the token (JSON body) for the session cookie; Origin and CSRF checked |
+
+Everything else answers 401 until the request carries the session cookie or
+`Authorization: Bearer <portal-token>`: the API inventory (devices, topology, models, profiles, stats, logs,
+settings, jobs), every feature document, history and export, the event stream, `/metrics`, the application
+scripts and feature pages, the node bootstrap downloads, and the same routes under the legacy `/hyperloom/`
+alias. A route added later is closed unless it is added to the allow-list; `tests/test_route_matrix.py` walks
+every registered route and pins the allow-list.
+
+Sign-in: type the token into the sign-in screen. It is sent in a `POST` body and kept in an
+`HttpOnly; SameSite=Strict` cookie. The token is never accepted in a URL (a request with a `token` query
+argument is refused), so it does not reach browser history, logs or referrers. Token comparison is
+constant-time. Browser cookies retain the existing Origin and CSRF checks; bearer callers supply the explicit
+credential instead of browser CSRF headers. A signed-in page that receives 401 reloads into the sign-in screen.
+
+Rotation: `hloom keys rotate portal-access` (or the portal's key rotation) takes effect on the next request
+without a restart (the rotation reply says `restart_required: false` for this key). The server reads the
+stored secret for every authorisation decision, so every existing cookie and bearer stops working and open
+event streams end; if the secret becomes absent or unreadable - including by a permission change alone - the
+portal stays closed. A sign-in cookie always carries the value that was checked, so a rotation during a
+sign-in cannot give the new token to a holder of the old one.
 
 The token persists in `~/.config/hydraweave/secrets/portal-access` with mode 0600 on POSIX. Windows stores
 it in `%APPDATA%\hydraweave\secrets\portal-access`, protected by the current user's DPAPI and private ACL.
@@ -145,7 +172,16 @@ and shows both a console warning and a visible LAN warning banner.
 
 Agent/bootstrap routes retain their own access rules:
 
-- Portal `GET`/`HEAD /node/bootstrap.sh` and `/node/package.tar.gz`: public, so unpaired workers can install.
+- Portal `GET`/`HEAD /node/bootstrap.sh` and `/node/package.tar.gz`: the portal token, like every other read.
+  On the worker, `export HYDRAWEAVE_PORTAL_TOKEN=<portal-token>` and add
+  `-H "Authorization: Bearer $HYDRAWEAVE_PORTAL_TOKEN"` to the `curl` of the bootstrap command; the script
+  sends the same header for the package download. Loopback and `--no-auth` portals need neither.
+- Portal `GET`/`HEAD /node/package.tar.gz` during **Update node**: a paired node agent presents its own
+  pairing bearer token (the one the controller uses for `/call`) and the portal accepts it for this one
+  download only; it opens no other route, and it is sent only to the controller origin, never across a
+  redirect. A node agent installed before this change downloads without a credential and gets 401 from a
+  token-protected portal: re-run the bootstrap command on that worker once (with `HYDRAWEAVE_PORTAL_TOKEN`,
+  as above); later updates work from the portal.
 - Worker `POST /pair`: the worker's short-lived, single-use console pairing code.
 - Worker `POST /call`: the worker's paired bearer token, distinct from the portal token.
 - Portal adoption/provisioning actions: authenticated portal mutations, including `discovery/adopt` and

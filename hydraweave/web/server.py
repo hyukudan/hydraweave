@@ -27,6 +27,30 @@ STATIC_DIR = Path(__file__).with_name("static")
 # Feature pages and their assets: only the exact names listed in <dir>/manifest.json ({"files": [...]}) are
 # served (no directory serving; names cannot contain separators, "..", ":" or stream suffixes).
 ASSET_DIRS = ("pages", "assets")
+# The whole surface an unauthenticated visitor may reach when the portal has an access token: the health /
+# version document, the sign-in screen and the two files that screen loads. Every other route - API reads,
+# the event stream, metrics, static pages, node bootstrap, legacy aliases - goes through Handler._gate and
+# needs the token. A new route is closed unless it is added here (tests/test_route_matrix.py pins this set).
+PUBLIC_GET = frozenset({"/api/health", "/", "/index.html", "/hydraweave/", "/hydraweave/index.html",
+                        "/app.css", "/hydraweave/app.css", "/security.js", "/favicon.ico"})
+NODE_PACKAGE = "/node/package.tar.gz"      # also readable by a paired node agent with its pairing credential
+PUBLIC_POST = frozenset({"/hydraweave/api/login"})
+LOGIN_REQUIRED = "Portal sign-in required: enter the access token printed on the portal console."
+STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
+                "/hydraweave/": "index.html", "/hydraweave/index.html": "index.html",
+                "/app.css": "app.css", "/app.js": "app.js", "/recipes.js": "recipes.js",
+                "/security.js": "security.js",
+                "/hydraweave/app.css": "app.css", "/hydraweave/app.js": "app.js",
+                "/hydraweave/recipes.js": "recipes.js"}
+SIGN_IN_PAGE = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                '<title>Hydraweave - sign in</title><link rel="stylesheet" href="/app.css">'
+                '<meta name="hydraweave-csrf" content="__HYDRAWEAVE_CSRF__">'
+                '<meta name="hydraweave-login" content="required">'
+                '<script src="/security.js" defer></script></head><body>'
+                '<main id="signin" style="max-width:44rem;margin:3rem auto;padding:0 1rem">'
+                '<h1>Hydraweave</h1><p id="signin-message">Signed out. This portal shows nothing until you '
+                'sign in with its access token.</p></main></body></html>')
 ASSET_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9_-]+)*\.(?:js|css|svg|png|json|webmanifest)")
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                  ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
@@ -94,6 +118,20 @@ class PortalServer(ThreadingHTTPServer):
             pass
         self.allowed_hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
 
+    def current_access(self):
+        """The access token in force now. The stored secret is read for every authorisation decision, so a
+        rotation (from this portal or from the command line) invalidates every cookie and bearer at once, and
+        a secret that became absent, invalid or unreadable - including by a permission change that leaves
+        its content untouched - closes the portal ("" matches nothing) instead of opening it."""
+        if self.access_token is None:
+            return None
+        from hydraweave import secrets as store
+        try:
+            self.access_token = store.get("portal-access") or ""
+        except (OSError, ValueError):
+            self.access_token = ""
+        return self.access_token
+
     def host_allowed(self, header):
         if header in self.allowed_hosts:
             return True
@@ -148,8 +186,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         if getattr(self, "_login_cookie", None):
             self.send_header("Set-Cookie", self._login_cookie)
-        if getattr(self, "_login_location", None):
-            self.send_header("Location", self._login_location)
         self.end_headers()
         self.close_connection = True
         if not head:
@@ -179,11 +215,12 @@ class Handler(BaseHTTPRequestHandler):
         self._get()
 
     def _access_token(self):
-        return getattr(self.server, "access_token", None)  # test doubles may omit it
+        current = getattr(self.server, "current_access", None)  # test doubles may omit it
+        return current() if current is not None else getattr(self.server, "access_token", None)
 
     def _matches_access(self, value):
-        return bool(self._access_token()) and hmac.compare_digest(
-            value.encode("utf-8"), self._access_token().encode("ascii"))
+        token = self._access_token()
+        return bool(token) and hmac.compare_digest(value.encode("utf-8"), token.encode("ascii"))
 
     def _bearer(self):
         values = self.headers.get_all("Authorization", [])
@@ -200,19 +237,46 @@ class Handler(BaseHTTPRequestHandler):
         except CookieError:
             return False
 
-    def _login(self, parsed):
-        """Exchange the URL credential for a browser-session cookie, then remove it from the URL."""
-        if self._access_token() is None or parsed.path not in {"/", "/index.html", "/hydraweave/", "/hydraweave/index.html"}:
+    def _paired_node(self):
+        """A paired node agent fetching the node package with its own pairing credential (the bearer the
+        controller uses to call it). It opens that one download and nothing else."""
+        values = self.headers.get_all("Authorization", [])
+        if len(values) != 1 or not values[0].startswith("Bearer "):
             return False
-        values = parse_qs(parsed.query, keep_blank_values=True).get("token")
-        if values is None:
+        offered = values[0][7:].encode("utf-8")
+        try:
+            from hydraweave import onboarding
+            saved = onboarding.credentials(self.server.api.config_path).values()
+            tokens = [row["token"].encode("utf-8") for row in saved if isinstance(row.get("token"), str) and row["token"]]
+        except Exception:         # no or unreadable pairing state: no node is recognised
             return False
-        if len(values) != 1 or not self._matches_access(values[0]):
+        return any([hmac.compare_digest(offered, token) for token in tokens])
+
+    def _gate(self, public):
+        """The one authorisation decision for every method and route: a path outside the explicit public set
+        needs the access token (bearer or session cookie), exactly as actions do."""
+        path = urlsplit(self.path).path
+        if path in public or self._authorized():
+            return
+        # The one credential besides the portal token, for the one read a node agent makes: its own package.
+        if public is PUBLIC_GET and path == NODE_PACKAGE and self._paired_node():
+            return
+        raise APIError(LOGIN_REQUIRED, 401)
+
+    def _sign_in(self, arguments):
+        """POST /hydraweave/api/login {"token": ...}: the credential travels in the body, never in a URL."""
+        token = arguments.get("token")
+        if set(arguments) != {"token"} or not isinstance(token, str):
+            raise APIError("login takes exactly one string argument: token")
+        if self._access_token() is None:
+            self._send(200, {"signed_in": True, "required": False})
+            return
+        if not self._matches_access(token):
             raise APIError("invalid portal access token", 401)
-        self._login_cookie = "hydraweave-access=" + self._access_token() + "; Path=/; HttpOnly; SameSite=Strict"
-        self._login_location = parsed.path
-        self._send(303, b"")
-        return True
+        # The cookie carries the value that was just compared, never a second read of the secret: a rotation
+        # in between must not hand the new token to a holder of the old one.
+        self._login_cookie = "hydraweave-access=" + token + "; Path=/; HttpOnly; SameSite=Strict"
+        self._send(200, {"signed_in": True, "required": True})
 
     def _get(self, head=False):
         if not self._host():
@@ -224,12 +288,10 @@ class Handler(BaseHTTPRequestHandler):
                 from hydraweave.discovery import controller_commit
                 self._send(200, {"status": "ok", "version": __version__, "commit": controller_commit()}, head=head)
                 return
-            if self._login(parsed):
-                return
+            if "token" in parse_qs(parsed.query, keep_blank_values=True):
+                raise APIError("the access token is never accepted in a URL; sign in on the portal page")
+            self._gate(PUBLIC_GET)
             if parsed.path == "/metrics":
-                if getattr(self.server, "lan", False) and not self._authorized():
-                    self._unauthorized()
-                    return
                 from hydraweave.metrics_export import collect
                 body = collect(config_path=self.server.api.config_path)
                 self._send(200, body, "text/plain; version=0.0.4; charset=utf-8", head=head)
@@ -273,13 +335,7 @@ class Handler(BaseHTTPRequestHandler):
             # An explicit file allow-list prevents directory listings, symlink escape,
             # alternate separators, encoded traversal and accidental source serving.
             path = unquote(parsed.path)
-            files = {"/": "index.html", "/index.html": "index.html",
-                     "/hydraweave/": "index.html", "/hydraweave/index.html": "index.html",
-                     "/app.css": "app.css", "/app.js": "app.js", "/recipes.js": "recipes.js",
-                     "/security.js": "security.js",
-                     "/hydraweave/app.css": "app.css", "/hydraweave/app.js": "app.js",
-                     "/hydraweave/recipes.js": "recipes.js"}
-            name = files.get(path)
+            name = STATIC_FILES.get(path)
             root = self.server.static_dir.resolve()
             parts = path[len("/hydraweave"):].split("/") if path.startswith("/hydraweave/") else path.split("/")
             if name is None and len(parts) == 3 and parts[0] == "" and parts[1] in ASSET_DIRS:
@@ -306,7 +362,10 @@ class Handler(BaseHTTPRequestHandler):
             if content_type is None:
                 self._error(404, "not found")
                 return
-            if name == "index.html" and source.parent == self.server.static_dir.resolve():
+            if name == "index.html" and not self._authorized():
+                # Signed out: the sign-in screen only, never the application shell or its scripts.
+                body = SIGN_IN_PAGE.replace("__HYDRAWEAVE_CSRF__", self.server.csrf_token).encode("utf-8")
+            elif name == "index.html" and source.parent == self.server.static_dir.resolve():
                 token = self.server.csrf_token
                 html = body.decode("utf-8").replace("__HYDRAWEAVE_CSRF__", token)
                 # The meta works even if a static page has no placeholder.
@@ -314,8 +373,6 @@ class Handler(BaseHTTPRequestHandler):
                 html = html.replace("</head>", meta + "</head>") if "</head>" in html else meta + html
                 from hydraweave import bootstrap
                 security = '<meta name="hydraweave-package-sha256" content="' + bootstrap.package_sha256() + '">'
-                if self._access_token() and not self._authorized():
-                    security += '<meta name="hydraweave-login" content="required">'
                 security += '<script src="/security.js" defer></script>'
                 html = html.replace("</head>", security + "</head>") if "</head>" in html else security + html
                 if self.server.lan and self.server.no_auth:
@@ -364,8 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             self._drain()
             return
         try:
-            if not self._authorized():
-                raise APIError("Portal login required; open the console login URL or enter your access token.", 401)
+            self._gate(PUBLIC_POST)
             host = self.headers["Host"]
             origins = self.headers.get_all("Origin", [])
             if not self._bearer() and origins != ["http://" + host]:
@@ -394,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             action = parsed.path[len("/hydraweave/api/"):]
             registry = feature_registry.registry()
             if (action not in MUTATIONS and action not in recipe_web.POSTS and action not in registry.posts
-                    and action not in registry.jobs and action != "jobs/renew"):
+                    and action not in registry.jobs and action not in ("jobs/renew", "login")):
                 raise APIError("unknown mutation", 404)
             self._body_read = True
             raw = self.rfile.read(size)
@@ -405,6 +461,9 @@ class Handler(BaseHTTPRequestHandler):
             arguments = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=invalid_constant)
             if not isinstance(arguments, dict):
                 raise APIError("JSON object required")
+            if action == "login":
+                self._sign_in(arguments)
+                return
             if action in recipe_web.POSTS:
                 status, document = self.server.api.recipe_post(action, arguments, cancelled=self._client_gone)
                 self._send(status, document)
@@ -441,10 +500,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _method(self):
         if self._host():
-            if self.command in {"PUT", "DELETE", "PATCH"} and not self._authorized():
-                self._error(401, "Portal login required")
-            else:
+            try:
+                self._gate(frozenset())
                 self._error(405, "method not allowed")
+            except APIError as exc:
+                self._error(exc.status, str(exc))
 
     do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = _method
 
@@ -553,11 +613,11 @@ def serve(port=None, no_browser=False, config_path=None, listen=None, no_auth=Fa
             " (listening on " + bind.url_host(server.listen_address, server.server_port) + ")" if lan else ""),
             flush=True)
         token = getattr(server, "access_token", None)
-        login_url = server.origin + "/" + ("?token=" + token if token else "")
         if token:
-            print("Hydraweave portal login: " + login_url, flush=True)
+            # The token is typed into the sign-in screen; it is never placed in a URL (history, logs, referrers).
+            print("Hydraweave portal access token (enter it on the sign-in screen): " + token, flush=True)
         if not no_browser:
-            webbrowser.open(login_url)
+            webbrowser.open(server.origin + "/")
         try:
             server.serve_forever(poll_interval=.2)
         except KeyboardInterrupt:
