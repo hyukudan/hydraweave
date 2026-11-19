@@ -263,6 +263,13 @@ La caché de disco incluye nanosegundos e inode, fusiona escritores bajo lock y 
 una medición conserva su fecha original. El modelo heterogéneo histórico permanece identificado como tal;
 las curvas se validan y sus extrapolaciones se marcan.
 
+La revisión de CI detectó además que la persistencia reintentaba el reemplazo de un archivo ante un bloqueo
+transitorio de Windows, pero no la lectura previa de sus permisos. Se sustituyó `exists` seguido de `stat` por
+un solo `stat` bajo el mismo reintento acotado. Una regresión observada en rojo y después corregida inyecta ese
+bloqueo, comprueba que se conservan los permisos y que un bloqueo persistente deja intacto el registro anterior.
+Esto cierra una omisión reproducible; el error concurrente observado en un log Windows cancelado no tenía
+traceback final, por lo que no se atribuye su causa exacta sin la comprobación nativa de la revisión posterior.
+
 El recibo valida vinculación y procedencia declarada; no firma al productor ni demuestra por sí solo que se
 ejecutó el benchmark. La aceptación nativa del solver necesita su core. No hay un `ts-recipe` compatible en
 este entorno: las pruebas ejercitan la frontera Python/CLI con runner de fixture, no el cálculo nativo real.
@@ -306,6 +313,12 @@ afectados, Assets HTTP/JS y coordinación de Library terminó con **106 passed y
 skips requieren el core externo. No quedó un fallo reproducido pendiente. El pase amplio anterior no se
 presenta retroactivamente como una ejecución íntegramente verde del árbol final.
 
+El seguimiento de CI añadió la corrección del reintento al leer permisos y el aislamiento de `SIGKILL` en un
+fixture que simula un helper Linux desde Windows. Persistencia, publicación concurrente de descriptores,
+configuración, deployment y calibración pasaron después con **82 passed**, en 2,03 s. El test de navegador de
+Library se acotó a la raíz obsoleta que pretendía verificar, conservando sus assertions; sus expresiones se
+comprobaron con el JS real y el documento HTTP de la fixture, y la selección sin navegador dio **10 passed**.
+
 Comando del pase amplio:
 
 ```sh
@@ -322,7 +335,7 @@ updates, admisión y UI; **60 passed** en workflows de modelos después de su re
 en deployment, carreras de capacidad, drain e inventario de API. Se han comprobado además los nuevos casos de
 registro concurrente en la selección final de 106. Estas selecciones se solapan con el pase amplio.
 
-Los **41 archivos Python de producción** cambiados en esta fase aceptan gramática de Python 3.10; la ejecución
+Los **42 archivos Python de producción** cambiados en esta fase aceptan gramática de Python 3.10; la ejecución
 local fue con Python 3.12. Pasan `node --check` de las cuatro páginas JS modificadas y `git diff --check`.
 `check_versions_lock.py` conserva el aviso preexistente de los dos pins de TensorMeld, destinados a usos
 distintos según la auditoría inicial; no se han alineado ni actualizado por conveniencia de las pruebas.

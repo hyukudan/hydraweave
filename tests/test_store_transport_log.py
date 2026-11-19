@@ -1,6 +1,7 @@
 """Atomic store writes, log setup and the transport factory (stdlib unittest, runs under both runners)."""
 import logging
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -38,6 +39,44 @@ class StoreTransportLogTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 store.write_json(target, {"new": True})
         self.assertEqual(store.read_json(target), {"old": True})
+
+    def test_atomic_write_retries_mode_read_and_keeps_existing_permissions(self):
+        target = self.tmp / "state.json"
+        target.write_text('{"old": true}\n', encoding="utf-8")
+        target.chmod(0o600)
+        expected_mode = stat.S_IMODE(target.stat().st_mode)
+        real_stat, calls = Path.stat, []
+
+        def locked_stat(path, *args, **kwargs):
+            if path == target:
+                calls.append(1)
+                if len(calls) == 1:
+                    raise PermissionError("sharing violation while another writer replaces the descriptor")
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "stat", locked_stat), mock.patch.object(store.time, "sleep"):
+            store.write_json(target, {"new": True})
+        self.assertEqual(store.read_json(target), {"new": True})
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), expected_mode)
+        self.assertEqual(len(calls), 2)
+
+    def test_atomic_write_mode_read_failure_is_bounded_and_retains_old_record(self):
+        target = self.tmp / "state.json"
+        target.write_text('{"old": true}\n', encoding="utf-8")
+        real_stat, calls = Path.stat, []
+
+        def locked_stat(path, *args, **kwargs):
+            if path == target:
+                calls.append(1)
+                raise PermissionError("mode is still unavailable")
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "stat", locked_stat), mock.patch.object(store.time, "sleep"), \
+                self.assertRaises(PermissionError):
+            store.write_json(target, {"new": True})
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(store.read_json(target), {"old": True})
+        self.assertEqual(list(self.tmp.iterdir()), [target])
 
     def test_log_setup_redacts_token_values_by_not_logging_them(self):
         path = self.tmp / "hydraweave.log"

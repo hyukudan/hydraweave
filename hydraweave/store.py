@@ -32,7 +32,17 @@ def atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    file_mode = mode if mode is not None else (stat.S_IMODE(path.stat().st_mode) if path.exists() else None)
+    file_mode = mode
+    if file_mode is None:
+        # Concurrent replacement can deny even a metadata read on Windows.
+        # Use one stat (no exists/stat race) and the same bounded sharing retry
+        # as publication, while preserving an existing destination's mode.
+        def current_mode():
+            try:
+                return stat.S_IMODE(path.stat().st_mode)
+            except FileNotFoundError:
+                return None
+        file_mode = retry_sharing(current_mode)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(temporary, flags, file_mode if file_mode is not None else 0o666)
     try:

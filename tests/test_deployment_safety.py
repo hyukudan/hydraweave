@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -24,7 +25,9 @@ class DrainCleanupTests(unittest.TestCase):
         for child in children:
             child.process.poll.return_value = 0
         children[0].drain.side_effect = RuntimeError("broken drain response")
-        with patch.object(lease, "pair_leader", return_value=False), patch.object(lease, "group_signal"), \
+        # This simulates a Linux node helper; Windows controllers lack SIGKILL.
+        with patch.object(lease, "signal", SimpleNamespace(SIGKILL=9)), \
+                patch.object(lease, "pair_leader", return_value=False), patch.object(lease, "group_signal"), \
                 self.assertRaisesRegex(RuntimeError, "after owned-process cleanup"):
             lease.stop_children(children)
         for child in children:
