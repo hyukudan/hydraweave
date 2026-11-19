@@ -224,12 +224,16 @@ class LibraryPageInBrowser(unittest.TestCase):
         failed, unresolved = by_name["ds-trellis-k5"], by_name["draft-small.gguf"]
         self.assertEqual(failed[2], "failed")                          # not the stale "paused" of its node record
         self.assertIn("paused for more than 10 minutes", failed[3])
+        # halo-1 still has /opt/models configured; halo-2's cached scan of it is stale.
         self.assertIn("configured", self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-copy\"]').title"))     # fixture scan is stale
+            "document.querySelector('[data-page-action=\"library-copy\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').title"))
         self.assertIn("configured", self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-verify\"]').title"))
+            "document.querySelector('[data-page-action=\"library-verify\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').title"))
         self.assertFalse(self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-verify\"]').disabled === false"))
+            "document.querySelector('[data-page-action=\"library-verify\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').disabled === false"))
         self.assertEqual(unresolved[2], "unresolved")
         self.assertIn("could not be read", unresolved[3])
         self.assertEqual(len(unresolved), 5)                          # history only: no cancel control
