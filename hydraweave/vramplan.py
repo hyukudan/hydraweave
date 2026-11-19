@@ -114,10 +114,22 @@ def margin_bytes(inputs):
     return int(max(inputs.margin_gib * GIB, inputs.margin_fraction * inputs.vram_cap_gib * GIB))
 
 
+def validate_inputs(inputs):
+    """Reject invalid budgets before NaN comparisons or negative reserves can bypass a limit."""
+    for name, value, positive in (("vram cap", inputs.vram_cap_gib, True),
+                                  ("margin GiB", inputs.margin_gib, False),
+                                  ("margin fraction", inputs.margin_fraction, False),
+                                  ("host GiB", inputs.host_gib, False)):
+        if name == "host GiB" and value is None:
+            continue
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                or value < 0 or (positive and value == 0)):
+            raise PlanError(f"{name} must be a finite {'positive' if positive else 'non-negative'} number")
+
+
 def plan(model, inputs):
     """Fill the device up to cap - margin with the model's units; the rest stays where each unit lives."""
-    if not math.isfinite(inputs.vram_cap_gib) or inputs.vram_cap_gib <= 0:
-        raise PlanError("vram cap must be a positive number of GiB")
+    validate_inputs(inputs)
     cap = int(inputs.vram_cap_gib * GIB)
     margin = margin_bytes(inputs)
     fixed = sum(b for _, b in model.fixed)

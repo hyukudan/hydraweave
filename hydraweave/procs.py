@@ -4,15 +4,137 @@ import ctypes
 import os
 from pathlib import Path
 import re
+import select
 import signal
 import socket
 import subprocess
 import threading
+import time
 from .winproc import has_console, no_window
 
 
 class ProcessError(RuntimeError):
     pass
+
+
+def _linux_process(pid):
+    if os.name == "nt" or type(pid) is not int or pid <= 0:
+        return None
+    try:
+        # comm can contain spaces and parentheses; fields following its last
+        # ')' begin at field 3. starttime is field 22, in kernel clock ticks.
+        fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+        return {"pid": pid, "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                "start_ticks": int(fields[19]), "pgid": int(fields[2]), "sid": int(fields[3]), "state": fields[0]}
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, IndexError) as exc:
+        raise ProcessError("cannot verify local process identity") from exc
+
+
+def process_identity(pid):
+    """Durable Linux identity; a bare PID cannot authorize recovery after a crash."""
+    record = _linux_process(pid)
+    return {key: value for key, value in record.items() if key != "state"} if record else None
+
+
+def _group_members(identity):
+    members = []
+    for path in Path("/proc").iterdir():
+        if not path.name.isdecimal():
+            continue
+        record = _linux_process(int(path.name))
+        if record and record["pgid"] == identity["pid"] and record["sid"] == identity["pid"] \
+                and record["state"] not in {"Z", "X"}:
+            members.append({key: value for key, value in record.items() if key != "state"})
+    return members
+
+
+def stop_owned_group(identity, *, argument, grace_s=5):
+    """Recover a Linux child after its controller died, without signalling reused PIDs.
+
+    Only the recorded session leader with matching boot/start time and exact
+    config argument authorizes recovery. pidfds pin each reviewed target for
+    signalling; missing identities or unsupported hosts fail closed.
+    """
+    if not isinstance(identity, dict) or type(identity.get("pid")) is not int or identity["pid"] <= 1 \
+            or identity.get("pgid") != identity["pid"] or identity.get("sid") != identity["pid"] \
+            or type(identity.get("start_ticks")) is not int or identity["start_ticks"] < 0 \
+            or not isinstance(identity.get("boot_id"), str) or not identity["boot_id"]:
+        raise ProcessError("local router process identity is incomplete")
+    if os.name == "nt" or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise ProcessError("safe local process recovery requires Linux pidfd support")
+    if grace_s < 0:
+        raise ValueError("grace period must not be negative")
+    current_boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    if identity.get("boot_id") != current_boot:
+        return  # No process from the recorded boot can still be running.
+    pid, handles = identity["pid"], {}
+
+    def open_reviewed(record):
+        descriptor = os.pidfd_open(record["pid"])
+        try:
+            if process_identity(record["pid"]) != record:
+                raise ProcessError("local router process identity changed; ownership retained")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        handles[record["pid"]] = descriptor
+
+    def wait_pending(pending, timeout):
+        poller = select.poll()
+        for descriptor in pending:
+            poller.register(descriptor, select.POLLIN)
+        end = time.monotonic() + timeout
+        while pending:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            for descriptor, _ in poller.poll(max(1, int(remaining * 1000))):
+                pending.discard(descriptor)
+                poller.unregister(descriptor)
+
+    try:
+        try:
+            open_reviewed(identity)
+        except ProcessLookupError:
+            if _group_members(identity):
+                raise ProcessError("local router leader is gone but descendants remain; ownership retained") from None
+            return
+        command = (Path("/proc") / str(pid) / "cmdline").read_bytes().split(b"\0")
+        if os.fsencode(argument) not in command:
+            raise ProcessError("local router command does not match its owned config; ownership retained")
+        for record in _group_members(identity):
+            if record["pid"] in handles:
+                continue
+            if record["boot_id"] != identity["boot_id"] or record["start_ticks"] < identity["start_ticks"]:
+                raise ProcessError("local router group identity changed; ownership retained")
+            try:
+                open_reviewed(record)
+            except ProcessLookupError:
+                pass  # It exited between the process snapshot and pidfd_open.
+        if process_identity(pid) != identity:
+            raise ProcessError("local router leader changed during recovery; ownership retained")
+        pending = set(handles.values())
+        for descriptor in pending:
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        wait_pending(pending, grace_s)
+        for descriptor in pending:
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        wait_pending(pending, 5)
+        if pending or _group_members(identity):
+            raise ProcessError("local router group did not confirm stop; ownership retained")
+    except OSError as exc:
+        raise ProcessError("could not safely stop local router; ownership retained") from exc
+    finally:
+        for descriptor in handles.values():
+            os.close(descriptor)
 
 
 def check_port(address, port):

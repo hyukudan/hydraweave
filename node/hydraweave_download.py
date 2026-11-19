@@ -40,6 +40,8 @@ VERBS = {"download-plan", "download", "download-cancel"}
 HOSTS = {"huggingface.co"}
 MAX_FILES = 64
 HEADROOM = 1 << 30
+STOP_GRACE_S = 3
+POLL_S = 2
 # The operator creates this file in a directory dedicated to hydraweave downloads. Lab model
 # directories never have it, so a manifest path inside one is refused rather than written into.
 ASSET_MARKER = ".hydraweave-assets"
@@ -129,7 +131,11 @@ def plan(payload, root):
         rows.append({"url": source_url(item), "destination": str(destination), "part": str(part),
                      "bytes": size, "sha256": digest,
                      "argv": [*prefix, curl, *CURL, str(part), source_url(item)]})
-        have = part.stat().st_size if part.exists() else 0
+        # A merge retry retains already verified inputs at their final part names.
+        # They still need integrity checks in the job, but occupy no *additional*
+        # download space. Reserve missing/resumable inputs plus the merge output.
+        have = (destination.stat().st_size if payload.get("merge") and destination.exists()
+                else part.stat().st_size if part.exists() else 0)
         need[destination.parent] = need.get(destination.parent, 0) + max(0, size - have)
     merge = payload.get("merge")
     if merge is not None:
@@ -176,9 +182,43 @@ def lock_part(part):
     return fd
 
 
+def _stop_download(process):
+    """Retire the curl process group without an unbounded cancellation wait."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=STOP_GRACE_S)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=STOP_GRACE_S)
+
+
+def _hash_check(stop, turn_check):
+    """Keep cancellation and GPU ownership live while a model-sized hash runs."""
+    last = [None]
+
+    def check():
+        now = time.monotonic()
+        if last[0] is None or now - last[0] >= 1:
+            last[0] = now
+            reason = stop() or turn_check()
+            if reason:
+                raise ValueError(reason)
+
+    return check
+
+
 def fetch(row, stop, turn_check, progress=lambda have, total: None):
     """Run the planned command for one file and verify it; returns a failure reason or None."""
     part, destination = Path(row["part"]), Path(row["destination"])
+    reason = stop() or turn_check()
+    if reason:
+        return reason
     if os.path.lexists(destination):
         return "destination appeared during the job: " + row["destination"]
     try:
@@ -192,10 +232,8 @@ def fetch(row, stop, turn_check, progress=lambda have, total: None):
             progress(part.stat().st_size if part.exists() else 0, row["bytes"])
             reason = stop() or turn_check()
             if reason:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait()
                 return reason
-            time.sleep(2)
+            time.sleep(POLL_S)
         if process.returncode:
             return f"download command exited {process.returncode}; rerun to resume"
         size = part.stat().st_size
@@ -203,26 +241,18 @@ def fetch(row, stop, turn_check, progress=lambda have, total: None):
         if size != row["bytes"]:
             part.unlink(missing_ok=True)
             return "verification failed (size); partial file removed"
-        last = [0.0]
-
-        def check():
-            # The GPU-turn and lease rules hold while hashing too (once a second is enough).
-            now = time.monotonic()
-            if now - last[0] >= 1:
-                last[0] = now
-                reason = stop() or turn_check()
-                if reason:
-                    raise ValueError(reason)
-
         try:
             # main's hasher: O_DIRECT where the filesystem supports it, so the model is not
             # pulled through the page cache a second time.
-            digest = install.hash_file(part, check=check)
+            digest = install.hash_file(part, check=_hash_check(stop, turn_check))
         except ValueError as exc:
             return str(exc)
         if digest != row["sha256"]:
             part.unlink(missing_ok=True)
             return "verification failed (sha256); partial file removed"
+        reason = stop() or turn_check()
+        if reason:
+            return reason
         try:
             # link() fails when the destination exists: never overwrite, even in a race.
             os.link(part, destination)
@@ -230,14 +260,12 @@ def fetch(row, stop, turn_check, progress=lambda have, total: None):
             part.unlink(missing_ok=True)
         return None
     finally:
-        if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        if lock is not None:
-            os.close(lock)
+        try:
+            if process is not None and process.poll() is None:
+                _stop_download(process)
+        finally:
+            if lock is not None:
+                os.close(lock)
 
 
 def job_main(spec_path):
@@ -251,6 +279,9 @@ def job_main(spec_path):
     install.atomic_json(path, state)
     stop_file = install.inside(root, "run", "job-" + job + ".stop")
 
+    def stopped():
+        return "cancelled" if stop_file.exists() else None
+
     def turn():
         try:
             lab_quiet(spec.get("lab_dir"))
@@ -261,6 +292,9 @@ def job_main(spec_path):
 
     try:
         for row in spec["files"]:
+            reason = stopped() or turn()
+            if reason:
+                raise ValueError(reason)
             def progress(have, total):
                 state["progress"] = {"file": row["destination"], "bytes": have, "total_bytes": total}
                 install.atomic_json(path, state)
@@ -268,10 +302,11 @@ def job_main(spec_path):
                 retained = Path(row["destination"])
                 reason = "retained split part failed verification"
                 if not retained.is_symlink() and retained.stat().st_size == row["bytes"]:
-                    if install.hash_file(retained) == row["sha256"]:
+                    if install.hash_file(retained, check=_hash_check(stopped, turn)) == row["sha256"]:
                         reason = None
             else:
-                reason = fetch(row, lambda: "cancelled" if stop_file.exists() else None, turn, progress)
+                reason = fetch(row, stopped, turn, progress)
+            reason = reason or stopped() or turn()
             if reason:
                 raise ValueError(reason)
             state["done"].append(row["destination"])

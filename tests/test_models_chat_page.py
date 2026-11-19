@@ -36,15 +36,17 @@ let html = page.render();
 assert(html.includes('No model is running'));
 assert(html.includes('#/models'));
 list = [{id:'stopped', state:'stopped'},
- {id:'m1', label:'<b>One</b>', state:'running', processes:[{endpoint:'http://127.0.0.1:9000/'}]},
- {id:'m2', label:'Two', state:'running', processes:[{endpoint:'http://127.0.0.1:9001'}]}];
+ {id:'m1', label:'<b>One</b>', state:'running', processes:[{name:'engine',endpoint:'http://127.0.0.1:8000/'},{name:'router',endpoint:'http://127.0.0.1:9000/'}]},
+ {id:'m2', label:'Two', state:'running', processes:[{name:'router',endpoint:'http://127.0.0.1:9001'}]}];
 html = page.render();
 assert(!html.includes('value="stopped"'));
 assert(html.includes('&lt;b&gt;One&lt;/b&gt;') && !html.includes('<b>One</b>'));
 assert(html.includes('<option value="m1" selected>'));
 assert(html.includes('http://127.0.0.1:9000/v1/chat/completions'));
 assert(html.includes('base_url=&quot;http://127.0.0.1:9000/v1&quot;'));
-assert(html.includes('&quot;model&quot;:&quot;m1&quot;'));
+assert(!html.includes('http://127.0.0.1:8000'));
+assert(html.includes('Authorization: Bearer $HYDRAWEAVE_API_KEY'));
+assert(html.includes('client.models.list().data[0].id'));
 assert(html.includes('id="chat-stop" disabled'));
 context.location.hash = '#/chat?model=m2';
 html = page.render();

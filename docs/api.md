@@ -1,7 +1,8 @@
 # Hydraweave portal API
 
-The portal (`hydraweave ui`) serves the web UI and a JSON API on `http://127.0.0.1:18700/hydraweave/api/`. It only
-listens on loopback. This page documents the API, with the command line that does the same thing next to each call.
+The portal (`hydraweave ui`) serves the web UI and a JSON API on `http://127.0.0.1:18700/hydraweave/api/` by default.
+Explicit network binds require the access token for protected reads and actions unless `--no-auth` is selected.
+This page documents the API, with the equivalent command line where one exists.
 The shapes of the examples are exact; their values are illustrative (a test fixture), and long fields are trimmed.
 
 - [Access and authentication](#access-and-authentication)
@@ -9,7 +10,7 @@ The shapes of the examples are exact; their values are illustrative (a test fixt
   delete, layers, receipts, probe, deploy, `up` with a recipe, the running deployment and its route statistics
 - [Other endpoints](#other-endpoints): the screen documents, `up`/`down`/`install`/`doctor`/`hosts/pin`/
   `keys/rotate`/`cancel`, jobs
-- [Feature routes](#feature-routes): all 22 feature modules, arguments, execution, audit and refusal rules
+- [Feature routes](#feature-routes): registered feature modules, arguments, execution, audit and refusal rules
 - [Route documentation convention](#route-documentation-convention): keeping this inventory complete
 
 ## Legacy-visible changes
@@ -1037,3 +1038,22 @@ MQTT passwords require a username; omitting password leaves it unchanged, `clear
 | `GET prefs` | Effective/default preferences, saved flags, zones and related settings | None | Sync; no audit | 400 query |
 | `GET prefs/timezones` | Accepted IANA zone names, or null if database absent | None | Sync; no audit | 400 query |
 | `POST prefs/save` | Merge/save preferences (default values remove stored overrides) | Nonempty subset: `refresh_s` int 1/2/5/10/30; `temperature_unit` C/F; `timezone` local/UTC/accepted IANA string ≤64; `language` en/es; `theme` system/light/dark/black; `density` comfortable/compact; `hidden_panels` ≤64 ids `[a-z][a-z0-9-]{0,40}` | Sync; audited | 400 fields/choice/unknown zone; settings cannot be hidden; without zone DB only local/UTC |
+
+### chat
+
+[Source](../hydraweave/web/features/chat.py). Requests stay on the portal's origin. The caller selects an existing
+running profile; the server resolves its saved router address, credential and occupied resources. Arbitrary
+URLs, API keys, system commands and ad-hoc benchmark targets are not accepted.
+
+| API | Returns / does | Arguments | Execution / audit | Notable refusals |
+|---|---|---|---|---|
+| `GET chat` | Active profile router endpoints, authentication requirement, limits and delivery mode; never credentials | None | Sync; no generation | 400 unknown query; unresolved routers have a reason |
+| `POST chat/send` | Generate one reply through the profile's authenticated router | `profile`; `messages` (1..32 role/content objects); optional integer `max_tokens` 1..2048, default 512 | Audited job; shared resource admission; frozen target identity; 600 s deadline; cancellation and browser ownership | 400 malformed/oversized messages, unknown fields or limits; 409 stopped/changed target or occupied resources |
+
+Messages contain text only, at most 32,768 characters each and 48 KiB for the serialized conversation. Roles are
+`user`, `assistant` and an optional first `system`; the final message must be a nonempty user message. The job
+probes the router's model catalog, generates with streaming internally and exposes a completed response (up to
+128 Ki characters), usage and finish reason through `GET jobs/<id>`. Use the standard job renewal and cancel
+routes while the page owns the request. Stopping an overlapping profile cancels its chat job. Router credentials
+stay in the server and are removed even if an upstream echoes one in text. Client API snippets still require
+the operator to supply their own router key.

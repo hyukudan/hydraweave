@@ -17,7 +17,7 @@
   const link = (label, href, primary = false) => `<a class="btn${primary ? " pri" : ""}" href="${esc(href)}">${esc(label)}</a>`;
   const mark = kind => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${({engine:"M7 7h10v10H7z M4 9h3m-3 6h3m10-6h3m-3 6h3M9 4v3m6-3v3M9 17v3m6-3v3",turns:"m3 8 9-5 9 5-9 5z M3 12l9 5 9-5M3 16l9 5 9-5",node:"M4 4h16v6H4z M4 14h16v6H4z M7 7h1m3 0h6M7 17h1m3 0h6",pc:"M3 4h18v13H3z M9 21h6m-3-4v4"})[kind]}"></path></svg>`;
 
-  // Presentation of existing read documents only. No launch or queue mutation lives on Home.
+  // Home guides users into the profile and launch flows; selecting a preset is not a saved profile.
   const fresh = name => H().state.fresh && !H().state.errors[name] && H().state.fetched[name]
     && Date.now() - H().state.fetched[name] <= Math.max(10000, H().prefs().refresh_s * 3000);
   const presets = () => Array.isArray(H().state.docs["engine-settings"]?.presets) ? H().state.docs["engine-settings"].presets : [];
@@ -50,7 +50,7 @@
 
   function controller() {
     const d = doc(), c = d.controller || {}, router = d.router || {};
-    return `<div class="cc-roles"><div><span class="cc-eyebrow">Control plane</span><strong>${esc(c.hostname || "This computer")}</strong><span>${esc(c.os || "")} · local panel</span></div><div><span class="cc-eyebrow">Request router</span><strong>${esc(router.machine === "local" ? "This computer" : router.machine || "Not configured")}</strong><span>Configured placement · ${esc(router.listen || "endpoint not configured")}</span></div><div><span class="cc-eyebrow">Compute nodes</span><strong>${(d.nodes || []).filter(n => n.access !== "local").length} linked</strong><span>Workers are controlled over SSH</span></div></div>`;
+    return `<div class="cc-roles"><div><span class="cc-eyebrow">Control plane</span><strong>${esc(c.hostname || "This computer")}</strong><span>${esc(c.os || "")} · local panel</span></div><div><span class="cc-eyebrow">Request router</span><strong>${esc(router.machine === "local" ? "This computer" : router.machine || "Not configured")}</strong><span>Configured placement · ${esc(router.listen || "endpoint not configured")}</span></div><div><span class="cc-eyebrow">Compute nodes</span><strong>${(d.nodes || []).filter(n => n.access !== "local").length} linked</strong><span>Workers use SSH or paired node agents</span></div></div>`;
   }
   function steps() {
     const rows = doc().checklist || [];
@@ -78,15 +78,16 @@
   function render() {
     const d = doc(), cfg = d.configuration || {}, ready = d.configured === true || cfg.state === "valid";
     const checklist = d.checklist || [], completed = checklist.filter(s => s.state === "done").length;
-    const setupDone = [cfg.state === "valid", (d.nodes || []).some(n => n.access !== "local"), (() => { try { return !!localStorage.getItem("hydraweave-setup-model"); } catch (_) { return false; } })() || (d.profiles || []).some(p => p.state === "running"),
-      (d.profiles || []).some(p => p.state === "running")].filter(Boolean).length;
+    const running = H().profiles().some(p => p.state === "running");
+    const setupDone = [cfg.state === "valid", (d.nodes || []).some(n => ["ssh","agent"].includes(n.access) && n.os === "linux"),
+      (d.profiles || []).length > 0, running].filter(Boolean).length;
     if ((cfg.state === "missing" || (checklist.length > 0 && completed < checklist.length)) && !wizardLeft) {
       const names = ["This computer", "Nodes", "Model", "Start"];
       const discovery = H().state.docs.discovery || {};
       let content = wizardStep === 0 ? (cfg.state === "missing" ? `<p>Create the workspace on this computer to continue.</p>${action("Create workspace", "initialize", {}, "", true)}` : `<p>Workspace created. Run the local check, then continue.</p>${steps()}${action("Check again", "wizard-check")}${action("Continue", "wizard-next", {}, "", true)}`) : "";
-      if (wizardStep === 1) { const found = (discovery.nodes || []).filter(n => n.state !== "adopted"); content = (found.length ? `<p>Found on your network: ${found.map(n => `${esc(n.hostname || n.id)} ${action("Add", "adopt", {id:n.id})}`).join(" · ")}</p>` : `<p>No additional machines found.</p>`) + action("Add a machine", "add-node") + action("I only have this computer", "wizard-next", {}, "", true); }
-      if (wizardStep === 2) { const rows = presets(); content = rows.length ? `<ul class="cc-engine-list">${rows.map(p => { const unavailable = p.qualified === false; return `<li><button type="button" class="${unavailable ? "cc-model-unavailable" : ""}" ${unavailable ? "disabled" : `data-page-action="cc-wizard-model" data-model="${esc(p.id)}"`}><strong>${esc(p.label || p.id)}</strong><span>${esc(unavailable ? (p.notes || "Not qualified for this setup") : "Available preset")}</span></button></li>`; }).join("")}</ul>` : `<p>No model presets are available.</p>${link("Open engine settings", "#/engine-settings", true)}`; content += action("Continue", "wizard-next", {}, "", true); }
-      if (wizardStep === 3) content = `<ol>${(d.start_status?.steps || checklist).map(s => `<li>${esc(s.title || s.name || s.id)} · ${esc(s.state || "Pending")}</li>`).join("")}</ol>${link("Open Chat", "#/chat", true)} <button type="button" data-page-action="cc-copy-api">Copy API address</button>`;
+      if (wizardStep === 1) { const found = (discovery.nodes || []).filter(n => n.state !== "adopted"); content = (found.length ? `<p>Found on your network: ${found.map(n => `${esc(n.hostname || n.id)} ${action("Add", "adopt", {id:n.id})}`).join(" · ")}</p>` : `<p>No additional machines found.</p>`) + `<p class="hint">Inference needs a Linux worker connected over SSH or a paired node agent. This computer can also be added as a worker.</p>` + action("Add a machine", "add-node") + action("Continue", "wizard-next", {}, "", true); }
+      if (wizardStep === 2) { const rows = presets(); content = rows.length ? `<p>Choose a preset to create a profile and assign its workers in Engine settings.</p><ul class="cc-engine-list">${rows.map(p => `<li><button type="button" data-page-action="cc-wizard-model" data-model="${esc(p.id)}"><strong>${esc(p.label || p.id)}</strong><span>${esc(p.notes || "Available preset")}</span></button></li>`).join("")}</ul>` : `<p>No model presets are available.</p>${link("Open engine settings", "#/engine-settings", true)}`; content += action("Continue", "wizard-next", {}, "", true); }
+      if (wizardStep === 3) content = `<p>Complete the remaining setup steps, then start your profile from Engines.</p>${steps()}${link("Launch & status", "#/engines", true)}${running ? " " + link("Open Chat", "#/chat") : ""}`;
       return `<section class="cc-welcome"><div><span class="cc-eyebrow">Setup · Step ${wizardStep + 1} of 4</span><h2>Welcome. Let’s get a model running.</h2></div></section><section class="card cc-wizard"><nav aria-label="Setup steps">${names.map((n,i)=>`<span${i===wizardStep?' aria-current="step"':''}>${i+1}. ${n}</span>`).join(" · ")}</nav><h2>${names[wizardStep]}</h2>${content}${wizardStep ? action("Back", "wizard-back") : ""}${action("Leave setup", "wizard-leave")}</section>`;
     }
     const header = `<section class="cc-welcome"><div><span class="cc-eyebrow">Home / Control center</span><h2>Your machines and models.</h2><p>Machines and connections reported by this workspace.</p></div>${link("Open engines", "#/engines", true)}</section>`;
@@ -209,10 +210,9 @@
       else if (a === "cc-wizard-next") { setWizardStep(wizardStep + 1); H().render(); }
       else if (a === "cc-wizard-back") { setWizardStep(wizardStep - 1); H().render(); }
       else if (a === "cc-wizard-check") { await H().refresh(); }
-      else if (a === "cc-wizard-model") { try { localStorage.setItem("hydraweave-setup-model", button.dataset.model || ""); } catch (_) {} setWizardStep(3); H().render(); }
+      else if (a === "cc-wizard-model") { setWizardStep(3); location.hash=`#/engine-settings?preset=${encodeURIComponent(button.dataset.model || "")}`; }
       else if (a === "cc-wizard-leave") { wizardLeft = true; try { localStorage.setItem("hydraweave-setup-left", "true"); } catch (_) {} H().render(); }
       else if (a === "cc-wizard-resume") { wizardLeft = false; try { localStorage.setItem("hydraweave-setup-left", "false"); } catch (_) {} H().render(); }
-      else if (a === "cc-copy-api") { const address = `${location.origin}/v1`; if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(address); }
       else if (a === "cc-add-node") openAddNode();
       else if (a === "cc-add-manual") await openMachine();
       else if (a === "cc-adopt") openAddNode(button.dataset.id);

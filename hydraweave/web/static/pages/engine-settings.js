@@ -95,10 +95,13 @@
   }
   async function create() {
     const fresh=await H().request("engine-settings");
-    const machines=(fresh.machines || []).filter(m=>m.selectable !== false && m.os==="linux" && m.access==="ssh");
-    if(!machines.length)throw new Error("Add a Linux SSH worker from Home before creating an inference profile.");
-    creation={version:fresh.version,presets:fresh.presets || [],machines,preset:fresh.presets?.[0]?.id,nodes:[machines[0].id]};
-    UI().open({title:"Create inference profile",confirm:"Create profile",body:`<label class="field" for="es-new-id">Profile name<input class="inp" id="es-new-id" placeholder="my-qwen" spellcheck="false" autocomplete="off"></label><label class="field" for="es-new-preset">Model preset<select class="inp" id="es-new-preset">${creation.presets.map(p=>`<option value="${esc(p.id)}">${esc(p.label || p.id)}</option>`).join("")}</select></label><div id="es-new-nodes">${nodeFields()}</div>`,submit:async()=>{
+    const machines=(fresh.machines || []).filter(m=>m.selectable !== false && m.os==="linux" && ["ssh","agent"].includes(m.access));
+    if(!machines.length)throw new Error("Add a Linux SSH worker or pair a discovered node from Home before creating an inference profile.");
+    const presets=fresh.presets || [], requested=new URLSearchParams(location.hash.split("?").slice(1).join("?")).get("preset");
+    if(!presets.length)throw new Error("No supported model presets are available.");
+    if(requested && !presets.some(p=>p.id===requested))throw new Error("That model preset is no longer available. Choose another preset from Home.");
+    creation={version:fresh.version,presets,machines,preset:requested || presets[0].id,nodes:[machines[0].id]};
+    UI().open({title:"Create inference profile",confirm:"Create profile",body:`<label class="field" for="es-new-id">Profile name<input class="inp" id="es-new-id" placeholder="my-qwen" spellcheck="false" autocomplete="off"></label><label class="field" for="es-new-preset">Model preset<select class="inp" id="es-new-preset">${creation.presets.map(p=>`<option value="${esc(p.id)}"${p.id===creation.preset?" selected":""}>${esc(p.label || p.id)}</option>`).join("")}</select></label><div id="es-new-nodes">${nodeFields()}</div>`,submit:async()=>{
       const id=document.getElementById("es-new-id").value.trim(), preset=creation.presets.find(p=>p.id===creation.preset);
       const args={version:creation.version,id,preset:creation.preset};
       if(!id)throw new Error("Give this profile a name.");

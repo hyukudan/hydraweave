@@ -467,6 +467,7 @@ class API:
         self._hold_resources = {}       # job id -> the resources of its hold (a stop without admission uses them)
         self._heartbeat = None
         self._heartbeat_lock = threading.Lock()     # a hold is published only once the renewal thread runs
+        self._heartbeat_wake = threading.Event()
         self.recipes = recipe_web.Runner()
 
     def _recipe_loader(self, path):
@@ -1428,10 +1429,17 @@ class API:
         own cleanup (cancelled or abandoned jobs included: their resources stay owned while they clean up).
         Abandonment is detected by the job context, separately; it cancels the job, it never drops the hold."""
         while True:
-            time.sleep(HOLD_RENEW_S)
-            with self._job_lock:
-                holds = dict(self._holds)
-                contexts = dict(self._features_running)
+            self._heartbeat_wake.wait(HOLD_RENEW_S)
+            self._heartbeat_wake.clear()
+            # Serialize retirement with publication of a new hold. Otherwise a new job could observe a
+            # still-alive thread that had already decided to exit, and never get its lease renewed.
+            with self._heartbeat_lock:
+                with self._job_lock:
+                    holds = dict(self._holds)
+                    contexts = dict(self._features_running)
+                if not holds:
+                    self._heartbeat = None
+                    return
             for jid, hold in holds.items():
                 try:
                     context = contexts.get(jid)
@@ -1476,6 +1484,7 @@ class API:
                 self._admission().release(hold)
             except Exception:
                 pass
+        self._heartbeat_wake.set()      # retire promptly when the last job has completed cleanup
 
     def renew_jobs(self, arguments):
         """POST jobs/renew {jobs: [id, ...]}: the portal page that started these jobs is still open."""

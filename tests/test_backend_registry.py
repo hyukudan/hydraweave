@@ -1,5 +1,11 @@
 import json
 import tempfile
+import unittest
+
+try:
+    import pytest
+except ImportError:
+    raise unittest.SkipTest("backend fixtures require the test extra") from None
 
 from hydraweave import config, engines
 from hydraweave.backends import get, model_registry, registry
@@ -39,3 +45,21 @@ def test_llamacpp_process_arguments():
                               "host": "127.0.0.1", "port": 8090, "extra_args": ["--jinja"]}, ["node1"])
     assert rows[0]["argv"] == ["llama-server", "-m", "model.gguf", "--host", "127.0.0.1", "--port", "8090",
                                "-c", "8192", "-ngl", "42", "--jinja"]
+
+
+@pytest.mark.parametrize("change", [
+    {"extra_args": "--jinja"}, {"extra_args": [None]}, {"extra_args": ["bad\x00arg"]},
+    {"context": 0}, {"context": True}, {"context": 4.5},
+    {"n_gpu_layers": -2}, {"port": 0}, {"port": 65536}, {"port": False},
+    {"binary": None}, {"host": None}, {"model_path": "bad\x00model"},
+])
+def test_llamacpp_rejects_malformed_launch_arguments(change):
+    with pytest.raises(ValueError):
+        get("llamacpp").processes({"model_path": "model.gguf", **change}, ["node1"])
+
+
+def test_llamacpp_all_gpu_layers_and_independent_member_arguments():
+    rows = get("llamacpp").processes({"model_path": "model.gguf", "n_gpu_layers": -1}, ["a", "b"])
+    assert rows[0]["argv"][-1] == "-1"
+    rows[0]["argv"].append("--jinja")
+    assert "--jinja" not in rows[1]["argv"]

@@ -11,7 +11,7 @@ import tempfile as _tempfile
 from urllib.parse import unquote as _unquote, urlsplit as _urlsplit
 
 # Scope: the audit hook below is defence in depth for writes made by this Python process. Native writers (git, a
-# shell, cmd) and fresh child interpreters do not run the hook; they are kept away from the real configuration only
+# shell, cmd) and fresh child interpreters do not run the hook; they are kept away from real config/state/data only
 # by the redirected environment that they inherit.
 _GUARD_ROOTS = "HYDRAWEAVE_TEST_REAL_CONFIG_DIRS"        # exported once, so nested test runs guard the originals
 _ORIGINAL_LOCALAPPDATA = "HYDRAWEAVE_TEST_ORIGINAL_LOCALAPPDATA"   # per-user browser installs (tests/ui/smoke.py)
@@ -79,9 +79,14 @@ def _original_roots():
     else:
         roots = {_Path(_os.environ.get("APPDATA", _Path.home() / "AppData" / "Roaming")) / "hydraweave",
                  _Path(_os.environ.get("LOCALAPPDATA", _Path.home() / "AppData" / "Local")) / "hydraweave",
-                 _Path.home() / ".config" / "hydraweave"}
-        if _os.environ.get("XDG_CONFIG_HOME"):
-            roots.add(_Path(_os.environ["XDG_CONFIG_HOME"]) / "hydraweave")
+                 _Path.home() / ".config" / "hydraweave", _Path.home() / ".local/state" / "hydraweave",
+                 _Path.home() / ".local/share" / "hydraweave"}
+        for variable in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME"):
+            value = _os.environ.get(variable)
+            if value and _Path(value).is_absolute():
+                roots.add(_Path(value) / "hydraweave")
+        if _os.environ.get("HYDRAWEAVE_HOME"):
+            roots.add(_Path(_os.environ["HYDRAWEAVE_HOME"]).expanduser())
     if _os.name == "nt":
         roots.update(_Path(folder) / "hydraweave" for folder in map(_known_folder, (_ROAMING_APP_DATA, _LOCAL_APP_DATA))
                      if folder)
@@ -91,7 +96,8 @@ def _original_roots():
             roots.update(_Path(profile) / "AppData" / name / "hydraweave" for name in ("Roaming", "Local"))
     else:
         import pwd
-        roots.add(_Path(pwd.getpwuid(_os.getuid()).pw_dir) / ".config" / "hydraweave")
+        profile = _Path(pwd.getpwuid(_os.getuid()).pw_dir)
+        roots.update(profile / relative / "hydraweave" for relative in (".config", ".local/state", ".local/share"))
     return tuple(sorted({form for root in roots for form in _spellings(root)}))
 
 
@@ -126,16 +132,19 @@ if _ORIGINAL_CHROME not in _os.environ:
 _outer_admission_db = _os.environ.get("HYDRAWEAVE_ADMISSION_DB")
 _temporary = _tempfile.TemporaryDirectory(prefix="hl-tests-", ignore_cleanup_errors=True)
 _test_root = _Path(_temporary.name)
-# Hydraweave's config/secrets/runtime roots: APPDATA and LOCALAPPDATA on Windows, HOME (~/.config) and
-# XDG_CONFIG_HOME elsewhere. USERPROFILE retains the Windows identity required by Chrome's debugging checks, and
+# Hydraweave's config/secrets/runtime/data roots: APPDATA and LOCALAPPDATA on Windows, HOME and the XDG roots
+# elsewhere. USERPROFILE retains the Windows identity required by Chrome's debugging checks, and
 # HOME stays on Windows (Python ignores it there; Git for Windows reads its global config from it).
 for _name, _relative in (("APPDATA", "appdata"), ("LOCALAPPDATA", "local"), ("HOME", "home"),
-                         ("XDG_CONFIG_HOME", "home/.config")):
+                         ("XDG_CONFIG_HOME", "home/.config"), ("XDG_STATE_HOME", "home/.local/state"),
+                         ("XDG_DATA_HOME", "home/.local/share")):
     if _name == "HOME" and _os.name == "nt":
         continue
     _directory = _test_root / _relative
     _directory.mkdir(parents=True, exist_ok=True)
     _os.environ[_name] = str(_directory)
+# A product-root override takes precedence over every platform directory above, including in CLI children.
+_os.environ["HYDRAWEAVE_HOME"] = ""
 # An outer value is kept (a deliberate file database), unless it points into a real configuration directory.
 if _outer_admission_db not in (None, "", ":memory:") and _inside_real_config(
         _uri_path(_outer_admission_db) if _outer_admission_db.startswith("file:") else _outer_admission_db):

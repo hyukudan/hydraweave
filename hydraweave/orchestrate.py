@@ -1,6 +1,7 @@
 """Control-machine builds, bounded engine leases, and router lifecycle."""
 
 from .compat import schema as compat_schema
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
@@ -1137,15 +1138,28 @@ def _start_local_router(profile, rendered, keys, *, ownership=None, route_state=
 
 
 def poll_nodes_once(route_state, polled):
-    """Free RAM of every node over ssh (the node tool's read-only `gpu` verb) into ``polled``. Any failure or bad
-    answer leaves that node's last reading, which ages out (fail closed); it never raises."""
+    """Read independent node RAM facts concurrently, publishing each as it arrives.
+
+    Failed/bad answers retain that node's old reading, which ages out fail
+    closed. A slow node cannot delay fresh routing facts from another node.
+    """
     from .recipes import launch as recipe_launch
-    for mid, machine in route_state["machines"].items():
-        try:
-            result = _call(_client(SimpleNamespace(**machine), route_state["known_hosts"]), "gpu", {}, timeout=5)
-            polled[mid] = {"free_ram_gib": recipe_launch.node_ram(result), "at": time.time()}
-        except Exception:  # noqa: BLE001
-            pass
+    machines = [(mid, dict(machine)) for mid, machine in route_state["machines"].items()]
+    if not machines:
+        return
+    known_hosts = route_state["known_hosts"]
+
+    def read(machine):
+        result = _call(_client(SimpleNamespace(**machine), known_hosts), "gpu", {}, timeout=5)
+        return {"free_ram_gib": recipe_launch.node_ram(result), "at": time.time()}
+
+    with ThreadPoolExecutor(max_workers=min(8, len(machines)), thread_name_prefix="hydraweave-router-node") as pool:
+        pending = {pool.submit(read, machine): mid for mid, machine in machines}
+        for result in as_completed(pending):
+            try:
+                polled[pending[result]] = result.result()
+            except Exception:  # noqa: BLE001 - one failed node must not discard other nodes' facts
+                pass
 
 
 def local_router_run(spec_path):
@@ -1187,6 +1201,13 @@ def local_router_run(spec_path):
     poller = threading.Thread(target=poll_nodes, daemon=True) if route_state else None
     try:
         child.start()
+        started = {"state": "starting", "pid": child.process.pid}
+        identity = procs.process_identity(child.process.pid)
+        if identity is not None:
+            started["process"] = identity
+        # Persist before readiness: a helper can die while the router is still
+        # binding/loading. Linux children outlive a hard-killed controller.
+        _write(directory / "state.json", started)
         if poller is not None:
             poller.start()
         end = time.monotonic() + 15
@@ -1214,7 +1235,7 @@ def local_router_run(spec_path):
                     status = _http_json(rendered["listen"])
                     if compat_schema(status.get("schema")) != "tensormeld/replica-router-status-v1":
                         raise ValueError("unexpected router status schema")
-                    _write(directory / "state.json", {"state": "ready", "pid": child.process.pid})
+                    _write(directory / "state.json", dict(started, state="ready"))
                     ready = True
                 except (OSError, ValueError):
                     if time.monotonic() >= end:
@@ -1226,14 +1247,14 @@ def local_router_run(spec_path):
             pass
     finally:
         halt.set()
-        try:
-            child.stop(5)
-        finally:
-            for key in spec["keys"]:
-                Path(key).unlink(missing_ok=True)
-            config.unlink(missing_ok=True)
-            path.unlink(missing_ok=True)
-            _write(directory / "state.json", {"state": "stopped"})
+        child.stop(5)
+        # A failed stop must retain the config, keys and ownership evidence so
+        # a later down can retry; never publish a false stopped state.
+        for key in spec["keys"]:
+            Path(key).unlink(missing_ok=True)
+        config.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        _write(directory / "state.json", {"state": "stopped"})
 
 
 def _replicas_stopped(state):
@@ -1260,7 +1281,8 @@ def _stop_local_router(router):
     end = time.monotonic() + 15
     while time.monotonic() < end:
         path = directory / "state.json"
-        if path.exists() and _read(path).get("state") == "stopped":
+        state = _read(path) if path.exists() else {}
+        if state.get("state") == "stopped":
             for helper in _controllers[:]:
                 if helper.poll() is not None:
                     _controllers.remove(helper)
@@ -1271,14 +1293,27 @@ def _stop_local_router(router):
         except procs.ProcessError:
             pass
         else:
-            # A crashed controller's Job Object has already killed its router.
             try:
                 spec = directory / "spec.json"
+                config = directory / "router.json"
+                if os.name != "nt" and (spec.exists() or config.exists()):
+                    # Windows Job Objects kill children when their helper dies;
+                    # Linux sessions do not. Recover only a verified receipt.
+                    try:
+                        procs.stop_owned_group(state.get("process"), argument=str(config))
+                    except procs.ProcessError as exc:
+                        raise OrchestrationError(str(exc)) from exc
+                endpoint = router.get("endpoint")
+                if endpoint:
+                    try:
+                        procs.check_port(endpoint["address"], endpoint["port"])
+                    except procs.ProcessError as exc:
+                        raise OrchestrationError("local router port is still occupied; ownership retained") from exc
                 if spec.exists():
                     for key in _read(spec).get("keys", []):
                         Path(key).unlink(missing_ok=True)
                     spec.unlink()
-                (directory / "router.json").unlink(missing_ok=True)
+                config.unlink(missing_ok=True)
                 _write(directory / "state.json", {"state": "stopped"})
                 return
             finally:

@@ -501,6 +501,34 @@ class LeaseLive(RuntimeError):
     pass
 
 
+def _service_executable(command):
+    """Preserve venv entry points, following ``current`` for managed releases.
+
+    Resolving a venv's Python symlink selects the base interpreter and loses
+    the installed packages. A service also must not pin a release directory
+    that a later successful update can prune.
+    """
+    executable = Path(sys.executable).absolute()
+    candidate = executable if command == "python" else executable.with_name(
+        command + (".exe" if os.name == "nt" else ""))
+    environment = Path(sys.prefix).absolute()
+    root = None
+    if environment.name == "current" and environment.parent.name == "hydraweave":
+        root = environment.parent
+    elif environment.parent.name == "venvs" and environment.parent.parent.name == "hydraweave":
+        root = environment.parent.parent
+    if root is not None and root.parent.name == "share":
+        from .releases import ReleaseManager
+        manager = ReleaseManager(root.parent.parent)
+        if manager.current:
+            current = root / "current" / candidate.parent.name / candidate.name
+            if current.is_file():
+                return current
+    if command != "python" and not candidate.is_file():
+        candidate = Path(shutil.which(command) or candidate)
+    return candidate
+
+
 def install_service(root, lab_dir=None, *, no_announce=False, force=False, run=None):
     """Write and enable the agent unit; restart a running agent so it loads the new code.
 
@@ -515,17 +543,16 @@ def install_service(root, lab_dir=None, *, no_announce=False, force=False, run=N
     if leases and not force:
         raise LeaseLive("a lease is live (" + ", ".join(leases) + "); stop it or rerun install-service with --force")
     lab_dir = lab_dir or default_lab_dir()
-    candidate = Path(sys.executable).with_name("hydraweave-node" + (".exe" if os.name == "nt" else ""))
-    executable = str(candidate) if candidate.is_file() else (shutil.which("hydraweave-node") or str(candidate))
-    values = [executable.replace("\\", "/"), root.as_posix(), (lab_dir or "").replace("\\", "/")]
-    if any(any(char in value for char in '\n\r"%\\') for value in values):
+    executable = _service_executable("hydraweave-node")
+    values = [executable.as_posix(), root.as_posix(), (lab_dir or "").replace("\\", "/")]
+    if any(any(char in value for char in '\n\r"%$\\') for value in values):
         raise ValueError("unsupported character in systemd path")
     command = f'"{values[0]}" serve --root "{values[1]}"'
     if lab_dir:
         command += f' --lab-dir "{values[2]}"'
     if no_announce:
         command += " --no-announce"
-    bin_dir = Path(sys.executable).parent.as_posix()
+    bin_dir = executable.parent.as_posix()
     unit = ("[Unit]\nDescription=Hydraweave discovery agent\nAfter=network-online.target\n\n"
             "[Service]\nExecStart=" + command + '\nEnvironment="PATH=' + bin_dir
             + ':/usr/local/bin:/usr/bin:/bin"\nRestart=on-failure\nRestartSec=5\nKillMode=process\nUMask=0077\n\n'
@@ -550,14 +577,20 @@ def service_command(operation, *, run=None):
         return 2
     unit = Path.home() / ".config/systemd/user/hydraweave.service"
     if operation == "install":
-        command = f'"{Path(sys.executable).resolve()}" -m hydraweave ui --no-browser'
+        executable = _service_executable("python").as_posix()
+        if any(char in executable for char in '\n\r"%$\\'):
+            raise ValueError("unsupported character in systemd path")
+        command = f'"{executable}" -m hydraweave ui --no-browser'
         unit.parent.mkdir(parents=True, exist_ok=True)
         unit.write_text("[Unit]\nDescription=Hydraweave portal\n\n[Service]\nExecStart=" + command +
                         "\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n", encoding="utf-8")
         calls = [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", "hydraweave.service"]]
     elif operation in {"uninstall", "remove"}:
-        calls = [["systemctl", "--user", "disable", "--now", "hydraweave.service"], ["systemctl", "--user", "daemon-reload"]]
+        # systemd still needs the unit while disabling/stopping it. Preserve
+        # the file if stopping fails so the operation can be retried safely.
+        run(["systemctl", "--user", "disable", "--now", "hydraweave.service"], check=True, **no_window())
         unit.unlink(missing_ok=True)
+        calls = [["systemctl", "--user", "daemon-reload"]]
     elif operation in {"start", "stop"}:
         calls = [["systemctl", "--user", operation, "hydraweave.service"]]
     else:

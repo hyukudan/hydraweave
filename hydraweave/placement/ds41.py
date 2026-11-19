@@ -23,7 +23,7 @@ import math
 import re
 
 from .. import modelfiles
-from ..vramplan import GIB, Model, Plan, PlanError, Unit, check_peak
+from ..vramplan import GIB, Inputs, Model, Plan, PlanError, Unit, check_peak, validate_inputs
 
 LAYERS, EXPERTS, FIRST_DECODER, WINDOW, WINDOW_ROWS = 40, 384, 20, 128, 64
 # Measured (hetero/w2/e2e/alias-*.jsonl, exact profile): device bytes in use before the routed experts (dense
@@ -115,6 +115,17 @@ def predict_prefill(model_gguf, *, vram_cap_gib, positions, host_gib, margin_gib
                     context_gib=DEFAULTS["context_gib"], reserve_gib=DEFAULTS["reserve_gib"], slots=DEFAULTS["slots"],
                     free_at_start_gib=DEFAULTS["free_at_start_gib"], sz=None):
     """The service's own residency plan at the engine cap hydraweave passes (guard cap - margin - context)."""
+    validate_inputs(Inputs(vram_cap_gib, host_gib, margin_gib, margin_fraction))
+    if host_gib is None:
+        raise PlanError("ds41 prefill: host_gib is required (the pinned host tier)")
+    for name, value in (("positions", positions), ("slots", slots)):
+        if type(value) is not int or value <= 0:
+            raise PlanError(f"ds41 prefill: {name} must be a positive integer")
+    for name, value in (("context GiB", context_gib), ("reserve GiB", reserve_gib),
+                        ("free device GiB", free_at_start_gib)):
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                or value < 0):
+            raise PlanError(f"ds41 prefill: {name} must be a finite non-negative number")
     sz = sz or sizes(model_gguf)
     eb = sz["expert_bytes"]
     margin = max(margin_gib, margin_fraction * vram_cap_gib)

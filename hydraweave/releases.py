@@ -275,7 +275,8 @@ class ReleaseManager:
                  (result.stderr or result.stdout or "nonzero exit status").strip()[-2000:])
         return result
 
-    def stage(self, wheel: Path, extras=(), *, offline: bool = False, commit: str | None = None) -> str:
+    def stage(self, wheel: Path, extras=(), *, offline: bool = False, commit: str | None = None,
+              reuse: bool = False) -> str:
         wheel = Path(wheel).absolute()
         selected = wheel_version(wheel.name)
         entries = checksums(wheel.with_name("SHA256SUMS").read_bytes())
@@ -294,7 +295,23 @@ class ReleaseManager:
         rid = "v" + selected + "-" + digest[:12]
         target, record = self.environment(rid), self.root / "releases" / rid
         if target.exists() or record.exists() or target.is_symlink() or record.is_symlink():
-            fail("Version environment already exists: " + rid)
+            if not reuse:
+                fail("Version environment already exists: " + rid)
+            # A health rollback deliberately retains recent releases. Retrying
+            # the same wheel may reuse only a completed, matching installation;
+            # never overwrite an unknown/partial environment to make it fit.
+            receipt = record / "release.json"
+            if target.is_symlink() or record.is_symlink() or receipt.is_symlink() \
+                    or not receipt.is_file() or not self.executable(rid, "python").is_file():
+                fail("Installed release is incomplete; cannot reuse: " + rid)
+            metadata = json.loads(receipt.read_text(encoding="utf-8"))
+            if not isinstance(metadata, dict) or metadata.get("id") != rid \
+                    or metadata.get("version") != selected or metadata.get("wheel_sha256") != digest \
+                    or metadata.get("commit") != (provenance.get("commit") or commit) \
+                    or not isinstance(metadata.get("extras"), list) \
+                    or metadata["extras"] != list(extras):
+                fail("Installed release does not match the verified wheel and extras: " + rid)
+            return rid
         target.parent.mkdir(parents=True, exist_ok=True)
         record.parent.mkdir(parents=True, exist_ok=True)
         created = []
@@ -451,9 +468,14 @@ def update(manager: ReleaseManager, *, wheel: Path | None = None, requested: str
             return {"state": "up_to_date", "current": expected, "reason": None}
         extras = next((r.get("extras", []) for r in manager.list() if r["current"]), [])
         def stage():
-            rid = manager.stage(wheel, extras, offline=assets is None)
+            existing = any(path.exists() or path.is_symlink() for path in
+                           (manager.environment(expected), manager.root / "releases" / expected))
+            rid = manager.stage(wheel, extras, offline=assets is None, reuse=True)
+            if existing:
+                report("Reusing verified installed release " + rid)
             if cancelled():
-                manager.remove(rid)
+                if not existing:
+                    manager.remove(rid)
                 fail("Update cancelled before activation")
             return rid
         return manager.apply_update(stage, health_fn, report=report)

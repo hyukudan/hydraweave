@@ -7,6 +7,7 @@ nvidia-smi and the OS. Disk bandwidth is read from the probe cache unless the op
 from __future__ import annotations
 
 from ..compat import schema as compat_schema
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +17,7 @@ import time
 from .. import engines, render, rtx
 from ..config import ConfigError
 from . import apply, probe
+from .hashing import sha256_file
 from .reader import RecipeError
 
 # The model id each engine family serves (equals `match.model` of its recipes) and the asset that holds the model.
@@ -270,6 +272,20 @@ def _ok(result):
     return isinstance(result, dict)
 
 
+def _node_reports(nodes, call):
+    """Read independent nodes concurrently, keeping each node's verb order and failure isolated."""
+    def report(mid):
+        try:
+            return call(mid, "gpu"), call(mid, "doctor"), None
+        except Exception as exc:  # a failed read must not discard another node's available facts
+            return None, None, str(exc)
+
+    if len(nodes) < 2:
+        return [(mid, report(mid)) for mid in nodes]
+    with ThreadPoolExecutor(max_workers=min(8, len(nodes))) as executor:
+        return list(zip(nodes, executor.map(report, nodes)))
+
+
 def gather(cluster, ctx, *, call, gpus=None, memory=None, pro_busy=None, cache=None, measure_disks=False,
            measurer=None, now=None, release_executable=None, release_commit=None, sysmem_reader=None,
            transfer_identity=None, placement=False):
@@ -319,15 +335,12 @@ def gather(cluster, ctx, *, call, gpus=None, memory=None, pro_busy=None, cache=N
             avail_devices[gpu["uuid"]] = {"available": False, "why": "not the profile's prefill device"}
         devices[gpu["uuid"]] = row
     lan, usb4 = {}, {}
-    for mid in ctx.nodes:
-        try:
-            gpu_result = call(mid, "gpu")
-            doctor_result = call(mid, "doctor")
-        except Exception as exc:  # any remote failure is the node being unavailable
+    for mid, (gpu_result, doctor_result, error) in _node_reports(ctx.nodes, call):
+        if error is not None:
             devices[mid] = {"name": None, "memory_gib": None, "present": False}
-            avail_devices[mid] = {"available": False, "why": f"node unreachable: {exc}"}
+            avail_devices[mid] = {"available": False, "why": f"node unreachable: {error}"}
             hosts[mid] = {"free_ram_gib": None}
-            lan[mid] = {"up": False, "why": f"node unreachable: {exc}"}
+            lan[mid] = {"up": False, "why": f"node unreachable: {error}"}
             continue
         node = probe.node_device(gpu_result)
         devices[mid] = {"name": node["name"]["value"], "memory_gib": _gtt(gpu_result),
@@ -378,8 +391,7 @@ def _identities(cluster, ctx, executable, commit, notes):
         expected = release.get("binaries", {}).get(binary.name)
         if not content_cache._digest(expected) or (commit is not None and release.get("engine_commit") != commit):
             raise ValueError("release manifest differs from the selected build")
-        with binary.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = sha256_file(binary)
         if digest != expected:
             raise ValueError("release binary differs from its verified digest")
         identities["engine_sha256"] = digest

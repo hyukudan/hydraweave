@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -54,6 +55,22 @@ class NodeDownloadCase(unittest.TestCase):
 
 
 class NodePlanTests(NodeDownloadCase):
+    def test_merge_retry_reserves_only_missing_input_and_output(self):
+        first = self.item()
+        second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
+        merge = {"kind": "gguf-split", "destination": str(self.assets / "merged.gguf"),
+                 "expected": {"bytes": 13, "sha256": "c" * 64}}
+        # The retained input is rehashed by the job; it does not need room to download again.
+        Path(first["destination"]).write_bytes(BODY)
+        missing = len(BODY)
+        free = node.HEADROOM + missing + merge["expected"]["bytes"]
+        usage = node.shutil.disk_usage(self.assets)._replace(free=free)
+        with patch.object(node.shutil, "disk_usage", return_value=usage):
+            result = node.plan(self.payload(first, second, merge=merge), self.root)
+        self.assertEqual(result["disk"][0]["required_bytes"], missing + 13)
+        self.assertTrue(result["disk"][0]["ok"])
+        self.assertEqual(Path(first["destination"]).read_bytes(), BODY)
+
     def test_split_merge_plan_space_pin_confirmation_and_paths(self):
         first = self.item()
         second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
@@ -168,6 +185,111 @@ class NodePlanTests(NodeDownloadCase):
 
 
 class NodeJobTests(NodeDownloadCase):
+    def retained_job(self):
+        first = self.item()
+        second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
+        action = {"kind": "gguf-split", "destination": str(self.assets / "merged.gguf"), "expected": None}
+        for item in (first, second):
+            Path(item["destination"]).write_bytes(BODY)
+        planned = node.plan(self.payload(first, second, merge=action), self.root)
+        spec_path = self.root / "run" / "job-retained.spec.json"
+        install.atomic_json(spec_path, {"root": str(self.root), "job": "retained", "lab_dir": str(self.lab),
+                                       "files": planned["files"], "merge": action})
+        return spec_path, planned
+
+    def test_retained_part_hash_observes_cancel_and_gpu_ownership(self):
+        for event in ("cancel", "turn", "lease"):
+            with self.subTest(event=event):
+                spec_path, planned = self.retained_job()
+                checked = []
+                original = install.hash_file
+
+                def hasher(path, check=None):
+                    checked.append(path)
+                    if event == "cancel":
+                        (self.root / "run" / "job-retained.stop").touch()
+                    elif event == "turn":
+                        (self.lab / ".gpu-turn" / "holder").write_text("SINGLE other 456\n")
+                    else:
+                        install.atomic_json(self.root / "run" / "lease-other.json",
+                                            {"lease": "other", "state": "acquired"})
+                    return original(path, check=check)
+
+                with patch.object(install, "hash_file", side_effect=hasher), \
+                        patch.object(node.subprocess, "Popen") as spawn:
+                    code = node.job_main(str(spec_path))
+                state = install.read_json(self.root / "run" / "job-retained.json")
+                self.assertEqual(code, 1)
+                self.assertEqual(state["state"], "cancelled" if event == "cancel" else "failed")
+                self.assertEqual(len(checked), 1, "stop before hashing another retained model part")
+                self.assertIn({"cancel": "cancelled", "turn": "GPU turn", "lease": "lease"}[event], state["error"])
+                self.assertFalse(Path(planned["merge"]["destination"]).exists())
+                self.assertTrue(all(Path(row["destination"]).read_bytes() == BODY for row in planned["files"]))
+                spawn.assert_not_called()
+                (self.lab / ".gpu-turn" / "holder").unlink(missing_ok=True)
+                (self.root / "run" / "lease-other.json").unlink(missing_ok=True)
+
+    def test_pre_cancelled_fetch_does_not_spawn_or_create_partial(self):
+        row = node.plan(self.payload(), self.root)["files"][0]
+        with patch.object(node.subprocess, "Popen") as spawn:
+            self.assertEqual(node.fetch(row, lambda: "cancelled", lambda: None), "cancelled")
+        spawn.assert_not_called()
+        self.assertFalse(Path(row["part"]).exists())
+        self.assertFalse(Path(row["destination"]).exists())
+
+    @unittest.skipUnless(os.name == "posix", "process groups")
+    def test_cancellation_kills_a_child_that_ignores_sigterm(self):
+        row = node.plan(self.payload(), self.root)["files"][0]
+        ready = self.assets / "child-ready"
+        row["argv"] = [sys.executable, "-c",
+                       "import signal,time,sys; from pathlib import Path; "
+                       "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                       "Path(sys.argv[1]).write_bytes(b'pay'); Path(sys.argv[2]).touch(); time.sleep(30)",
+                       row["part"], str(ready)]
+        created = []
+        popen = node.subprocess.Popen
+
+        def spawn(*args, **kwargs):
+            child = popen(*args, **kwargs)
+            created.append(child)
+            return child
+
+        start = time.monotonic()
+        try:
+            with patch.object(node, "POLL_S", .01), patch.object(node, "STOP_GRACE_S", .1), \
+                    patch.object(node.subprocess, "Popen", side_effect=spawn):
+                result = node.fetch(row, lambda: "cancelled" if ready.exists() else None, lambda: None)
+            self.assertEqual(result, "cancelled")
+            self.assertLess(time.monotonic() - start, 5)
+            self.assertIsNotNone(created[0].poll())
+            self.assertEqual(Path(row["part"]).read_bytes(), b"pay")
+            self.assertFalse(Path(row["destination"]).exists())
+            # Cancellation releases the writer lock, so a later job can resume.
+            lock = node.lock_part(Path(row["part"]))
+            os.close(lock)
+        finally:
+            for child in created:
+                if child.poll() is None:
+                    os.killpg(child.pid, node.signal.SIGKILL)
+                    child.wait(timeout=5)
+
+    def test_cancellation_after_hash_keeps_verified_partial_unpublished(self):
+        original = install.hash_file
+        row = node.plan(self.payload(), self.root)["files"][0]
+        cancelled = []
+
+        def hasher(path, check=None):
+            digest = original(path, check=check)
+            cancelled.append(True)
+            return digest
+
+        row["argv"] = [sys.executable, str(FAKE_CURL), *row["argv"][row["argv"].index("/usr/bin/curl") + 1:]]
+        with patch.object(install, "hash_file", side_effect=hasher), patch.object(node, "POLL_S", .01):
+            result = node.fetch(row, lambda: "cancelled" if cancelled else None, lambda: None)
+        self.assertEqual(result, "cancelled")
+        self.assertEqual(Path(row["part"]).read_bytes(), BODY)
+        self.assertFalse(Path(row["destination"]).exists())
+
     def job(self, body=BODY, **env):
         rows = node.plan(self.payload(), self.root)["files"]
         for row in rows:

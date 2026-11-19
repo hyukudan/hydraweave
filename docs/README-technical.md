@@ -7,6 +7,10 @@ Hydraweave is the integration and control layer that turns three separate projec
 > [!IMPORTANT]
 > **Status (2026-10-25 evening):** Phases 1a and 2 accepted on hardware; portal start/stop smoke-tested, with crash-cleanup acceptance open. RTX build, standalone exactness and capped placement validated; pair + RTX placement remains pending. See the [current overview](../README.md#current-status) and [acceptance records](acceptance-2.md).
 
+The dated hardware statement above is historical. For the current implementation, including the integrated
+control center, recipes, planning, pairing and release management, see the [2026-11-19 audit](audit-2026-11-19.md).
+Host regressions and synthetic process/HTTP tests do not renew the hardware acceptance of a newer engine pin.
+
 <p align="center">
   <img src="img/devices-desktop.png" alt="Mockup of the Devices screen: a workstation with an RTX PRO 6000 and two Strix Halo nodes, each with memory and usage meters, roles and driver state. Sample data." width="900">
   <br><sub><b>Mockup with sample data</b>, not a running system: the Devices screen of the planned portal.</sub>
@@ -193,23 +197,13 @@ Profiles are mutually exclusive per node: the Qwen replicas (about 107 GiB per n
 
 ### Device discovery and joining
 
-```mermaid
-flowchart LR
-    subgraph now["MVP: add by address"]
-        a1["operator enters<br/>address + ssh target"] --> a2["ssh-keyscan:<br/>fingerprint shown"]
-        a2 --> a3{"operator confirms<br/>on the machine"}
-        a3 -- yes --> a4["key pinned in<br/>hydraweave's own known_hosts"]
-        a4 --> a5["bootstrap hydraweave-node,<br/>doctor + gpu + probe"]
-        a5 --> a6["machine listed<br/>in Devices"]
-    end
-    subgraph later["Phase 4: discover and pair"]
-        b1["signed LAN announce<br/>(reachability only)"] --> b2["listed as<br/>discovered, not paired"]
-        b2 --> b3["one-time code +<br/>fingerprint check"]
-        b3 --> b4["mutual certificates<br/>via the TensorMeld agent"]
-    end
-```
+| Path | Trust and execution |
+|---|---|
+| SSH machine | Operator verifies and pins the host fingerprint; later calls use `StrictHostKeyChecking=yes` and Hydraweave's own `known_hosts` |
+| Local Linux worker | Explicit machine entry; runs the same node helper locally under the controller user |
+| Discovered/paired agent | Discovery advertises reachability; explicit pairing establishes the credential before commands are accepted |
 
-- **Today's path is ssh with the operator's keys.** Nothing listens on a worker. Every later ssh call is pinned to the recorded key (`StrictHostKeyChecking=yes` against Hydraweave's own `known_hosts`), so a changed key is a hard failure.
+- **SSH remains supported alongside agents.** A changed pinned SSH key is a hard failure. Agent pairing is implemented by Hydraweave's node agent; the former proposed TensorMeld mutual-certificate flow is not the current transport contract.
 - **Inventory** comes from `tensormeld probe` (OS, RAM, NVIDIA devices) and `hydraweave-node doctor` / `gpu` (CPU, AMD memory from sysfs, ROCm version, kernel, USB4 stream driver and layout). These are passive reads that do not initialize the GPU.
 - **Discovery never grants anything.** A machine that announces itself is listed as "discovered, not paired" and cannot run work until the operator pairs it explicitly.
 
@@ -272,7 +266,7 @@ Pinned in [`versions.lock`](../versions.lock) and as git submodules under `third
 | Component | Pin | License | What Hydraweave uses |
 |---|---|---|---|
 | [TensorMeld](https://github.com/hyukudan/tensormeld) | `7165e98` (0.2.0a2) on the nodes; `409003a` for the local router (see SPEC 1.1) | MIT | `serve-replicas` router (`replica-router-v1`: OpenAI/Anthropic relay with SSE, replica balancing, prefill placement, `/api/status`, `/metrics`); `probe` and `link-probe` for inventory and links; `plan-hetero` for placement proposals; `bench-protocol` for client-side benchmarks. Its config parser validates every router config Hydraweave renders. |
-| [Strix Halo engine](https://github.com/hyukudan/strix-halo-engine-lab) | `70ec42b9` | Apache-2.0 | `strix-hip-decode-token --http-serve` (Qwen replicas), `strix-deepseek41-serve` (DeepSeek pair over USB4, `READY` / `STOPPED` events, `/admin/drain`, state import), `strix-cuda-ds41-prefill-service` (RTX prefill). The pin moves to the merge commit once it lands on the engine's `main`. |
+| [Strix Halo engine](https://github.com/hyukudan/strix-halo-engine-lab) | `9211b07e` default in `versions.lock` (presets may override) | Apache-2.0 | `strix-hip-decode-token --http-serve` (Qwen replicas), `strix-deepseek41-serve` (DeepSeek pair over USB4, `READY` / `STOPPED` events, `/admin/drain`, state import), `strix-cuda-ds41-prefill-service` (RTX prefill). The default pin records a docs-only difference from the former `70ec42b9`; it is not the current engine main head. |
 | [strix-trellis](https://github.com/hyukudan/strix-trellis) | `5acf090` (0.3.0) | Apache-2.0 | static library + C header linked into the DeepSeek engine build: trellis-quantized dense layers (shared expert and output head). |
 
 Not managed by Hydraweave, only checked read-only: the kernel and USB4 stream driver, ROCm / CUDA / MSVC toolchains, ssh keys, model downloads and conversions. Gaps in a component are filed as requests in that component's repository, never patched here.
@@ -329,7 +323,7 @@ Experts from the published Q2 GGUF; dense layers trellis mix-B over a 6.5-bit ov
 | **2.5** | Placement proposals from `plan-hetero`, filtered to qualified profiles | planned |
 | **3a** | RTX prefill service and KV handoff | [Build and standalone gates passed](acceptance-3a.md); [capped placement validated](vramplan.md); full pair + RTX placement pending |
 | **3b** | Split decode across the RTX and the pair | deferred until the engine ships that front end as an HTTP server |
-| **4** | Operational extensions | Install/release tooling, diagnostics, qualified knobs, [Prometheus](prometheus.md) and [non-lab service mode](non-lab-mode.md) implemented; discovery/pairing and Windows workers later |
+| **4** | Operational extensions | Install/release tooling, diagnostics, qualified knobs, discovery/pairing, [Prometheus](prometheus.md) and [non-lab Qwen service mode](non-lab-mode.md) implemented; Windows inference workers and broader hardware qualification remain open |
 
 Every phase ends with unit and hygiene tests green and its acceptance tests passed. GPU acceptance runs are short, bounded leases; performance thresholds are compared in interleaved rounds against the same binary, not against historical numbers. The full plan, acceptance tests and component requests are in [docs/SPEC.md](../docs/SPEC.md).
 
@@ -337,7 +331,7 @@ CI (`.github/workflows/ci.yml`) needs no repository secrets: it fetches only the
 
 ## Security
 
-- **Local control plane.** The portal listens on `127.0.0.1` only and accepts only a matching `Host` (no DNS rebinding). GET is read-only; every mutation is a JSON `POST` with a per-launch CSRF header and a matching `Origin`; there are no CORS headers. Negative tests cover each rule.
+- **Authenticated control plane.** The portal defaults to `127.0.0.1`; explicit LAN binds require an access token for protected reads and actions unless `--no-auth` is selected. Host validation and mutation CSRF/Origin checks remain enforced. Read-only GET does not imply public access. Negative tests cover the authentication surface, including static assets, event streams, metrics and node bootstrap.
 - **Pinned ssh.** Machines are reached with the operator's keys and a host key pinned at first contact in Hydraweave's own `known_hosts`, with a minimal ssh config so ambient settings cannot weaken the check. Remote calls are fixed verbs from an allow-list, with arguments as bounded JSON on stdin; there is no free-form shell.
 - **Bounded background reads.** The portal reads each node with one read-only `poll` session per 30 s while one of its pages is open (host, USB4, tool check, doctor, GPU, launch status and logs together), and otherwise only checks a lab node's GPU turn every 30 s. While a GPU turn holds a node, only that check runs, once a minute. The turn check does not depend on the history store.
 - **Secrets stay out of config and command lines.** Keys are generated by Hydraweave (32 random bytes), stored with a user-only ACL on the control machine and as `0600` files on the nodes, and redacted from logs and bundles (rules, known limits and follow-ups: [redaction.md](redaction.md)). The one exception today is the CUDA prefill service, which only accepts literal key arguments; it is bound to loopback until the engine accepts key files.
