@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -36,7 +37,7 @@ except ImportError:  # not POSIX: background jobs are refused there anyway
 
 from hydraweave_compat import LEGACY_NAME, read_marker, read_path, tool_command
 
-VERBS = {"download-plan", "download", "download-cancel"}
+VERBS = {"download-plan", "download", "download-cancel", "download-prepare", "download-status"}
 HOSTS = {"huggingface.co"}
 MAX_FILES = 64
 HEADROOM = 1 << 30
@@ -108,6 +109,49 @@ def target(item, protected=(), allow_existing=False):
     return destination, part
 
 
+def prepare_directory(root, payload):
+    """Explicit setup of one dedicated directory; never adopt a nonempty one."""
+    directory = install.absolute(payload.get("directory"))
+    if directory.resolve() != directory or any(p.is_symlink() for p in (directory, *directory.parents)):
+        raise ValueError("asset directory must contain no symlinks")
+    home = Path.home().resolve()
+    if directory == home or directory in home.parents or any(install.overlap(directory, Path(other).resolve())
+            for other in [root, *([payload["lab_dir"]] if payload.get("lab_dir") else [])]):
+        raise ValueError("asset directory overlaps an installation, lab, or home directory")
+    from hydraweave_model_jobs import WriteTree
+    from hydraweave_models import DIRECTORY, NOFOLLOW
+    with WriteTree(directory.parent) as parent:
+        try:
+            os.mkdir(directory.name, 0o700, dir_fd=parent.fd)
+        except FileExistsError:
+            pass
+        fd = os.open(directory.name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=parent.fd)
+        try:
+            with os.scandir(fd) as entries:
+                nonempty = next(entries, None) is not None
+            if nonempty:
+                for name in (ASSET_MARKER, "." + LEGACY_NAME + "-assets"):
+                    try:
+                        marker = os.open(name, os.O_RDONLY | NOFOLLOW, dir_fd=fd)
+                    except FileNotFoundError:
+                        continue
+                    try:
+                        if stat.S_ISREG(os.fstat(marker).st_mode):
+                            return {"directory": str(directory), "prepared": True, "existing": True}
+                    finally:
+                        os.close(marker)
+                raise ValueError("refusing to adopt a nonempty unmarked asset directory")
+            marker = os.open(ASSET_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, 0o600, dir_fd=fd)
+            with os.fdopen(marker, "wb") as stream:
+                stream.write(b"hydraweave model downloads\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.fsync(fd)
+            return {"directory": str(directory), "prepared": True, "existing": False}
+        finally:
+            os.close(fd)
+
+
 def plan(payload, root):
     files = payload.get("files")
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
@@ -124,7 +168,7 @@ def plan(payload, root):
         if type(size) is not int or size <= 0 or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ValueError("every file needs pinned bytes and sha256")
         destination, part = target(item, [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []),
-                                   allow_existing=bool(payload.get("merge")))
+                                   allow_existing=True)
         if str(destination) in directories:
             raise ValueError("duplicate destination")
         directories.add(str(destination))
@@ -134,7 +178,7 @@ def plan(payload, root):
         # A merge retry retains already verified inputs at their final part names.
         # They still need integrity checks in the job, but occupy no *additional*
         # download space. Reserve missing/resumable inputs plus the merge output.
-        have = (destination.stat().st_size if payload.get("merge") and destination.exists()
+        have = (destination.stat().st_size if destination.exists()
                 else part.stat().st_size if part.exists() else 0)
         need[destination.parent] = need.get(destination.parent, 0) + max(0, size - have)
     merge = payload.get("merge")
@@ -144,7 +188,7 @@ def plan(payload, root):
             raise ValueError("merge must declare gguf-split, destination and expected with at least two parts")
         directory = Path(rows[0]["destination"]).parent
         target({"destination": merge["destination"], "directory": str(directory)},
-               [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []))
+               [root] + ([payload["lab_dir"]] if payload.get("lab_dir") else []), allow_existing=True)
         if any(Path(row["destination"]).parent != directory for row in rows):
             raise ValueError("GGUF split parts must share the merge directory")
         if merge["destination"] in directories:
@@ -158,12 +202,16 @@ def plan(payload, root):
                 or not isinstance(expected["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", expected["sha256"])):
             raise ValueError("merged pin needs positive bytes and lowercase sha256")
         need[directory] += expected["bytes"] if expected else sum(row["bytes"] for row in rows)
+        if expected and Path(merge["destination"]).is_file():
+            # The worker verifies this resident final artifact before reuse.
+            # No input parts or second output need to be downloaded/allocated.
+            need[directory] = 0
     code = hashlib.sha256(install.canonical(rows if merge is None else {"files": rows, "merge": merge})).hexdigest()[:12]
     disk = []
     for directory, required in need.items():
         free = shutil.disk_usage(directory).free
         disk.append({"directory": str(directory), "required_bytes": required, "free_bytes": free,
-                     "ok": free >= required + HEADROOM})
+                     "ok": free >= required + (HEADROOM if required else 1024 * 1024)})
     return {"files": rows, "disk": disk, "confirm": code, "merge": merge}
 
 
@@ -269,18 +317,41 @@ def fetch(row, stop, turn_check, progress=lambda have, total: None):
 
 
 def job_main(spec_path):
+    from hydraweave_model_jobs import storage_owner
+    from hydraweave_models import effective_policy
+    spec = install.read_json(install.absolute(spec_path))
+    try:
+        with storage_owner(effective_policy({"root": spec["root"], "lab_dir": spec.get("lab_dir")})):
+            return _job_main(spec_path)
+    except Exception as exc:
+        path = install.inside(Path(spec["root"]), "run", "job-" + install.identifier(spec["job"]) + ".json")
+        state = install.read_json(path) if path.exists() else {"job": spec["job"], "kind": "download"}
+        state.update(state="failed", error=str(exc), finished=time.time())
+        install.atomic_json(path, state)
+        install.absolute(spec_path).unlink(missing_ok=True)
+        return 1
+
+
+def _job_main(spec_path):
     spec = install.read_json(install.absolute(spec_path))
     root = install.checked_root({"root": spec["root"]})
     job = install.identifier(spec["job"])
     path = install.inside(root, "run", "job-" + job + ".json")
     state = {"job": job, "kind": "download", "pid": os.getpid(), "boot_id": install.boot_id(),
              "state": "running", "started": time.time(),
-             "log": str(install.inside(root, "log", "job-" + job + ".log")), "done": []}
+             "log": str(install.inside(root, "log", "job-" + job + ".log")), "done": [], "verified": {},
+             "bytes_transferred": 0, "bytes_reused": 0}
     install.atomic_json(path, state)
     stop_file = install.inside(root, "run", "job-" + job + ".stop")
 
     def stopped():
-        return "cancelled" if stop_file.exists() else None
+        if stop_file.exists():
+            return "cancelled"
+        if spec.get("owner_ttl"):
+            owner = install.inside(root, "run", "job-" + job + ".owner")
+            if not owner.exists() or time.time() - owner.stat().st_mtime > spec["owner_ttl"]:
+                return "cancelled"
+        return None
 
     def turn():
         try:
@@ -291,41 +362,72 @@ def job_main(spec_path):
         return None
 
     try:
-        for row in spec["files"]:
+        rows, merge_action = spec["files"], spec.get("merge")
+        if merge_action and merge_action.get("expected") and Path(merge_action["destination"]).is_file():
+            reason = stopped() or turn()
+            if reason:
+                raise ValueError(reason)
+            destination, expected = Path(merge_action["destination"]), merge_action["expected"]
+            before = install.stat_asset(destination)
+            if destination.is_symlink() or before["bytes"] != expected["bytes"]:
+                raise ValueError("resident merged file failed size verification")
+            digest = install.hash_file(destination, check=_hash_check(stopped, turn))
+            if digest != expected["sha256"] or before != install.stat_asset(destination):
+                raise ValueError("resident merged file failed SHA-256 or identity verification")
+            state["verified"][str(destination)] = {**before, "sha256": digest}
+            state["bytes_reused"] = expected["bytes"]
+            state["done"] = [str(destination)]
+            rows, merge_action = [], None
+        for row in rows:
             reason = stopped() or turn()
             if reason:
                 raise ValueError(reason)
             def progress(have, total):
                 state["progress"] = {"file": row["destination"], "bytes": have, "total_bytes": total}
                 install.atomic_json(path, state)
-            if spec.get("merge") and Path(row["destination"]).is_file():
+            retained_bytes = 0
+            partial_bytes = min(row["bytes"], Path(row["part"]).stat().st_size) if Path(row["part"]).exists() else 0
+            if Path(row["destination"]).is_file():
                 retained = Path(row["destination"])
-                reason = "retained split part failed verification"
+                reason = "retained file failed verification"
                 if not retained.is_symlink() and retained.stat().st_size == row["bytes"]:
                     if install.hash_file(retained, check=_hash_check(stopped, turn)) == row["sha256"]:
                         reason = None
+                        retained_bytes = row["bytes"]
             else:
                 reason = fetch(row, stopped, turn, progress)
+                if reason is None:
+                    retained_bytes = partial_bytes
             reason = reason or stopped() or turn()
             if reason:
                 raise ValueError(reason)
             state["done"].append(row["destination"])
+            info = install.stat_asset(Path(row["destination"]))
+            state["verified"][row["destination"]] = {**info, "sha256": row["sha256"]}
+            state["bytes_reused"] += retained_bytes
+            state["bytes_transferred"] += row["bytes"] - retained_bytes
             install.atomic_json(path, state)
-        if spec.get("merge"):
+        if merge_action:
             from hydraweave_gguf_merge import merge
             def check_merge():
-                reason = "cancelled" if stop_file.exists() else turn()
+                reason = stopped() or turn()
                 if reason:
                     raise ValueError(reason)
             check_merge()
-            action = spec["merge"]
+            action = merge_action
             if os.path.lexists(action["destination"]):
                 raise ValueError("merge destination appeared during the job")
             state["merged"] = merge([row["destination"] for row in spec["files"]],
                                     action["destination"], expected=action["expected"], check=check_merge)
+            state["verified"][action["destination"]] = {**install.stat_asset(Path(action["destination"])),
+                                                        "sha256": state["merged"]["sha256"]}
             install.atomic_json(path, state)
             for row in spec["files"]:
+                check_merge()
                 Path(row["destination"]).unlink()
+        reason = stopped() or turn()
+        if reason:
+            raise ValueError(reason)
         state["state"] = "succeeded"
     except Exception as exc:
         state.update(state="cancelled" if str(exc) == "cancelled" else "failed", error=str(exc))
@@ -334,10 +436,59 @@ def job_main(spec_path):
         install.atomic_json(path, state)
         install.absolute(spec_path).unlink(missing_ok=True)
         stop_file.unlink(missing_ok=True)
+        install.inside(root, "run", "job-" + job + ".owner").unlink(missing_ok=True)
     return 0 if state["state"] == "succeeded" else 1
 
 
 def start(root, payload):
+    from hydraweave_lease import root_lock
+    from hydraweave_agent_update import require_idle
+    from hydraweave_model_jobs import refuse_storage_owner
+    # Preserve pure validation before opening a lock (also for callers showing a
+    # refused plan on a node not initialized yet). Recheck under the lock before
+    # publishing queued work so the admission decision cannot race an updater.
+    _checked_plan(root, payload)
+    with root_lock(root):
+        require_idle(root)
+        refuse_storage_owner(root)
+        return _start(root, payload)
+
+
+def _start(root, payload):
+    result = _checked_plan(root, payload)
+
+    job = uuid.uuid4().hex
+    spec = install.inside(root, "run", "job-" + job + ".spec.json")
+    state_path = install.inside(root, "run", "job-" + job + ".json")
+    log = install.inside(root, "log", "job-" + job + ".log")
+    install.atomic_json(spec, {"root": str(root), "job": job, "lab_dir": payload.get("lab_dir"),
+                               "files": result["files"], "merge": result.get("merge"),
+                               "owner_ttl": 120 if payload.get("owned") is True else None})
+    if payload.get("owned") is True:
+        install.inside(root, "run", "job-" + job + ".owner").touch()
+    state = {"job": job, "kind": "download", "state": "queued", "log": str(log),
+             "boot_id": install.boot_id(), "created": time.time(), "owned": payload.get("owned") is True}
+    install.atomic_json(state_path, state)
+    # The job itself hashes the files: idle CPU and I/O priority, like verify-model.
+    prefix = ["nice", "-n", "19"] + (["ionice", "-c3"] if shutil.which("ionice") else [])
+    try:
+        with log.open("ab") as output:
+            child = subprocess.Popen(["nohup", *prefix, sys.executable, str(Path(__file__).resolve()), "--job", str(spec)],
+                                     stdin=subprocess.DEVNULL, stdout=output, stderr=output,
+                                     start_new_session=True, close_fds=True)
+        # root_lock still excludes the worker's storage_owner acquisition.
+        state["pid"] = child.pid
+        install.atomic_json(state_path, state)
+    except BaseException as exc:
+        state.update(state="failed", error=str(exc), finished=time.time())
+        install.atomic_json(state_path, state)
+        spec.unlink(missing_ok=True)
+        install.inside(root, "run", "job-" + job + ".owner").unlink(missing_ok=True)
+        raise
+    return {"job": job, "pid": child.pid, "log": str(log), "confirm": result["confirm"]}
+
+
+def _checked_plan(root, payload):
     result = plan(payload, root)
     if payload.get("confirm") != result["confirm"]:
         raise ValueError("confirmation code does not match the current plan; review the plan again")
@@ -345,21 +496,7 @@ def start(root, payload):
         raise ValueError("not enough free disk space for the planned files")
     if os.name != "posix":
         raise ValueError("node background jobs require POSIX")
-    job = uuid.uuid4().hex
-    spec = install.inside(root, "run", "job-" + job + ".spec.json")
-    state_path = install.inside(root, "run", "job-" + job + ".json")
-    log = install.inside(root, "log", "job-" + job + ".log")
-    install.atomic_json(spec, {"root": str(root), "job": job, "lab_dir": payload.get("lab_dir"),
-                               "files": result["files"], "merge": result.get("merge")})
-    install.atomic_json(state_path, {"job": job, "kind": "download", "state": "queued", "log": str(log),
-                                     "boot_id": install.boot_id()})
-    # The job itself hashes the files: idle CPU and I/O priority, like verify-model.
-    prefix = ["nice", "-n", "19"] + (["ionice", "-c3"] if shutil.which("ionice") else [])
-    with log.open("ab") as output:
-        child = subprocess.Popen(["nohup", *prefix, sys.executable, str(Path(__file__).resolve()), "--job", str(spec)],
-                                 stdin=subprocess.DEVNULL, stdout=output, stderr=output,
-                                 start_new_session=True, close_fds=True)
-    return {"job": job, "pid": child.pid, "log": str(log), "confirm": result["confirm"]}
+    return result
 
 
 def run(verb, payload):
@@ -370,7 +507,12 @@ def run(verb, payload):
         root = install.checked_root(payload)
         policy = install.read_json(root / "etc" / "install-policy.json")
         payload = {**payload, "lab_dir": payload.get("lab_dir") or policy.get("lab_dir")}
-        if verb == "download-plan":
+        if verb == "download-prepare":
+            from hydraweave_model_jobs import storage_owner
+            from hydraweave_models import effective_policy
+            with storage_owner(effective_policy(payload)):
+                result.update(prepare_directory(root, payload))
+        elif verb == "download-plan":
             result.update(plan(payload, root))
         elif verb == "download":
             lab_quiet(payload["lab_dir"])
@@ -383,9 +525,16 @@ def run(verb, payload):
             if state.get("kind") != "download":
                 raise ValueError("not a download job")
             state = install.settle_stale(path, state)
-            if state["state"] in {"queued", "running"}:
+            if state.get("state") == "queued" and state.get("owned") and time.time() - state.get("created", time.time()) > 120:
+                state.update(state="failed", error="download never published running state before owner deadline", finished=time.time())
+                install.atomic_json(path, state)
+            if state["state"] in {"queued", "running"} and verb == "download-cancel":
                 install.inside(root, "run", "job-" + job + ".stop").touch()
-            result.update(job=job, state=state["state"])
+            if state["state"] in {"queued", "running"} and verb == "download-status" and payload.get("renew") is True:
+                owner = install.inside(root, "run", "job-" + job + ".owner")
+                if owner.exists():
+                    owner.touch()
+            result.update(state if verb == "download-status" else {"job": job, "state": state["state"]})
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, subprocess.SubprocessError) as exc:
         result["error"] = str(exc)
     return result

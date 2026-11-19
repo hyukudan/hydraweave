@@ -54,7 +54,7 @@ form read; they do not restart a model. GET documents do not run Git, contact a 
 | `GET discovery/plan` | Optional `machine`, `profile` (together) | Exact pinned engine recipe, model requirements, model roots and blockers; no node calls. |
 | `POST discovery/adopt` | `id`, `code` | Verify the node console code, merge its machine entry and save a private agent token. Codes/tokens are not audited. Starts provisioning assigned profiles as a visible job. |
 | `POST discovery/provision` | `machine`, optional `profile` | Background job: use existing bundles/builds and verified resumable downloads; activate for a stopped profile; never start inference. |
-| `POST discovery/update` | `machine`, `origin` | Exclusive background job for a paired agent: re-pull the controller's `/node/package.tar.gz` with an authenticated SHA-256 digest, reinstall and schedule its user-service restart. Refuse live GPU leases/turns or unverifiable turn state. |
+| `POST discovery/update` | `machine`, `origin` | Audited background job with shared admission on the selected machine and browser ownership renewal; different nodes may update concurrently within the shared cap, and priority stops remain available. The admitted machine/pairing identity is rechecked and its endpoint retained. Verify the controller's authenticated package SHA-256, stage an isolated candidate and activate through an independent user-service worker. Success requires the new authenticated process identity/version; failed activation restores and verifies the retained release. Deadline 2200 s. Refuse live GPU leases/turns, owned model I/O, active background jobs or unverifiable state. Status/stop remain available during staging. Cancelling the portal job stops waiting while the node completes activation/rollback. Legacy agents require the documented bootstrap migration. |
 | `POST setup/initialize` | `{}` | Create a controller-only workspace only when its configuration does not exist. Audited. |
 | `POST setup/router/validate` | `machine`, optional `port`, `version` | Preview router placement and preset constraints; no write. |
 | `POST setup/router/save` | `version`, `machine`, optional `port` | Save placement for the next launch; refuse stale forms or saved/running launches. Audited. |
@@ -958,6 +958,22 @@ control-machine lab verification needs the RTX ledger guard. Those failures are 
 | `POST library/roots` | Replace extra model roots for machine | Exactly `machine`: id, `roots`: array ≤16 absolute directory strings ≤1024 for machine OS, no controls/.., each inside the install root, a machine `model_roots` entry (default `<lab_dir>/models`) or an asset directory | Sync; audited | 400 path/list; 404 machine |
 | `POST library/ledger-accept` | Accept current RTX ledger guard baseline | Empty object | Sync; audited | 400 extra keys/unconfigured, oversized or changed ledger; 503 I/O/timeout |
 | `POST library/scan` | Scan selected/all machines and retain inventories | `machine?`: id | Audited job; no admission/hold; deadline 600 s | 400 fields; 404 machine; 409 another scan of machine within 600 s |
+| `POST library/copy-plan` | Review a direct peer transfer, file identities, byte count and confirmation token | `machine`, `model_root`, `name`, `destination`, `destination_root` | Read-only plan; no model bytes pass through the controller | Missing complete manifest, unconfigured root or unpinned SSH destination |
+| `POST library/verify` | Verify a model's complete manifest and retain its result | `machine`, `model_root`, `name` | Audited job; node resource admission; cancellation; bounded ownership renewal | Busy node, stale configuration, changed files or incomplete/mismatched identity |
+| `POST library/copy` | Transfer directly between nodes, reuse verified existing content and publish only verified files | `machine`, `model_root`, `name`, `destination`, `destination_root`, `confirm` | Audited job; admission for both nodes; cancellation and owner expiry | Changed plan/configuration, busy node, unsafe paths, insufficient space or integrity mismatch |
+
+### assets
+
+Pinned model acquisition reuses the CLI/node downloader. A reviewed plan names the exact sources, final
+identity and destination. Successful downloads register the verified asset while their resource hold remains
+active. Cancellation or a changed configuration never publishes a successful registration.
+
+| API | Returns / does | Arguments | Execution / audit | Notable refusals |
+|---|---|---|---|---|
+| `GET assets` | Downloadable profile assets, pinned sources and explicit reasons for unavailable derived artifacts | None | Sync; authenticated; no acquisition | Invalid query |
+| `POST assets/prepare` | Prepare a dedicated destination below a configured model root | `profile`, `asset`, `machine`, `path` | Sync; audited | Unconfigured root, symlink, overlapping installation/lab path |
+| `POST assets/plan` | Exact download plan, disk requirements and confirmation token | `profile`, `asset`, `machine`, `path` | Read-only query | Unpinned/unusable source or unsafe destination |
+| `POST assets/download` | Download, verify and register one pinned final asset | `profile`, `asset`, `machine`, `path`, `confirm` | Audited job; machine admission; 24 h deadline; cancellation and owner renewal | Stale plan/configuration, occupied node, insufficient space or failed final identity |
 
 ### logsearch
 

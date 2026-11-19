@@ -7,6 +7,10 @@ defaults in a JSON file under `hydraweave/presets`. Data readiness rules (`strea
 
 ## Integration status
 
+The managed profiles use the project's own inference engines. The optional
+llama.cpp registry entry is an adapter declaration, not the engine used by those
+profiles and not a requirement for completing their orchestration.
+
 Qwen, DeepSeek and MiniMax families are connected to the managed profile renderer and lifecycle. The `llamacpp`
 record currently provides metadata and a validated argument builder for a prebuilt `llama-server`; it is **not a
 launchable managed profile**. It is deliberately absent from `engines.FAMILIES`, and the JSON example in

@@ -658,7 +658,8 @@ class MinimaxNodeTests(unittest.TestCase):
                 patch.object(lease, "signal", SimpleNamespace(**dict(vars(signal), SIGKILL=9))), \
                 patch.object(lease.time, "sleep"):
             lease.stop_children(children)
-        self.assertNotIn("drain", events)  # no HTTP drain route in the MiniMax serve
+        self.assertLess(events.index("drain"), events.index((200, signal.SIGTERM)))
+        events = [event for event in events if event != "drain"]
         self.assertEqual(events[0], (200, signal.SIGTERM))
         self.assertEqual(events[1], ("terminate", 201))
         self.assertEqual([e[0] for e in events[2:]], [200, 201])

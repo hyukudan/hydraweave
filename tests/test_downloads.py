@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -24,6 +25,12 @@ spec.loader.exec_module(node)
 sys.path.remove(str(NODE))
 install = node.install
 BODY = b"payload"
+
+
+def fixture_job(spec_path):
+    # The worker's I/O algorithms remain portable unit tests. Managed ownership
+    # is a Linux node contract and is exercised by the real entry point there.
+    return (node.job_main if os.name == "posix" else node._job_main)(str(spec_path))
 
 
 class NodeDownloadCase(unittest.TestCase):
@@ -55,6 +62,19 @@ class NodeDownloadCase(unittest.TestCase):
 
 
 class NodePlanTests(NodeDownloadCase):
+    @unittest.skipUnless(os.name == "posix", "node directory preparation uses POSIX directory descriptors")
+    def test_prepare_marks_only_empty_directories_without_following_links(self):
+        directory = self.base / "new-models"
+        result = node.prepare_directory(self.root, {"directory": str(directory), "lab_dir": str(self.lab)})
+        self.assertTrue(result["prepared"])
+        self.assertTrue((directory / node.ASSET_MARKER).is_file())
+        self.assertTrue(node.prepare_directory(self.root, {"directory": str(directory)})["existing"])
+        unrelated = self.base / "unmarked"
+        unrelated.mkdir()
+        (unrelated / "important").write_bytes(b"keep")
+        with self.assertRaisesRegex(ValueError, "nonempty unmarked"):
+            node.prepare_directory(self.root, {"directory": str(unrelated)})
+        self.assertEqual(list(unrelated.iterdir()), [unrelated / "important"])
     def test_merge_retry_reserves_only_missing_input_and_output(self):
         first = self.item()
         second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
@@ -122,7 +142,8 @@ class NodePlanTests(NodeDownloadCase):
                 self.assertIn("error", node.run("download-plan", self.payload(item)))
         (self.assets / "part-1.gguf").write_bytes(b"existing")
         reply = node.run("download-plan", self.payload())
-        self.assertIn("already exists", reply["error"])
+        self.assertNotIn("error", reply)  # a job verifies and reuses it, never overwrites it
+        self.assertEqual(reply["disk"][0]["required_bytes"], 0)
         self.assertEqual((self.assets / "part-1.gguf").read_bytes(), b"existing")
 
     def test_only_a_marked_hydraweave_asset_directory(self):
@@ -217,7 +238,7 @@ class NodeJobTests(NodeDownloadCase):
 
                 with patch.object(install, "hash_file", side_effect=hasher), \
                         patch.object(node.subprocess, "Popen") as spawn:
-                    code = node.job_main(str(spec_path))
+                    code = fixture_job(spec_path)
                 state = install.read_json(self.root / "run" / "job-retained.json")
                 self.assertEqual(code, 1)
                 self.assertEqual(state["state"], "cancelled" if event == "cancel" else "failed")
@@ -297,7 +318,7 @@ class NodeJobTests(NodeDownloadCase):
         spec_path = self.root / "run" / "job-j1.spec.json"
         install.atomic_json(spec_path, {"root": str(self.root), "job": "j1", "lab_dir": str(self.lab), "files": rows})
         with patch.dict(os.environ, {"FAKE_BODY": body.decode(), **env}):
-            code = node.job_main(str(spec_path))
+            code = fixture_job(spec_path)
         return code, install.read_json(self.root / "run" / "job-j1.json")
 
     def test_verified_file_is_renamed(self):
@@ -305,6 +326,55 @@ class NodeJobTests(NodeDownloadCase):
         self.assertEqual((code, state["state"]), (0, "succeeded"))
         self.assertEqual((self.assets / "part-1.gguf").read_bytes(), BODY)
         self.assertFalse((self.assets / ".part-1.gguf.hydraweave-part").exists())
+
+    def test_verified_resident_file_is_reused_without_curl(self):
+        (self.assets / "part-1.gguf").write_bytes(BODY)
+        code, state = self.job(FAKE_EXIT="99")
+        self.assertEqual((code, state["state"]), (0, "succeeded"))
+        self.assertEqual((state["bytes_transferred"], state["bytes_reused"]), (0, len(BODY)))
+        self.assertEqual(state["verified"][str(self.assets / "part-1.gguf")]["sha256"], hashlib.sha256(BODY).hexdigest())
+
+    def test_corrupt_resident_file_is_not_overwritten(self):
+        (self.assets / "part-1.gguf").write_bytes(b"corrupt")
+        code, state = self.job()
+        self.assertEqual((code, state["state"]), (1, "failed"))
+        self.assertEqual((self.assets / "part-1.gguf").read_bytes(), b"corrupt")
+
+    def test_resident_merged_file_does_not_download_parts_again(self):
+        destination = self.assets / "merged.gguf"
+        destination.write_bytes(BODY)
+        second = self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
+        action = {"kind": "gguf-split", "destination": str(destination), "expected": {"bytes": len(BODY), "sha256": hashlib.sha256(BODY).hexdigest()}}
+        plan = node.plan(self.payload(self.item(), second, merge=action), self.root)
+        self.assertEqual(plan["disk"][0]["required_bytes"], 0)
+        spec_path = self.root / "run" / "job-j1.spec.json"
+        install.atomic_json(spec_path, {"root": str(self.root), "job": "j1", "lab_dir": str(self.lab), "files": plan["files"], "merge": action})
+        with patch.object(subprocess, "Popen", side_effect=AssertionError("redownloaded parts")):
+            self.assertEqual(fixture_job(spec_path), 0)
+        state = install.read_json(self.root / "run" / "job-j1.json")
+        self.assertEqual(state["bytes_transferred"], 0)
+        self.assertEqual(state["bytes_reused"], len(BODY))
+
+    def test_merge_checks_owned_job_expiry_and_keeps_verified_parts(self):
+        from types import SimpleNamespace
+        first, second = self.item(), self.item(file="UD/part-2.gguf", destination=str(self.assets / "part-2.gguf"))
+        for row in (first, second):
+            Path(row["destination"]).write_bytes(BODY)
+        action = {"kind": "gguf-split", "destination": str(self.assets / "merged.gguf"), "expected": {"bytes": 3, "sha256": "a" * 64}}
+        plan = node.plan(self.payload(first, second, merge=action), self.root)
+        spec_path = self.root / "run" / "job-j1.spec.json"
+        owner = self.root / "run" / "job-j1.owner"
+        owner.touch()
+        install.atomic_json(spec_path, {"root": str(self.root), "job": "j1", "lab_dir": str(self.lab), "files": plan["files"], "merge": action, "owner_ttl": 120})
+        def merge(*args, check, **kw):
+            os.utime(owner, (time.time() - 200, time.time() - 200))
+            check()
+            raise AssertionError("merge continued after owner expiry")
+        with patch.dict(sys.modules, {"hydraweave_gguf_merge": SimpleNamespace(merge=merge)}):
+            self.assertEqual(fixture_job(spec_path), 1)
+        state = install.read_json(self.root / "run" / "job-j1.json")
+        self.assertEqual(state["state"], "cancelled")
+        self.assertTrue(all(Path(row["destination"]).exists() for row in (first, second)))
 
     def test_verify_failure_leaves_no_final_file(self):
         code, state = self.job(body=b"tampered")

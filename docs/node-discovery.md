@@ -18,7 +18,8 @@ journalctl --user -u hydraweave-node -n 20 --no-pager
 ```
 
 Replace `CONTROLLER` with the controller's LAN address. The controller serves its own Hydraweave source
-package; publishing is unnecessary. Bootstrap upgrades `~/hydraweave/agent-venv` and enables
+package; publishing is unnecessary. Bootstrap installs a fresh environment under
+`~/hydraweave/agent-releases/` and enables
 `hydraweave-node.service` with `systemctl --user`. Nodes support Python 3.10+. Existing `etc`, `incoming`,
 `lab-arm`, `log` and `releases` stay in place. For lab mode, run bootstrap with `HYDRAWEAVE_LAB_DIR=<lab>` set (the directory holding the turn scripts);
 without it the agent runs in non-lab mode.
@@ -118,7 +119,51 @@ hydraweave nodes discover --wait 5
 hydraweave doctor node-a
 ```
 
-Rerun bootstrap to upgrade in place; pairing and node state are retained.
+### Agent updates and migration
+
+**Update node** in the portal downloads the controller's verified package into a fresh environment,
+checks its dependencies and installed imports, then schedules an independent user service to activate it.
+The old environment remains intact. A successful job means the replacement process answered an authenticated
+health request with the expected transaction, environment, version and build commit. Scheduling a restart is
+not reported as success. Failed health restores the previous systemd drop-in, restarts the retained environment
+and verifies its readiness before reporting `rolled_back`.
+
+During download and installation, status, stop, cancellation and job-status calls remain available on the old
+agent. New work is refused. The node's root lock and pending-update receipt coordinate agent, SSH and service
+starts. Updates refuse live GPU leases, owned model I/O, and queued/running or unverifiable background jobs.
+Activation holds the root lock through health/rollback, preventing a new job from being admitted between the
+idle check and restart. This adds no polling delay to inference.
+
+Portal update jobs reserve only their selected node through shared admission, so an update on another
+node can run concurrently within the shared job limit. A second update or another admitted task on the same
+node is refused; priority stops remain available. The admitted machine and pairing identity are rechecked
+before execution, and the transaction retains that endpoint through reconnects. The Home page renews the
+jobs it starts, shows each node's progress and allows stopping the wait. Closing the page or cancelling the
+portal job does not interrupt the node's independent activation/rollback worker.
+
+Agents installed before this transaction protocol cannot update themselves safely. Rerun the bootstrap
+command on the **running** node to migrate: it stages a new venv, checks the existing service's MainPID,
+process start identity, original environment/argv and ownership of its listener, then reads the authenticated
+legacy version. The independent activation worker retains the original unit and environment. A rollback to
+that legacy agent is verified using the same local process evidence and its original version response;
+it does not invent a new-protocol health receipt. For an unpaired node the local pairing endpoint plus verified
+listener ownership supplies readiness, and bootstrap prints a pairing code. A stopped existing service must
+be started before migration so its rollback identity can be checked. Custom external/pipx environments are
+not silently rewritten by this managed-root migration.
+
+The private receipt is `run/agent-update.json`; `agent-update-status` is an authenticated, argument-free agent
+verb. `ready`, `rolled_back` and `failed` are terminal outcomes. `rollback_failed` retains the new-work gate
+and the previous release; automatic rollback attempts are bounded to three. After fixing the service problem,
+an operator can retry the independent recovery using an installed environment that contains this protocol:
+
+```sh
+PATH_TO_RETAINED_VENV/bin/python -I -m hydraweave.node_update \
+  --root "$HOME/hydraweave" --transaction TRANSACTION_ID_FROM_RECEIPT
+```
+
+No active venv is reinstalled, and retained environments are not automatically pruned by agent updates.
+Pairing, model/engine assets, logs and other node state stay in place.
+
 Stop advertising with `systemctl --user stop hydraweave-node`.
 If controller credentials are lost: stop the agent, remove only `etc/agent-pairing.json`, restart and
 pair again. Retain `etc/agent-id` and all other configuration/logs.

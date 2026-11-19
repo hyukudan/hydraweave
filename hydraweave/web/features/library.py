@@ -4,25 +4,26 @@ GET library -> hydraweave/ui-library-v1: every machine with its model roots (mac
     ``<lab_dir>/models``; config assets; prefs ``library/roots``), its last scan (units with ``format``, ``quant``,
     ``size_bytes`` from the node and ``engine`` {family, presets, basis, assets} mapped here), verification results and library jobs kept from earlier releases, and the
     RTX big-job ledger guard state. It reads the portal store only: no node call, no file named by the client,
-    nothing created. Copies between machines and model verification are not part of this release; the document
-    says so (``copy``, ``verify_job``) and there is no route that starts either.
+    nothing created. Capabilities describe managed verification and configured direct SSH copies.
 POST library/roots {machine, roots} (audited): the extra model roots of one machine.
 POST library/ledger-accept {} (audited): accept the current RTX big-job ledger as the guard's baseline.
-Job: library/scan {machine?} (a bounded, read-only inventory; it takes no GPU turn). The CLI family
-    ``hydraweave models`` runs the same functions.
+Jobs: library/scan {machine?} (bounded parallel read-only inventory), library/verify and library/copy
+    (admitted, owned, cancellable model-I/O jobs). Copies require a fresh plan and confirmation.
+    The CLI family ``hydraweave models`` runs the same functions.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import threading
 import time
 
-from hydraweave import downloads, telemetry
+from hydraweave import downloads, library_jobs, telemetry
 
 
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}")
 SCAN_STALE_S = 600
-COPY = {"available": False, "why": "copies between machines are not available in this release"}
-VERIFY = {"available": False, "why": downloads.VERIFY_HELD}
+COPY = {"available": True, "why": "Direct copies require Linux peers, a configured peer_ssh route and a pinned destination host key."}
+VERIFY = {"available": True, "why": "Owned jobs verify complete manifests while the node's model-I/O gate is held."}
 _scans = {}
 _scan_lock = threading.Lock()
 
@@ -81,6 +82,9 @@ def overview(api, query):
         _engines(cluster, machine, inventory)
         row = {"id": machine.id, "os": machine.os, "access": machine.access, "lab_mode": machine.lab_mode,
                "roots": roots.get(machine.id, []), "inventory": inventory, "why": {}}
+        row["copy_destinations"] = [mid for mid in machine.peer_ssh if mid in cluster.machines
+                                    and cluster.machines[mid].os == "linux" and cluster.machines[mid].access == "ssh"]
+        row["verify_available"] = machine.os == "linux" or machine.access == "local"
         if not row["roots"]:
             row["why"]["roots"] = "no model roots: the machine has no model_roots or lab_dir, none of the " \
                                   "configured assets is on it and prefs library/roots has none"
@@ -139,19 +143,22 @@ def scan(api, arguments, ctx):
         cluster = api.cluster()
         store = telemetry.open_store(api)
         result = {}
-        for mid in machines:
-            if ctx.cancelled():
-                return None
-            ctx("scanning " + mid)
+        def one(mid):
             try:
                 inventory = downloads.inventory(cluster, mid, store)
             except Exception as exc:          # one machine failing must not hide the others
                 inventory = {"machine": mid, "scanned_at": time.time(), "roots": [], "error": str(exc)}
-            if inventory.get("busy"):
-                result[mid] = "busy (another scan is running on the node; the previous result is kept)"
-                continue
-            store.put("library/inventory", mid, inventory)
-            result[mid] = "error: " + inventory["error"] if inventory.get("error") else "scanned"
+            return mid, inventory
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(machines)))) as pool:
+            pending = {pool.submit(one, mid) for mid in machines if not ctx.cancelled()}
+            for future in as_completed(pending):
+                mid, inventory = future.result()
+                ctx("scanned " + mid)
+                if inventory.get("busy"):
+                    result[mid] = "busy (another scan is running on the node; the previous result is kept)"
+                    continue
+                store.put("library/inventory", mid, inventory)
+                result[mid] = "error: " + inventory["error"] if inventory.get("error") else "scanned"
         return {"machines": result}
     finally:
         with _scan_lock:
@@ -159,8 +166,57 @@ def scan(api, arguments, ctx):
                 _scans.pop(mid, None)
 
 
+def _job_arguments(api, arguments, copying=False):
+    required = ("machine", "model_root", "name") + (("destination", "destination_root", "confirm") if copying else ())
+    a = dict(_arguments(arguments, required))
+    cluster, store = api.cluster(), telemetry.existing_store(api)
+    library_jobs.selection(cluster, store, a["machine"], a["model_root"], a["name"])
+    mids = {a["machine"]}
+    if copying:
+        library_jobs.selection(cluster, store, a["destination"], a["destination_root"], a["name"])
+        if not re.fullmatch(r"[0-9a-f]{16}", a["confirm"]):
+            raise ValueError("review the copy plan and send its confirmation code")
+        mids.add(a["destination"])
+    a["resources"] = sorted(mids)
+    a["configuration"] = library_jobs.identity(cluster, mids)
+    return a
+
+
+def verify_validate(api, arguments):
+    return _job_arguments(api, arguments)
+
+
+def copy_validate(api, arguments):
+    return _job_arguments(api, arguments, copying=True)
+
+
+def copy_plan(api, arguments):
+    _arguments(arguments, ("machine", "model_root", "name", "destination", "destination_root"))
+    return library_jobs.copy_plan(api.cluster(), telemetry.existing_store(api), arguments)
+
+
+def _run(api, arguments, ctx, kind):
+    cluster = api.cluster()
+    if library_jobs.identity(cluster, arguments["resources"]) != arguments["configuration"]:
+        raise ValueError("machine configuration changed while the job was queued")
+    return library_jobs.execute(cluster, telemetry.open_store(api), api.config_path, arguments, ctx, kind)
+
+
+def verify(api, arguments, ctx):
+    return _run(api, arguments, ctx, "verify")
+
+
+def copy(api, arguments, ctx):
+    return _run(api, arguments, ctx, "copy")
+
+
 def register(reg):
     reg.get("library", overview)
     reg.post("library/roots", roots, audited=True)
     reg.post("library/ledger-accept", ledger_accept, audited=True)
     reg.job("library/scan", scan, validate=scan_validate, deadline_s=600, rollback=scan_rollback)
+    reg.post("library/copy-plan", copy_plan)
+    reg.job("library/verify", verify, validate=verify_validate, admission="bench",
+            resources=lambda api, a: set(a["resources"]), deadline_s=86400)
+    reg.job("library/copy", copy, validate=copy_validate, admission="bench",
+            resources=lambda api, a: set(a["resources"]), deadline_s=86400)

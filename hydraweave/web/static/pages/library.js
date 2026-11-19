@@ -2,7 +2,7 @@
 "use strict";
 (() => {
   const H = () => window.Hydraweave;
-  const view = {busy: false, accept: false};
+  const view = {busy: false, pending: 0, accept: false, copy: null, plan: null};
   const doc = () => H().state.docs.library;
   const when = t => typeof t === "number" ? new Date(t * 1000).toLocaleString() : null;
   const size = (value, why) => H().display(value, why, "bytes");
@@ -32,7 +32,8 @@
       const manifest = unit.manifest || {};
       const status = manifest.status || "unknown";
       const busy = view.busy ? "Another library request is being sent" : "";
-      const verifyBlocker = verifyWhy || busy || (verifiable(status) ? "" : status === "none" ? "No manifest entries to verify against" : "The scan reached a bound in this unit");
+      const rootWhy = machine.roots.some(r=>r.path===root.path) ? "" : "This scanned root is no longer configured; rescan the machine";
+      const verifyBlocker = verifyWhy || busy || rootWhy || (!machine.verify_available ? "Managed verification requires a Linux node or the local controller" : "") || (verifiable(status) ? "" : status === "none" ? "No manifest entries to verify against" : "The scan reached a bound in this unit");
       const engine = unit.engine || {};
       const engineText = engine.family ? `${engine.family}${engine.presets?.length ? ` · ${engine.presets.join(", ")}` : ` · ${engine.why || "no preset"}`}` : "";
       return cells([
@@ -45,7 +46,7 @@
         `<span class="hide-n">${unit.newest_mtime ? esc(when(unit.newest_mtime)) : H().unavailable(manifest.why || "no files")}</span>`,
         `${pill(status, statusClass(status))}${manifest.unlisted ? ` <span class="hint">${esc(manifest.unlisted)} not listed</span>` : ""}${manifest.missing ? ` <span class="hint">${esc(manifest.missing)} missing</span>` : ""}`,
         `<span class="hide-n">${verifyCell(machine.id, root.path, unit.name)}</span>`,
-        `<div class="row lib-actions">${act("Verify", "library-verify", {machine: machine.id, root: root.path, name: unit.name}, {disabled: verifyBlocker})}${act("Copy to…", "library-copy", {machine: machine.id, root: root.path, name: unit.name}, {disabled: copyWhy})}</div>`]);
+        `<div class="row lib-actions">${act("Verify", "library-verify", {machine: machine.id, root: root.path, name: unit.name}, {disabled: verifyBlocker})}${act("Copy to…", "library-copy", {machine: machine.id, root: root.path, name: unit.name}, {disabled: copyWhy || busy || rootWhy || (status !== "complete" ? "A complete manifest is required" : "") || (!machine.copy_destinations?.length ? "Configure a pinned peer_ssh destination first" : "")})}</div>`]);
     }).join("");
   }
 
@@ -80,7 +81,21 @@
       return cells([esc(job.kind), esc(what), pill(state, ({succeeded: "ok", running: "info", paused: "warn", unresolved: "warn", failed: "err"})[state] || "off"), esc(paused ? `paused: ${paused}` : job.reason || job.progress || ""), esc(when(job.started) || "")]);
     }).join("");
     return card("Library jobs", jobs.length ? table(["Kind", "What", "State", "Progress", "Started"], body, "Library jobs") : `<p class="t2">No library jobs recorded.</p>`,
-      "verifications recorded by earlier releases (verification is not available in this release)");
+      "owned jobs, verified results and direct-transfer byte counts");
+  }
+
+  function copyCard() {
+    if (!view.copy) return "";
+    const {esc, card} = H(), source = (doc()?.machines || []).find(m=>m.id===view.copy.machine);
+    const destinations = (doc()?.machines || []).filter(m=>(source?.copy_destinations || []).includes(m.id));
+    const options = destinations.flatMap(m=>(m.roots || []).map(r=>({machine:m.id,root:r.path})));
+    const selected = view.copy.destination ? JSON.stringify([view.copy.destination,view.copy.destination_root]) : "";
+    return card("Copy " + view.copy.name, `<p>Model bytes travel directly between the selected nodes. Existing files and retained staging files are reused only after SHA-256 verification.</p><label for="library-copy-destination">Destination machine and model root</label><select class="inp" id="library-copy-destination"><option value="">Choose a destination</option>${options.map(o=>`<option value="${esc(JSON.stringify([o.machine,o.root]))}"${selected===JSON.stringify([o.machine,o.root])?" selected":""}>${esc(o.machine + " · " + o.root)}</option>`).join("")}</select>${view.plan ? `<p>${size(view.plan.bytes)} · ${esc(view.plan.files?.length)} files · ${esc(view.plan.transport)}</p><details><summary>Review file hashes</summary><pre>${esc(JSON.stringify(view.plan.files,null,2))}</pre></details>${act("Confirm direct copy", "library-copy-confirm", {}, {disabled:view.busy?"A request is running":"",style:"pri"})}` : act("Review copy plan", "library-copy-plan", {}, {disabled:view.busy?"A request is running":""})} ${act("Close", "library-copy-close")}`);
+  }
+
+  function activeCard() {
+    const jobs=(H().state.lastJobs || []).filter(j=>j.action?.startsWith("library/") && j.state==="running");
+    return jobs.length ? H().card("Active library work",jobs.map(j=>`<p>${H().esc(j.action)} · ${H().esc(j.progress || "Running")} ${act("Cancel", "library-cancel", {job:j.id || j.job})}</p>`).join("")) : "";
   }
 
   function rootsCard() {
@@ -132,19 +147,21 @@
       const library = doc();
       const {esc} = H();
       const store = library.why?.inventory ? `<p class="hint">${esc(library.why.inventory)}</p>` : "";
-      return `<div class="grid">${kpis()}${store}${(library.machines || []).map(machineCard).join("")}${jobsCard()}<div class="grid g2">${rootsCard()}${ledgerCard()}</div></div>`;
+      return `<div class="grid">${kpis()}${store}<a class="btn" href="#/assets">Download pinned model files</a>${copyCard()}${activeCard()}${(library.machines || []).map(machineCard).join("")}${jobsCard()}<div class="grid g2">${rootsCard()}${ledgerCard()}</div></div>`;
     },
   };
 
   async function post(endpoint, body, done) {
-    view.busy = true; H().render();
+    if(view.busy && endpoint!=="cancel") return;
+    view.pending++; view.busy = true; H().render();
     try {
       const result = await H().request(endpoint, {method: "POST", headers: {"Content-Type": "application/json", "X-Hydraweave-CSRF": H().csrf() || ""}, body: JSON.stringify(body)});
+      if (result.id || result.job) H().own(result.id || result.job);
       if (done) done(result);
     } catch (error) {
       H().announce(error.message);
     } finally {
-      view.busy = false; H().render(); H().refresh();
+      view.pending--; view.busy = view.pending>0; H().render(); H().refresh();
     }
   }
 
@@ -153,6 +170,19 @@
     if (!control || control.disabled) return;
     const d = control.dataset;
     switch (d.pageAction) {
+      case "library-verify": post("library/verify", {machine:d.machine,model_root:d.root,name:d.name},()=>H().announce("Verification started")); break;
+      case "library-copy": view.copy={machine:d.machine,model_root:d.root,name:d.name}; view.plan=null; H().render(); break;
+      case "library-copy-close": view.copy=null; view.plan=null; H().render(); break;
+      case "library-copy-plan": {
+        const value=document.getElementById("library-copy-destination")?.value;
+        if(!value) {H().announce("Choose a destination");break;}
+        const [destination,destination_root]=JSON.parse(value);
+        view.copy={...view.copy,destination,destination_root};
+        const reviewed={...view.copy};
+        post("library/copy-plan",reviewed,r=>{if(JSON.stringify(view.copy)===JSON.stringify(reviewed))view.plan=r;}); break;
+      }
+      case "library-copy-confirm": if(view.copy&&view.plan) post("library/copy",{...view.copy,confirm:view.plan.confirm},()=>{view.copy=null;view.plan=null;H().announce("Direct copy started");}); break;
+      case "library-cancel": post("cancel",{job:d.job},()=>H().announce("Cancellation requested")); break;
       case "library-scan": post("library/scan", d.machine ? {machine: d.machine} : {}, () => H().announce("Scan started")); break;
       case "library-roots": {
         const text = document.getElementById(`library-roots-${d.machine}`)?.value || "";
@@ -164,4 +194,5 @@
       case "library-accept-confirm": view.accept = false; post("library/ledger-accept", {}, () => H().announce("Ledger accepted as the new baseline")); break;
     }
   });
+  document.addEventListener("change",event=>{if(event.target.id==="library-copy-destination") {view.plan=null; const value=event.target.value;if(value) {const [destination,destination_root]=JSON.parse(value);Object.assign(view.copy,{destination,destination_root});} H().render();}});
 })();

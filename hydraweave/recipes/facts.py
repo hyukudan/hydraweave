@@ -345,6 +345,15 @@ def gather(cluster, ctx, *, call, gpus=None, memory=None, pro_busy=None, cache=N
         node = probe.node_device(gpu_result)
         devices[mid] = {"name": node["name"]["value"], "memory_gib": _gtt(gpu_result),
                         "host_ram_gib": node["host_ram_gib"]["value"]}
+        if placement:
+            for key in ("uuid", "pci"):
+                if node.get(key, {}).get("value") is not None:
+                    devices[mid][key] = node[key]["value"]
+            kernel = node["kernel"]["value"]
+            rocm = probe._ok(((doctor_result or {}).get("checks") or {}).get("rocm_version"))
+            devices[mid]["driver"] = (f"kernel={kernel};rocm={rocm}"
+                                      if isinstance(kernel, str) and kernel and isinstance(rocm, str) and rocm else "unknown")
+            devices[mid]["platform"] = "linux-hip"
         model = cluster.assets.get(mid, {}).get(FAMILY_MODELS_BY_ID.get(ctx.model, ""), {}).get("path")
         evidence = cache.evidence(mid, model, now) if cache is not None and model else None
         if evidence is not None:
@@ -395,12 +404,14 @@ def _identities(cluster, ctx, executable, commit, notes):
         if digest != expected:
             raise ValueError("release binary differs from its verified digest")
         identities["engine_sha256"] = digest
+        if isinstance(release.get("engine_commit"), str) and re.fullmatch(r"[0-9a-f]{40}", release["engine_commit"]):
+            identities["engine_revision"] = release["engine_commit"]
     except (OSError, ValueError, RecipeError) as exc:
         notes.append("engine identity unavailable: " + str(exc))
     try:
         name = FAMILY_MODELS_BY_ID.get(ctx.model)
         asset = cluster.assets.get(ctx.pc, {}).get(name)
-        entry = assets.read_manifest().get(ctx.pc, {}).get(name)
+        entry = assets.read_manifest().get(ctx.pc, {}).get(asset["path"]) if asset is not None else None
         if asset is None or entry is None:
             raise ValueError("run assets verify for the selected model")
         stat = Path(asset.get("control_path", asset["path"])).stat()
@@ -515,22 +526,20 @@ class Cache(probe.DiskCache):
             if type(value) is not int or not 0 <= value < MAX_DECLARED_BYTES:
                 raise probe.ProbeError(f"{receipt_path}: {key} must be an integer in [0, 2^50)")
             fields[key] = value
-        data = self._load()
         key = f"describe|{machine}|{launch}"
-        data[key] = dict(fields, launch_sha256=launch, rank=rank, receipt=str(receipt_path),
+        entry = dict(fields, launch_sha256=launch, rank=rank, receipt=str(receipt_path),
                          receipt_sha256=hashlib.sha256(raw).hexdigest(),
                          executable_sha256=executable)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
-        return data[key]
+        self.update(key, entry)
+        return entry
 
     def evidence(self, machine, model_path, now=None):
         """The node's saved disk measurement for this model path, when it is younger than the cache TTL."""
         entry = self._load().get(f"evidence|{machine}|{model_path}")
         now = time.time() if now is None else now
-        if not isinstance(entry, dict) or entry.get("path") != model_path or now - entry.get("measured_at", 0) > probe.CACHE_TTL_S:
+        measured = entry.get("measured_at") if isinstance(entry, dict) else None
+        if (not isinstance(entry, dict) or entry.get("path") != model_path or type(measured) not in (int, float)
+                or not 0 <= now - measured <= probe.CACHE_TTL_S):
             return None
         return entry
 
@@ -548,12 +557,12 @@ class Cache(probe.DiskCache):
         value = receipt["disk_read_gbytes_ps"]
         if type(value) not in (int, float) or not 0 < value < 1e6:   # NaN, infinities and huge integers fail too
             raise probe.ProbeError(f"{receipt_path}: disk_read_gbytes_ps must be a finite number in (0, 1e6)")
-        data = self._load()
+        measured = receipt.get("measured_at")
+        if type(measured) not in (int, float) or not 0 <= time.time() - measured <= probe.CACHE_TTL_S:
+            raise probe.ProbeError(f"{receipt_path}: measured_at must be the measurement's recent Unix timestamp; "
+                                   "importing an old receipt does not refresh it")
         key = f"evidence|{machine}|{model_path}"
-        data[key] = {"disk_read_gbytes_ps": float(value), "method": "receipt", "receipt": str(receipt_path),
-                     "receipt_sha256": hashlib.sha256(raw).hexdigest(), "path": model_path, "measured_at": time.time()}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
-        return data[key]
+        entry = {"disk_read_gbytes_ps": float(value), "method": "receipt", "receipt": str(receipt_path),
+                 "receipt_sha256": hashlib.sha256(raw).hexdigest(), "path": model_path, "measured_at": measured}
+        self.update(key, entry)
+        return entry

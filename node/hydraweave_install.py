@@ -412,18 +412,22 @@ def launch_job(root, kind, payload):
         if not shutil.which("ionice"):
             raise ValueError("verify-model requires ionice for idle I/O priority")
         prefix += ["ionice", "-c3"]
-    atomic_json(spec, {"root": str(root), "kind": kind, "payload": payload,
-                       "job": job, "limited": prefix[0] != "systemd-run"})
-    atomic_json(state_path, {"job": job, "kind": kind, "state": "queued", "log": str(log)})
-    try:
-        with log.open("ab") as output:
-            child = subprocess.Popen(["nohup", *prefix, sys.executable, str(Path(__file__).resolve()),
-                                      "--job", str(spec)], stdin=subprocess.DEVNULL,
-                                     stdout=output, stderr=output, start_new_session=True,
-                                     close_fds=True)
-    except OSError as exc:
-        atomic_json(state_path, {"job": job, "state": "failed", "error": str(exc)})
-        raise
+    from hydraweave_lease import root_lock
+    from hydraweave_agent_update import require_idle
+    with root_lock(root):
+        require_idle(root)
+        atomic_json(spec, {"root": str(root), "kind": kind, "payload": payload,
+                           "job": job, "limited": prefix[0] != "systemd-run"})
+        atomic_json(state_path, {"job": job, "kind": kind, "state": "queued", "log": str(log)})
+        try:
+            with log.open("ab") as output:
+                child = subprocess.Popen(["nohup", *prefix, sys.executable, str(Path(__file__).resolve()),
+                                          "--job", str(spec)], stdin=subprocess.DEVNULL,
+                                         stdout=output, stderr=output, start_new_session=True,
+                                         close_fds=True)
+        except OSError as exc:
+            atomic_json(state_path, {"job": job, "state": "failed", "error": str(exc)})
+            raise
     threading.Thread(target=child.wait, daemon=True).start()
     # Do not rewrite queued state here: the worker may already have finished.
     return {"job": job, "pid": child.pid, "log": str(log)}

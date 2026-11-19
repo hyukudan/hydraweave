@@ -40,7 +40,8 @@ def test_measurement_uses_real_watchdog_with_zero_load_grace(monkeypatch, tmp_pa
     observer = Observer()
     child = mock.Mock(pid=42, returncode=0)
     child.poll.return_value = 0
-    samples = [{"h2d_mbps": n + 1} for n in range(9)]
+    # Match the worker's complete transfer sample while exercising the real watchdog.
+    samples = [{"h2d_mbps": n + 1, "d2h_mbps": n + 2, "h2d_lat_ns": n + 3} for n in range(9)]
     def communicate(*args, **kwargs):
         if args:
             now[0] += 5
@@ -68,7 +69,7 @@ def test_measurement_uses_real_watchdog_with_zero_load_grace(monkeypatch, tmp_pa
     result = measurements._gpu(row, grant, clock=lambda: now[0], lock_factory=lambda _: lock,
         gate_runner=lambda _: None, observer_factory=lambda: observer, watchdog_factory=watchdog,
         popen=lambda *a, **kw: child, job_factory=mock.Mock)
-    assert result["values"] == {"h2d_mbps": 5}
+    assert result["values"] == {"h2d_mbps": 5, "d2h_mbps": 6, "h2d_lat_ns": 7}
     assert dogs[0].spec.ready_timeout_s == 0
     assert dogs[0].reason is None
     assert dogs[0].smi_failures == int(ambiguous)

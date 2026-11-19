@@ -1,6 +1,7 @@
 """Bounded GPU turns and their foreground owner (Python 3.10+, stdlib only)."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import hashlib
 import ipaddress
@@ -16,7 +17,7 @@ import threading
 import time
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 import uuid
 try:
     import hydraweave_common
@@ -232,6 +233,10 @@ def validate_process(proc):
     proc["ready_timeout_s"] = number(proc.get("ready_timeout_s", 120), "ready_timeout_s")
     if proc.get("key_file") is not None:
         path(proc["key_file"])
+    if type(proc.get("deployment_required", False)) is not bool:
+        raise ValueError("deployment_required must be boolean")
+    if proc.get("deployment_id") is not None and not re.fullmatch(r"[a-f0-9]{16}", str(proc["deployment_id"])):
+        raise ValueError("invalid deployment identity")
     return proc
 
 
@@ -414,6 +419,10 @@ def start_lease(payload):
     if spec.get("diagnostic"):
         state.update(production=False, diagnostic=spec["diagnostic"])
     with root_lock(root):
+        import hydraweave_agent_update
+        import hydraweave_model_jobs
+        hydraweave_agent_update.require_idle(root)
+        hydraweave_model_jobs.refuse_storage_owner(root)
         exclude_services(root, gpu=spec["kind"] != "none" or spec.get("lab_dir") is not None)
         write_json(filename, spec)
         write_json(record_path(root, lease), state)
@@ -610,7 +619,12 @@ def adapter_ready(adapter, stdout, stderr, rank=0):
     return False
 
 
-def http(url, *, drain=False, key_file=None, timeout=0.5):
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def http(url, *, drain=False, key_file=None, timeout=0.5, deployment_id=None, deployment_required=False):
     parsed = urlsplit(url)
     if drain:
         # Admin calls stay on the process's host, even when health binds a private IP.
@@ -622,8 +636,23 @@ def http(url, *, drain=False, key_file=None, timeout=0.5):
     request = Request(urlunsplit(parsed), data=b"{}" if drain else None,
                       headers=headers, method="POST" if drain else "GET")
     try:
-        with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
-            return response.status == 200
+        with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=timeout) as response:
+            if response.status != 200:
+                return False
+            if drain or deployment_id is not None or deployment_required:
+                body = response.read(MAX_LOG + 1)
+                if len(body) > MAX_LOG:
+                    return False
+                try:
+                    value = decode(body)
+                except (ValueError, UnicodeError):
+                    return not deployment_required and deployment_id is None
+                if deployment_required or deployment_id is not None:
+                    live_id = value.get("deployment_id")
+                    return (isinstance(live_id, str) and re.fullmatch(r"[a-f0-9]{16}", live_id) is not None
+                            and (deployment_id is None or live_id == deployment_id))
+                return value
+            return True
     except OSError:
         return False
 
@@ -709,24 +738,41 @@ class Child:
                      for stream in ("stdout", "stderr"))
 
     def check_ready(self):
+        options = {}
+        if self.proc.get("deployment_id") is not None:
+            options["deployment_id"] = self.proc["deployment_id"]
+        if self.proc.get("deployment_required"):
+            options["deployment_required"] = True
+        if key_file(self.proc):
+            options["key_file"] = key_file(self.proc)
         if isinstance(self.proc["ready"], dict) and "http" in self.proc["ready"]:
             base = urlsplit(self.proc["health_url"])
             endpoint = urlunsplit(base._replace(path=self.proc["ready"]["http"], query="", fragment=""))
-            return http(endpoint)
+            return http(endpoint, **options)
         stdout, stderr = self.logs()
         return (adapter_ready(self.proc["ready"], stdout, stderr, rank_of(self.proc))
-                and http(self.proc["health_url"]))
+                and http(self.proc["health_url"], **options))
+
+    def drain(self, deadline):
+        if self.peer or rank_of(self.proc) != 0:
+            return
+        while self.process.poll() is None:
+            try:
+                remaining = max(0.01, deadline - time.monotonic())
+                reply = http(self.proc["health_url"], drain=True, key_file=key_file(self.proc),
+                             timeout=min(0.5, remaining))
+            except (ValueError, OSError):
+                return
+            if (not isinstance(reply, dict) or reply.get("status") != "draining"
+                    or reply.get("drained") is not False or time.monotonic() >= deadline):
+                return
+            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
 
     def terminate(self):
         if self.peer:
             if self.process.stdin and not self.process.stdin.closed:
                 self.process.stdin.close()
         else:
-            if self.proc["ready"] == "ds41-json" and not ds41_follower(self.proc) and self.process.poll() is None:
-                try:
-                    http(self.proc["health_url"], drain=True, key_file=key_file(self.proc))
-                except (ValueError, OSError):
-                    pass
             group_signal(self.process, signal.SIGTERM)
 
     def close(self):
@@ -735,6 +781,19 @@ class Child:
 
 
 def stop_children(children, leader_grace=30):
+    # One shared drain window; independent engines drain together before signals.
+    drain_deadline = time.monotonic() + 30
+    draining = [child for child in children if child.process is not None]
+    drain_errors = []
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(draining)))) as executor:
+        futures = [executor.submit(child.drain, drain_deadline) for child in draining]
+        for future in futures:
+            try:
+                future.result()
+            except Exception as exc:
+                # A broken optional HTTP drain must never skip owned-process
+                # cleanup. Report it after every child has been stopped.
+                drain_errors.append(exc)
     # A MiniMax rank 0 stops first (SIGTERM ends its scheduler, which sends the shutdown block to rank 1); the
     # others are signalled after it exits or after leader_grace, then share the grace period below.
     leaders = [child for child in children if child.process is not None and pair_leader(child)]
@@ -765,6 +824,8 @@ def stop_children(children, leader_grace=30):
             child.process.wait()
         finally:
             child.close()
+    if drain_errors:
+        raise RuntimeError("engine drain failed after owned-process cleanup") from drain_errors[0]
 
 
 def supervise(filename):
@@ -900,11 +961,9 @@ def peer_run(payload, stream=None):
     root = marked_root(payload["root"])
     lease = identifier(payload["lease"])
     diagnostic_names(payload.get("diagnostic"))
-    with root_lock(root):
-        exclude_services(root, gpu=True)
     proc = validate_process(payload["process"])
     proc["machine"] = "local"
-    child = Child(root, lease, proc)
+    child = None
     eof = threading.Event()
     stream = sys.stdin.buffer if stream is None else stream
 
@@ -921,15 +980,22 @@ def peer_run(payload, stream=None):
     old_handlers = {sig: signal.signal(sig, lambda *_: eof.set())
                     for sig in (signal.SIGTERM, signal.SIGHUP)}
     try:
-        child.start()
-        peer_state(root, payload, child)
+        with root_lock(root):
+            import hydraweave_agent_update
+            import hydraweave_model_jobs
+            hydraweave_agent_update.require_idle(root)
+            hydraweave_model_jobs.refuse_storage_owner(root)
+            exclude_services(root, gpu=True)
+            child = Child(root, lease, proc)
+            child.start()
+            peer_state(root, payload, child)
         threading.Thread(target=watch, daemon=True).start()
         while (child.process.poll() is None and not eof.wait(0.05)
                and not stop_path(root, lease).exists()
                and (payload.get("deadline") is None or time.time() < payload["deadline"])):
             pass
     finally:
-        if child.process is not None:
+        if child is not None and child.process is not None:
             stop_children([child])
             peer_state(root, payload, child, finished=True)
         for sig, old in old_handlers.items():

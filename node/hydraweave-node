@@ -37,7 +37,7 @@ POLL_REPLY = 1024 * 1024
 # VERBS (set of names) and run(verb, payload: dict) -> dict; they get the raw JSON payload.
 EXTENSIONS = ("hydraweave_rocm", "hydraweave_compat", "hydraweave_common", "hydraweave_install", "hydraweave_lease", "hydraweave_download", "hydraweave_service",
               "hydraweave_observe", "hydraweave_usb4", "hydraweave_turns", "hydraweave_models", "hydraweave_logsearch",
-              "hydraweave_gguf_merge")
+              "hydraweave_gguf_merge", "hydraweave_deploy", "hydraweave_agent_update", "hydraweave_model_jobs")
 
 
 def extension_for(verb):
@@ -352,6 +352,10 @@ class Inspector:
                 continue
             item = {"id": PurePosixPath(card).name}
             item["product_name"] = self.read(device + "/product_name")
+            item["unique_id"] = self.read(device + "/unique_id")
+            event = self.read(device + "/uevent")
+            match = re.search(r"^PCI_SLOT_NAME=([0-9a-fA-F:.]+)$", event.get("value") or "", re.M)
+            item["pci"] = ok(match[1].lower()) if match else unavailable("PCI slot identity not reported")
             fields = {"vram_used_bytes": "mem_info_vram_used",
                       "vram_total_bytes": "mem_info_vram_total",
                       "gtt_used_bytes": "mem_info_gtt_used",

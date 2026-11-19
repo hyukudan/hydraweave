@@ -244,6 +244,13 @@ class LeaseLogicTests(LeaseFixture):
 
     def test_launch_command_and_turn_cap(self):
         # Check POSIX launch construction on Windows without starting any child.
+        import hydraweave_model_jobs as jobs
+        if jobs.models.fcntl is None:
+            # This fixture simulates a POSIX launch; no native I/O lock exists on
+            # the Windows runner. The real missing-lock refusal is tested below.
+            gate = patch.object(jobs, "refuse_storage_owner")
+            gate.start()
+            self.addCleanup(gate.stop)
         fake_os = SimpleNamespace(**dict(vars(os), name="posix"))
         for kind in ("single", "pair", "none"):
             for approved in (False, True):
@@ -267,6 +274,15 @@ class LeaseLogicTests(LeaseFixture):
                 self.assertTrue(start.call_args.kwargs["start_new_session"])
                 lease._launches.remove(process)
 
+    def test_storage_owner_guard_refuses_without_posix_locks(self):
+        import hydraweave_model_jobs as jobs
+        fake_os = SimpleNamespace(**dict(vars(os), name="posix"))
+        with patch.object(lease, "os", fake_os), patch.object(jobs.models, "fcntl", None), \
+                patch.object(lease.subprocess, "Popen") as start:
+            reply = lease.run("lease", self.spec)
+        self.assertIn("require POSIX file locks", reply["error"])
+        start.assert_not_called()
+
     def test_stop_order_and_group_escalation(self):
         events = []
         processes = []
@@ -274,17 +290,17 @@ class LeaseLogicTests(LeaseFixture):
             proc = dict(self.spec["processes"][0], name=name, ready=adapter)
             child = lease.Child(self.root, "abc", proc)
             child.process = Mock(pid=100 + len(processes), poll=Mock(return_value=None))
+            child.process.poll.side_effect = lambda p=child.process: 0 if (p.pid, signal.SIGTERM) in events else None
             processes.append(child)
         with patch.object(lease, "http", side_effect=lambda *a, **kw: events.append("drain")), \
                 patch.object(lease, "group_signal", side_effect=lambda proc, sig: events.append((proc.pid, sig))), \
-                patch.object(lease, "signal", SimpleNamespace(**dict(vars(signal), SIGKILL=9))), \
-                patch.object(lease.time, "monotonic", side_effect=[0, 31]):
+                patch.object(lease, "signal", SimpleNamespace(**dict(vars(signal), SIGKILL=9))):
             lease.stop_children(processes)
-        self.assertEqual(events[0], "drain")
-        self.assertEqual(events[1], (101, signal.SIGTERM))
-        self.assertEqual(events[2], (100, signal.SIGTERM))
+        self.assertEqual(events[:2], ["drain", "drain"])
+        self.assertEqual(events[2], (101, signal.SIGTERM))
+        self.assertEqual(events[3], (100, signal.SIGTERM))
         # Both groups are killed even if their leaders have already left children.
-        self.assertEqual([event[0] for event in events[3:]], [100, 101])
+        self.assertEqual([event[0] for event in events[4:]], [100, 101])
 
     def test_ds41_follower_stops_without_an_http_drain(self):
         proc = dict(self.spec["processes"][0], ready="ds41-json",
@@ -425,7 +441,8 @@ class LeaseProcessTests(LeaseFixture):
         super().setUp()
         self.boot = self.base / "boot"
         self.boot.mkdir()
-        for name in ("hydraweave-node", "hydraweave_common.py", "hydraweave_compat.py", "hydraweave_lease.py", "hydraweave_rocm.py"):
+        from hydraweave.remote import node_files
+        for name in node_files():
             shutil.copyfile(REPO / "node" / name, self.boot / name)
             (self.boot / name).chmod(0o700)
         for name in ("gpu-turn.sh", "gpu-turn-pair.sh"):

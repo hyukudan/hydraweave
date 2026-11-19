@@ -5,14 +5,12 @@ Verbs (node extension contract: VERBS and run(verb, payload) -> dict):
 - ``models``: read-only inventory of model roots (units, sizes, file counts, newest mtime, manifest status, and
   ``format``/``quant`` from file names, small ``config.json`` files and GGUF headers). Bounded by a deadline,
   directory entries, depth, units, manifest bytes, config and header reads and the reply size; it creates nothing.
-- ``model-verify`` / ``copy-job`` / ``copy-cancel``: verification is not part of this release (it has no design
-  that runs inside a lease or a GPU turn yet); the three verbs answer so before anything is read or written, and
-  no background process exists behind them.
-- ``copy-plan`` / ``copy``: copies between machines are not part of this release; both answer so, and nothing
-  runs behind them.
+- ``model-verify`` / ``copy-job`` / ``copy-cancel``: owned background verification, status/renewal and cancellation.
+- ``copy-plan`` / ``copy``: complete-manifest planning and confirmed, direct SSH copies. Both nodes hold an I/O
+  gate that excludes new engine leases; transfers are bounded, verified and published without overwriting.
 
-``verify_unit`` (a bounded, cache-free hash of one unit in the calling process) stays for that later design; no
-verb runs it. Reads never fill the page cache (direct I/O, or cache advice after each chunk, or unbuffered handles
+``verify_unit`` is the bounded, cache-free hash used by the managed job. Reads never fill the page cache (direct
+I/O, or cache advice after each chunk, or unbuffered handles
 on Windows).
 """
 
@@ -47,8 +45,6 @@ except ImportError:  # not POSIX: node jobs are refused there; inventory and ver
 from hydraweave_compat import LEGACY_NAME, read_marker, read_path, tool_command
 
 VERBS = {"models", "model-verify", "copy-plan", "copy", "copy-job", "copy-cancel"}
-NOT_IN_RELEASE = "copies between machines are not available in this release"
-VERIFY_NOT_IN_RELEASE = "model verification is not available in this release"
 SCHEMA = "hydraweave/node-v1"
 MAX_REPLY = 200 * 1024
 DEADLINE_S = 5.0
@@ -1259,10 +1255,9 @@ def run(verb, payload):
             raise ValueError("unsupported model library request")
         if verb == "models":
             result.update(models(payload))
-        elif verb in ("copy-plan", "copy"):
-            raise ValueError(NOT_IN_RELEASE)
-        else:                                          # model-verify, copy-job, copy-cancel
-            raise ValueError(VERIFY_NOT_IN_RELEASE)
+        else:
+            import hydraweave_model_jobs
+            result.update(hydraweave_model_jobs.run(verb, payload))
         result = bounded(result)
         request_check()
     except (OSError, ValueError, LookupError, TypeError, KeyError, UnicodeError,

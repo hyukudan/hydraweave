@@ -29,11 +29,9 @@ LAYERS, EXPERTS, FIRST_DECODER, WINDOW, WINDOW_ROWS = 40, 384, 20, 128, 64
 # Measured (hetero/w2/e2e/alias-*.jsonl, exact profile): device bytes in use before the routed experts (dense
 # weights, row buffers, workspaces, attention state; CUDA context excluded) by --positions, GiB.
 USED_BEFORE_EXPERTS = [(512, 11.10), (2048, 11.46), (8192, 12.89), (32768, 18.36)]
-# free_at_start_gib: cudaMemGetInfo free after the service's own context, measured 93.09 of 95.57 GiB (TTFT exact run);
-# context_gib: the share of that the process itself holds (what the watchdog sees). NOT measured yet: ~2.5 GiB is gone
-# before planning (context + display + driver); the margin (2.7 GiB at 90) covers the difference today. Re-check
-# against the on-device measurement before shrinking any margin.
-DEFAULTS = {"context_gib": 1.0, "reserve_gib": 1.0, "slots": 2, "free_at_start_gib": 93.09}
+# Policy reserves for the legacy predictor. Free device memory is a caller-supplied
+# observation, never a number inherited from a different machine's old benchmark.
+DEFAULTS = {"context_gib": 1.0, "reserve_gib": 1.0, "slots": 2}
 # Measured: the decode FRONT at K=22 (positions 2600) uses 96.0 GB of the PRO (hetero/hdec-report.md section 6.3b).
 FRONT_MEASURED = {"k": 22, "device_bytes": 96.0e9, "positions": 2600}
 HOT_RESERVE_GIB = 9.55  # measured W1 plan: dense + state + buffers of the hot decoder (hetero/w1-report.md)
@@ -113,11 +111,14 @@ def plan_streamed(budget, slots, w, E=EXPERTS):
 
 def predict_prefill(model_gguf, *, vram_cap_gib, positions, host_gib, margin_gib=2.0, margin_fraction=0.03,
                     context_gib=DEFAULTS["context_gib"], reserve_gib=DEFAULTS["reserve_gib"], slots=DEFAULTS["slots"],
-                    free_at_start_gib=DEFAULTS["free_at_start_gib"], sz=None):
+                    free_at_start_gib=None, sz=None):
     """The service's own residency plan at the engine cap hydraweave passes (guard cap - margin - context)."""
     validate_inputs(Inputs(vram_cap_gib, host_gib, margin_gib, margin_fraction))
     if host_gib is None:
         raise PlanError("ds41 prefill: host_gib is required (the pinned host tier)")
+    measured_free = free_at_start_gib is not None
+    if free_at_start_gib is None:
+        free_at_start_gib = vram_cap_gib
     for name, value in (("positions", positions), ("slots", slots)):
         if type(value) is not int or value <= 0:
             raise PlanError(f"ds41 prefill: {name} must be a positive integer")
@@ -176,7 +177,9 @@ def predict_prefill(model_gguf, *, vram_cap_gib, positions, host_gib, margin_gib
                        f"engine cap {engine_cap:g} GiB = guard cap - margin - CUDA context (the engine's cap "
                        "excludes its context; the watchdog's does not)",
                        f"dense from the GGUF {(sum(sz['layer_dense']) + sz['globals']) / 1e9:.2f} GB; "
-                       f"expert {eb} B; Engram {sz['engram_file'] / 1e9:.1f} GB stays in the file"],
+                       f"expert {eb} B; Engram {sz['engram_file'] / 1e9:.1f} GB stays in the file",
+                       "free device memory: caller measurement" if measured_free else
+                       "free device memory not measured: cap-bounded prediction; native admission still required"],
                 source={"model": str(model_gguf), "positions": positions, "engine_budget_experts": budget,
                         "resident_per_layer": resident, "tiers": tiers, "plan": note},
                 tiers={f"layer:{L}:{v}": {"host": "pinned", "file": "disk"}[tier]

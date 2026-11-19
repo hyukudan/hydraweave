@@ -6,6 +6,36 @@
   const doc = () => H().state.docs.setup || {};
   const esc = value => H().esc(value ?? "");
   let notice = "";
+  const updateRequests = new Set(), updateJobs = new Map();
+  function updates() {
+    for (const job of H().state.lastJobs || []) {
+      if (job.action === "discovery/update") updateJobs.set(job.id || job.job, job);
+    }
+    for (const [id, job] of updateJobs) {
+      if (updateJobs.size > 20 && job.state !== "running") updateJobs.delete(id);
+    }
+    return [...updateJobs.values()];
+  }
+  function updateBlocker(machine) {
+    if (updateRequests.has(machine) || updates().some(j => j.arguments?.machine === machine && j.state === "running"))
+      return "An update is already running on this node";
+    return H().mutationReason();
+  }
+  async function updatePost(endpoint, args) {
+    return H().request(endpoint, {method:"POST", headers:{"Content-Type":"application/json", "X-Hydraweave-CSRF":H().csrf() || ""}, body:JSON.stringify(args)});
+  }
+  async function updateNode(machine) {
+    const blocker = updateBlocker(machine);
+    if (blocker) throw new Error(blocker);
+    updateRequests.add(machine); H().render();
+    try {
+      const job = await updatePost("discovery/update", {machine, origin:window.location.origin});
+      const id = job.id || job.job;
+      if (!id) throw new Error("The node update did not return a job");
+      updateJobs.set(id, job); H().own(id);
+      await H().refresh();
+    } finally { updateRequests.delete(machine); H().render(); }
+  }
   let wizardStep = 0;
   let wizardLeft = false;
   try { wizardStep = Math.max(0, Math.min(3, Number(localStorage.getItem("hydraweave-setup-step")) || 0)); wizardLeft = localStorage.getItem("hydraweave-setup-left") === "true"; } catch (_) { /* storage may be disabled */ }
@@ -72,8 +102,8 @@
     const bootstrap = sha256 ? `<p>On each worker: <code>curl -fsSL ${esc(typeof location === "undefined" ? "" : location.origin)}/node/bootstrap.sh | HYDRAWEAVE_PKG_SHA256=${esc(sha256)} sh</code></p><p class="hint">Package SHA-256: <code>${esc(sha256)}</code></p><p class="hint">If this portal asks for an access token, first run <code>export HYDRAWEAVE_PORTAL_TOKEN=&lt;access token&gt;</code> on the worker and add <code>-H "Authorization: Bearer $HYDRAWEAVE_PORTAL_TOKEN"</code> to the curl command.</p>` : "<p>Open the live portal to get the verified node bootstrap command.</p>";
     return H().card("Discovered on your LAN", `${bootstrap}${d.error ? `<p role="alert">${esc(d.error)}</p>` : ""}${pairText}${rows.map(n => {
       const profiles = (doc().profiles || []).filter(p => (p.machines || p.nodes || []).includes(n.machine));
-      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state === "adopted" && (n.version_status === "outdated" || n.version_mismatch) ? action("Update node", "update-node", {machine:n.machine}, H().mutationReason()) : ""}${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
-    }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}<p class="hint">Provisioning progress appears in Jobs.${(d.nodes || []).some(n => n.lab_mode === true) ? " Engines use configured GPU slots when launched." : ""}</p>`);
+      return `<article class="cc-node"><div><strong>${esc(n.hostname || n.id)}</strong><p class="hint">${esc(n.state)} · ${esc(n.gpu_arch)} · ${esc(n.address)} · agent ${esc(n.agent_version || "unknown")}${n.version_status === "outdated" ? ` <span class="pill p-warn" title="Agent version differs from this portal; rerun the bootstrap one-liner on the node">Out of date</span>` : ""}</p></div>${n.state === "adopted" && (n.version_status === "outdated" || n.version_mismatch) ? action("Update node", "update-node", {machine:n.machine}, updateBlocker(n.machine)) : ""}${n.state !== "adopted" ? action("Adopt", "adopt", {id:n.id}) : profiles.map(p => action(`Install ${p.profile || p.name || p.id}`, "provision", {machine:n.machine,profile:p.profile || p.name || p.id})).join("")}</article>`;
+    }).join("") || "<p>Listening for nodes. Discovery can take a few seconds.</p>"}${updates().map(j => `<p>${esc(j.arguments?.machine)} · ${esc(j.state)} · ${esc(j.error || j.progress || "")}${j.state === "running" ? " " + action("Stop waiting", "cancel-update", {job:j.id || j.job}) : ""}</p>`).join("")}${updates().some(j => j.state === "running") ? '<p class="hint">Stopping an update job stops waiting here; the node completes its activation or rollback independently.</p>' : ""}<p class="hint">Provisioning progress appears in Jobs.${(d.nodes || []).some(n => n.lab_mode === true) ? " Engines use configured GPU slots when launched." : ""}</p>`);
   }
   function render() {
     const d = doc(), cfg = d.configuration || {}, ready = d.configured === true || cfg.state === "valid";
@@ -216,7 +246,12 @@
       else if (a === "cc-add-node") openAddNode();
       else if (a === "cc-add-manual") await openMachine();
       else if (a === "cc-adopt") openAddNode(button.dataset.id);
-      else if (a === "cc-update-node") await H().mutate("discovery/update", {machine:mid,origin:window.location.origin});
+      else if (a === "cc-update-node") await updateNode(mid);
+      else if (a === "cc-cancel-update") {
+        await updatePost("cancel", {job:button.dataset.job});
+        notice = "Cancellation requested; the node completes activation or rollback independently.";
+        H().announce(notice); await H().refresh();
+      }
       else if (a === "cc-provision") await H().mutate("discovery/provision", {machine:mid,profile:button.dataset.profile});
       else if (a === "cc-edit-node") await openMachine(mid);
       else if (a === "cc-trust-node") await trustNode(mid);

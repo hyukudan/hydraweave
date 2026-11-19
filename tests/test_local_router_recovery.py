@@ -54,7 +54,8 @@ from pathlib import Path
 from hydraweave import orchestrate as orch
 original = orch.procs.LocalChild
 def child(argv, env, directory, name, **kwargs):
-    return original([sys.executable, sys.argv[2], argv[-1]], env, directory, name, **kwargs)
+    # Exercise recovery of legacy children that predate the Linux lifetime guard.
+    return original([sys.executable, sys.argv[2], argv[-1]], env, directory, name, parent_guard=False, **kwargs)
 def status(endpoint):
     if not Path(sys.argv[1]).with_name("listening").exists():
         raise OSError("fixture not listening yet")

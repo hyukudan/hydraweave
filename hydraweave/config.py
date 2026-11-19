@@ -221,6 +221,21 @@ def validate_overrides(overrides, data):
             raise ConfigError(f"overrides.{key}: value is not qualified by this preset")
 
 
+def deployment_spec(profile, data):
+    """Optional engine deployment request, with no implicit preset changes."""
+    if "deploy" not in profile:
+        return None
+    if data.get("family") == "llamacpp":
+        raise ConfigError("profile.deploy: llama.cpp does not implement the Strix deployment contract")
+    deploy = record(profile["deploy"], "profile.deploy", ("spec",))
+    spec = text(deploy["spec"], "profile.deploy.spec")
+    if spec != "auto":
+        absolute(spec, "profile.deploy.spec", "linux")
+        if ".." in PurePosixPath(spec).parts or "\\" in spec:
+            raise ConfigError("profile.deploy.spec: expected an absolute POSIX path without '..'")
+    return spec
+
+
 def _curve(value, where):
     if not isinstance(value, list) or not 1 <= len(value) <= 64:
         raise ConfigError(f"{where}: expected 1..64 curve points")
@@ -378,12 +393,13 @@ def parse(obj: dict) -> Cluster:
     for name, p in profiles.items():
         identifier(name, "profile name")
         record(p, "profile", optional=("preset", "nodes", "rank0", "rank1", "port", "receipt", "overrides", "api_key_files",
-                                       "release_id", "prefill_service", "advanced"))
+                                       "release_id", "prefill_service", "advanced", "deploy"))
         kind = p.get("preset", name)
         data = preset(kind)
         from . import engines
         engine = engines.release_adapter(kind)
         engines.check_components(data, f"preset {kind}")
+        deployment_spec(p, data)
         if "receipt" in p and p["receipt"] != data["receipt"]:
             raise ConfigError("profile.receipt: does not match qualified preset")
         if "release_id" in p and (not isinstance(p["release_id"], str) or not re.fullmatch(r"[0-9a-f]{12}", p["release_id"])):

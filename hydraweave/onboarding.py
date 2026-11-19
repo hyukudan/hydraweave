@@ -160,11 +160,14 @@ class Controller:
 
 
 class Client:
-    def __init__(self, machine, config_path):
+    def __init__(self, machine, config_path, *, connection=None):
         self.machine, self.config_path = machine, config_path
+        # Long transactions may freeze their admitted endpoint. Ordinary node
+        # calls keep discovering current credentials as before.
+        self.connection = dict(connection) if connection is not None else None
 
     def call(self, verb, payload, timeout=60, **kwargs):
-        saved = credentials(self.config_path).get(self.machine.id)
+        saved = self.connection if self.connection is not None else credentials(self.config_path).get(self.machine.id)
         if not saved:
             raise ValueError("node has not been paired with this controller")
         return request(saved["address"], saved["port"], "call", {"verb": verb, "payload": payload},

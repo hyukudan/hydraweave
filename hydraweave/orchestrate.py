@@ -685,6 +685,85 @@ def prelaunch(cluster, profile, settings, kind, clients, mids):
             "node_paths": node_paths, "release_rows": release_rows}
 
 
+def deployment_checks(cluster, processes, clients, kind, settings):
+    """Inspect explicit deployment profiles concurrently, before requesting any GPU turn.
+
+    Legacy profiles retain their exact launch. Inspection hashes include measured
+    free memory, so the router binds the first *live* identity after native admission.
+    A pair must agree on its chosen model/topology/format/context/slots, not on a
+    hash of free-memory observations made at different instants.
+    """
+    from .deployment import parse_plan
+    selected = [spec for spec in processes if "--deploy" in spec.argv]
+    if not selected:
+        return {}
+    if len(selected) != len(processes):
+        raise OrchestrationError("deployment must cover every process in the profile")
+    pair = engines.adapter(kind).topology == "pair"
+    inventory = None
+
+    def inspect(spec, *, probe=False):
+        payload = {"root": cluster.machines[spec.machine_id].install_root,
+                   "argv": list(spec.argv), "env": dict(spec.env)}
+        if inventory is not None:
+            payload.update(inventory=inventory, topology="tp2")
+        if probe:
+            payload["inventory_only"] = True
+        return _call(clients[spec.machine_id], "deploy-check", payload, timeout=160)
+
+    def gather(*, probe=False):
+        replies = {}
+        with ThreadPoolExecutor(max_workers=min(8, len(selected))) as executor:
+            pending = {executor.submit(inspect, spec, probe=probe): spec.machine_id for spec in selected}
+            for future in as_completed(pending):
+                replies[pending[future]] = future.result()
+        return replies
+
+    if pair and all(spec.argv[spec.argv.index("--deploy") + 1] == "auto" for spec in selected):
+        probes = gather(probe=True)
+        inventory = []
+        for spec in selected:
+            reply = probes[spec.machine_id]
+            devices = (reply.get("deployment") or {}).get("devices")
+            if not reply.get("supported") or not isinstance(devices, list) or len(devices) != 1:
+                raise OrchestrationError(f"{spec.machine_id}: deployment needs a measured local device inventory")
+            inventory.append(devices[0])
+    replies = gather()
+    plans = {}
+    for spec in selected:
+        reply = replies[spec.machine_id]
+        if not reply.get("supported"):
+            raise OrchestrationError(f"{spec.machine_id}: deployment inspection unavailable")
+        try:
+            plan = parse_plan(reply.get("deployment"))
+        except ValueError as exc:
+            raise OrchestrationError(f"{spec.machine_id}: {exc}") from exc
+        chosen = plan["chosen"]
+        if (chosen["ranks"] != (2 if pair else 1)
+                or chosen["topology"] not in ({"tp2"} if pair else {"single", "replica", "replicas"})):
+            raise OrchestrationError(f"{spec.machine_id}: deployment topology requires a different lease layout")
+        inspected = reply.get("argv", list(spec.argv))
+        if inventory is None:
+            if inspected != spec.argv:
+                raise OrchestrationError("deployment inspection changed the launch arguments")
+        else:
+            index = spec.argv.index("--deploy") + 1
+            if (not isinstance(inspected, list) or len(inspected) != len(spec.argv)
+                    or inspected[:index] != spec.argv[:index] or inspected[index + 1:] != spec.argv[index + 1:]
+                    or not isinstance(inspected[index], str)
+                    or not re.fullmatch(re.escape(cluster.machines[spec.machine_id].install_root.rstrip("/"))
+                                        + r"/run/deployment-[a-f0-9]{64}\.toml", inspected[index])):
+                raise OrchestrationError("deployment inspection returned an invalid inventory file")
+        spec.argv[:] = inspected
+        plans[spec.machine_id] = plan
+    if pair:
+        signatures = {json.dumps({"model": plan.get("model"), "chosen": plan["chosen"]}, sort_keys=True)
+                      for plan in plans.values()}
+        if len(signatures) != 1:
+            raise OrchestrationError("pair deployment choices disagree across nodes")
+    return plans
+
+
 def check_launch(cluster, profile, router="local", nodes=None, *, diagnostics=None, recipe=False,
                  devices=None, vram_cap_gib=None):
     """The profile, node and router checks up makes before any I/O (also `hydraweave recipe plan`'s preflight)."""
@@ -887,6 +966,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
         # Diagnostic runs are labelled non-production everywhere they are recorded (state, leases, status).
         processes = render.render_processes(selected, profile, **(
             {"diagnostics": diagnostics, "run": state["token"][:12]} if diagnostics else {}))
+        state["deployments"] = deployment_checks(selected, processes, clients, kind, settings)
         rendered = render.render_router(selected, profile)
         if launch is not None:
             recipe_launch.verify_launch(launch, selected, profile, processes, release_rows)
@@ -929,7 +1009,10 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                     "machine": location, "argv": spec.argv, "env": spec.env,
                     "ready": spec.ready,
                     "health_url": _url({"address": address, "port": port}, engine.health_path),
-                    "key_file": node_paths.get(spec.machine_id), "ready_timeout_s": 600}
+                    # Pair readiness is checked by rank 0's owner against rank
+                    # 0's HTTP listener, including when inspecting rank 1 logs.
+                    "key_file": node_paths.get(mids[0] if pair else spec.machine_id), "ready_timeout_s": 600,
+                    "deployment_required": spec.machine_id in state["deployments"]}
 
         for index, mid in enumerate(engines.router_members(kind, mids) if pair else mids):
             payload = {"root": cluster.machines[mid].install_root, "lab_dir": _lab(cluster, mid),
@@ -1025,6 +1108,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
             # The wrapper sets the pinned import path itself: node spec env forbids
             # PYTHON* variables for engine processes.
             source = str(PurePosixPath(machine.install_root) / "src" / ("tensormeld-" + commit) / "src")
+            bridge = Path(__file__).with_name("deployment.py").read_text(encoding="utf-8")
             wrapper = ("import os,runpy,sys,tempfile\n"
                        "if not os.path.isfile(os.path.join(sys.argv[3],'tensormeld','__main__.py')): "
                        "raise SystemExit('pinned TensorMeld source unavailable')\n"
@@ -1032,7 +1116,8 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                        "os.write(fd,sys.argv[2].encode());os.close(fd)\n"
                        "os.environ['PYTHONPATH']=sys.argv[3];sys.path.insert(0,sys.argv[3])\n"
                        "sys.argv=['tensormeld','serve-replicas',path]\n"
-                       "try: runpy.run_module('tensormeld',run_name='__main__')\n"
+                       "try: exec(" + repr(bridge.replace('if __name__ == "__main__":', 'if False:'))
+                       + ");router_main(['serve-replicas',path])\n"
                        "finally: os.unlink(path)\n")
             wrapper = "exec(" + repr(wrapper) + ")"
             payload = {"root": machine.install_root, "lab_dir": None, "kind": "none",
@@ -1176,7 +1261,8 @@ def local_router_run(spec_path):
         env["PYTHONPATH"] = str(source)
     else:
         env.pop("PYTHONPATH", None)
-    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "tensormeld", "serve-replicas", str(config)],
+    env["PYTHONPATH"] = os.pathsep.join([str(repo_root()), env.get("PYTHONPATH", "")])
+    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "hydraweave.deployment", "serve-replicas", str(config)],
                              env, directory, "router", port=(rendered["listen"]["address"], rendered["listen"]["port"]))
     interrupted = False
 

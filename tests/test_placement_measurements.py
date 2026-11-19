@@ -43,7 +43,7 @@ class MeasurementTests(unittest.TestCase):
             m.acquire(self.cluster, "xfer", runtime=self.root, uuid=self.uuid, xfer_sha256="a" * 64,
                       store_id="store-test", clock=lambda: NOW,
                       gpu_runner=lambda row, grant: m.median(self.samples, m.XFER_METHOD))
-        inventory.assert_called_once_with(placement=True)
+        self.assertEqual(inventory.call_args_list, [mock.call(placement=True), mock.call(placement=True)])
 
     def test_top_level_only_exclusive_modes_and_dispatch(self):
         parser = cli.build_parser()
@@ -62,7 +62,7 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(result["values"], {"h2d_mbps": 5, "d2h_mbps": 50, "h2d_lat_ns": 500})
         self.assertEqual(result["provenance"]["method"]["runs"], 9)
         self.assertEqual(result["provenance"]["samples"], self.samples)
-        cache = m.Cache(self.root)
+        cache = m.Cache(self.root, clock=lambda: NOW)
         self.assertEqual(cache.lookup(self.identity, "xfer")["status"], "measured")
         for field in self.identity:
             changed = dict(self.identity, **{field: "b" * 64 if field == "xfer_sha256" else "changed"})
@@ -144,7 +144,8 @@ class MeasurementTests(unittest.TestCase):
 
     def test_solver_lookup_removes_stale_figures_without_acquisition(self):
         cache = m.Cache(self.root)
-        probe = {"probe_xfer": {"anchor": {"h2d_mbps": 999}}}
+        probe = {"probe_xfer": {"anchor": {"h2d_mbps": 999}}, "devices": [self.row],
+                 "file_store": "store-test", "xfer_sha256": {"anchor": "a" * 64}}
         with mock.patch.object(m, "acquire", side_effect=AssertionError("implicit measurement")):
             self.assertEqual(placement.cached_measurements(probe, {"anchor": self.identity}, cache)["probe_xfer"], {})
             cache.save(self.identity, "xfer", m.median(self.samples, m.XFER_METHOD))

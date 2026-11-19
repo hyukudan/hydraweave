@@ -295,7 +295,7 @@ def test_16_verified_live_identity_activates_profile_through_real_core(tmp_path,
     stat = model.stat()
     entry = dict(bytes=stat.st_size, mtime_ns=stat.st_mtime_ns, inode=stat.st_ino, dev=stat.st_dev,
                  sha256=model_sha, verified_at=1)
-    monkeypatch.setattr(assets, "read_manifest", lambda: {"local": {"ds41_model": entry}})
+    monkeypatch.setattr(assets, "read_manifest", lambda: {"local": {str(model): entry}})
     gpu_uuid = "GPU-" + str(uuid.uuid4())
     gpu = dict(uuid=gpu_uuid, name="NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
                memory_gib=128, driver="617.14", pci="0000:01:00.0",

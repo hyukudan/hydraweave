@@ -1,6 +1,7 @@
 """Owned local process groups, bounded logs, and cross-platform instance locks."""
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import re
@@ -8,6 +9,7 @@ import select
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from .winproc import has_console, no_window
@@ -101,6 +103,9 @@ def stop_owned_group(identity, *, argument, grace_s=5):
             if _group_members(identity):
                 raise ProcessError("local router leader is gone but descendants remain; ownership retained") from None
             return
+        current = _linux_process(pid)
+        if current and current["state"] in {"Z", "X"} and not _group_members(identity):
+            return  # A lifetime guard may already have stopped the group; zombies hold no listener.
         command = (Path("/proc") / str(pid) / "cmdline").read_bytes().split(b"\0")
         if os.fsencode(argument) not in command:
             raise ProcessError("local router command does not match its owned config; ownership retained")
@@ -422,7 +427,7 @@ if os.name == "nt":
 
 class LocalChild:
     def __init__(self, argv, env, log_dir, name, *, port=None,
-                 max_log_bytes=1024 * 1024, log_backups=3):
+                 max_log_bytes=1024 * 1024, log_backups=3, parent_guard=True):
         if not argv or not Path(argv[0]).is_absolute():
             raise ValueError("child executable must be an absolute path")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
@@ -432,8 +437,11 @@ class LocalChild:
         self.argv, self.env = list(argv), dict(env)
         self.log_dir, self.name, self.port = Path(log_dir), name, port
         self.max_log_bytes, self.log_backups = max_log_bytes, log_backups
+        self.parent_guard = parent_guard
         self.process = None
         self._job = None
+        self._guard_writer = None
+        self._guarded = False
         self._threads = []
         self._lock = InstanceLock(self.log_dir / (name + ".lock"))
 
@@ -455,9 +463,12 @@ class LocalChild:
                 else no_window(subprocess.CREATE_NEW_PROCESS_GROUP | 0x4))
             if os.name == "nt":
                 self._job = _WindowsJob()
-            self.process = subprocess.Popen(self.argv, env=self.env, stdin=subprocess.DEVNULL,
-                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            **options)
+            if sys.platform == "linux" and self.parent_guard:
+                self._start_guarded(options)
+            else:
+                self.process = subprocess.Popen(self.argv, env=self.env, stdin=subprocess.DEVNULL,
+                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                **options)
             if self._job is not None:
                 self._job.assign(self.process)
                 self._resume_windows_child()
@@ -475,8 +486,45 @@ class LocalChild:
                     stream.close()
             if self._job:
                 self._job.close()
+            if self._guard_writer is not None:
+                os.close(self._guard_writer)
+                self._guard_writer = None
             self._lock.close()
             raise
+
+    def _start_guarded(self, options):
+        if not hasattr(os, "pidfd_open"):
+            raise ProcessError("owned Linux children require pidfd support")
+        owner_fd = os.pidfd_open(os.getpid())
+        self._guarded = True
+        read_fd, error_fd = os.pipe()
+        control_fd, self._guard_writer = os.pipe()
+        try:
+            argv = [str(Path(sys.executable).absolute()), "-I", str(Path(__file__).with_name("_child_guard.py")),
+                    str(owner_fd), str(error_fd), str(control_fd), *self.argv]
+            self.process = subprocess.Popen(argv, env=self.env, stdin=subprocess.DEVNULL,
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            pass_fds=(owner_fd, error_fd, control_fd), **options, **no_window())
+            os.close(error_fd)
+            error_fd = None
+            if not select.select([read_fd], [], [], 10)[0]:
+                raise ProcessError("owned child did not confirm exec")
+            raw = os.read(read_fd, 4096)
+            if raw:
+                error = json.loads(raw)
+                raise OSError(error.get("errno") or 5, error.get("error", "child exec failed"), self.argv[0])
+        finally:
+            os.close(read_fd)
+            os.close(owner_fd)
+            os.close(control_fd)
+            if error_fd is not None:
+                os.close(error_fd)
+
+    def _guard_signal(self, command):
+        try:
+            os.write(self._guard_writer, command)
+        except BrokenPipeError:
+            pass  # The guard already killed its group and exited.
 
     def _resume_windows_child(self):
         resume_suspended(self.process.pid)
@@ -515,6 +563,8 @@ class LocalChild:
                 try:
                     if os.name == "nt":
                         self.process.send_signal(signal.CTRL_BREAK_EVENT)
+                    elif self._guard_writer is not None:
+                        self._guard_signal(b"T")
                     else:
                         os.killpg(self.process.pid, signal.SIGTERM)
                 except (OSError, ProcessLookupError):
@@ -524,13 +574,19 @@ class LocalChild:
                 except subprocess.TimeoutExpired:
                     if self._job:
                         self._job.terminate()
+                    elif self._guard_writer is not None:
+                        self._guard_signal(b"K")
                     else:
                         os.killpg(self.process.pid, signal.SIGKILL)
                     self.process.wait(timeout=5)
         finally:
             if self._job:
                 self._job.close()
-            elif self.process is not None:
+            elif self._guard_writer is not None:
+                self._guard_signal(b"K")
+                os.close(self._guard_writer)
+                self._guard_writer = None
+            elif self.process is not None and not self._guarded:
                 # Also reap descendants when the group leader has already exited.
                 try:
                     os.killpg(self.process.pid, signal.SIGKILL)

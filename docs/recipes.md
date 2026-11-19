@@ -180,7 +180,7 @@ Decode is not switched per request: a running request keeps its route.
 |---|---|---|
 | name, memory | nvidia-smi `name`, `memory.total` | DRM `product_name`; GTT total (the GPU-mappable pool) |
 | host RAM, free RAM | GlobalMemoryStatusEx / `/proc/meminfo` | node `ram` |
-| disk read | `recipe probe --disks`: sequential direct I/O (`FILE_FLAG_NO_BUFFERING` / `O_DIRECT`), ≤ 256 MiB, ≤ 2 s. A buffered read is not accepted as evidence. | a saved receipt (`--evidence NODE=FILE`: JSON with `disk_read_gbytes_ps`, `method: "direct"`, `host`, `path` naming that node and its model file). It is used only for that model path, and only for 7 days. |
+| disk read | `recipe probe --disks`: sequential direct I/O (`FILE_FLAG_NO_BUFFERING` / `O_DIRECT`), ≤ 256 MiB, ≤ 2 s. A buffered read is not accepted as evidence. | a saved receipt (`--evidence NODE=FILE`: JSON with `disk_read_gbytes_ps`, `method: "direct"`, `host`, `path` naming that node and its model file, and its original Unix `measured_at`). It is used only for that model path, and only for 7 days from measurement; importing it again does not refresh it. |
 | links | — | PC–node: the node answered and has a physical NIC that is up (negotiated speed); a link whose speed is unknown is not reported. Pair: both nodes report the USB4 layout and an openable stream. USB4 bandwidth is not probed and is reported as 0 Gb/s, so only `gbps_min = 0` passes. |
 
 Disk results are cached in `<config dir>/run/probe-cache.json` for 7 days. The cache key is the machine, the volume,

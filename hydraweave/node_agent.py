@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import errno
 import hmac
 import importlib.machinery
@@ -20,7 +19,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections import Counter
@@ -175,9 +173,17 @@ class Agent(ThreadingHTTPServer):
             storage._write(policy, json.dumps({"lab_dir": lab_dir, "asset_paths": []}).encode(), replace=False)
         self.lock, self.failures = threading.Lock(), []
         self.update_lock = threading.RLock()
+        self.active_mutations = 0
+        self.instance = secrets.token_hex(16)
         self.runner = runner or subprocess.run
+        # Keep injection distinct from the default inventory runner: production
+        # update commands need node_update's owned-child lifetime guard.
+        self.update_runner = runner
         self.download = download or download_package
         self.updating = False
+        from . import node_update
+        if sys.platform == "linux":
+            node_update.recover_staging(self.root)
         self.code = f"{secrets.randbelow(100000000):08d}"
         self.code_expires = time.monotonic() + 600
         self.credentials = self.root / "etc" / "agent-pairing.json"
@@ -240,8 +246,25 @@ class Agent(ThreadingHTTPServer):
             return {"code": self.code, "expires_in": 600}
 
     def invoke(self, verb, payload):
+        from . import node_update
+        control = verb in {"version", "doctor", "gpu", "poll", "status", "turns", "stop", "cancel", "logs",
+                           "job", "download-status", "download-cancel", "copy-job", "copy-cancel",
+                           "agent-health", "agent-update-status"}
+        # Only admission is serialized. Downloads/pip install into a distinct
+        # environment; reads and stops continue on the old imported code.
         with self.update_lock:
+            pending = self.updating or node_update.read(self.root).get("state") in node_update.PENDING
+            if pending and not control:
+                raise ValueError("Node update in progress; new work is refused until activation or rollback is verified")
+            mutation = not control and verb != "agent-update"
+            if mutation:
+                self.active_mutations += 1
+        try:
             return self._invoke(verb, payload)
+        finally:
+            if mutation:
+                with self.update_lock:
+                    self.active_mutations -= 1
 
     def _invoke(self, verb, payload):
         # A paired controller cannot redirect this daemon to another user's install or lab root.
@@ -253,10 +276,17 @@ class Agent(ThreadingHTTPServer):
             for part in payload.get("parts", []):
                 self.check_paths(part.get("payload", {}))
         self.check_paths(payload)
+        if verb in {"agent-health", "agent-update-status"}:
+            if payload:
+                raise ValueError("agent health/update status takes no arguments")
+            from . import node_update
+            if verb == "agent-update-status":
+                return node_update.public(self.root)
+            return {"instance": self.instance, "pid": os.getpid(), "version": __version__,
+                    "commit": discovery.controller_commit(), "prefix": str(Path(sys.prefix).resolve()),
+                    "transaction": os.environ.get("HYDRAWEAVE_AGENT_UPDATE", ""), "update_protocol": 1}
         if verb == "agent-update":
             return self.update_agent(payload)
-        if self.updating and verb not in {"version", "doctor", "gpu", "poll", "status", "turns", "stop", "cancel", "logs"}:
-            raise ValueError("Node update in progress; new work is refused until restart")
         if verb == "provision-prepare":
             tool = load_tool()
             install = tool.extension_for("install")
@@ -305,56 +335,54 @@ class Agent(ThreadingHTTPServer):
         return self.call(verb, payload)
 
     def update_agent(self, payload):
-        """Authenticated /call verb; hashes come from the paired controller."""
+        """Stage an authenticated package, then schedule independent activation."""
+        from . import node_update
         if set(payload) != {"origin", "sha256"}:
             raise ValueError("node update requires origin and sha256")
         origin, digest = payload["origin"], payload["sha256"]
         from .bootstrap import script
-        script(origin)  # reuse the bootstrap's strict origin validation
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ValueError("invalid package SHA256")
+        script(origin, digest)  # Validate origin without building another source archive on the node.
+        if sys.platform != "linux":
+            raise ValueError("transactional node updates require the Linux user service")
         with self.update_lock:
             if self.updating:
                 raise ValueError("Node update already in progress")
-            install = load_tool().extension_for("install")
-            if install.active_leases(self.root):
-                raise ValueError("Update node refused: a live GPU lease is active; stop it first")
-            if self.lab_dir:
-                turns = self.call("turns", {"lab_dir": self.lab_dir})
-                holder = turns.get("holder")
-                if turns.get("error") or (holder and holder.get("alive") is not False):
-                    raise ValueError("Update node refused: a GPU turn is live or its state cannot be verified")
-                if not turns.get("present"):
-                    raise ValueError("Update node refused: GPU turn state is unavailable")
+            if self.active_mutations:
+                raise ValueError("Node update refused: a mutating node call is still active")
             self.updating = True
-            try:
-                self._update_command(["systemctl", "--user", "is-active", "hydraweave-node.service"])
-                with tempfile.TemporaryDirectory(prefix="hydraweave-node-update-") as directory:
-                    # The package route is closed to anonymous readers; this node presents its own pairing
-                    # credential to the controller that issued it (and already holds it).
-                    data = self.download(origin.rstrip("/") + "/node/package.tar.gz", self.token)
-                    if hashlib.sha256(data).hexdigest() != digest:
-                        raise ValueError("Node package SHA256 mismatch; nothing was installed")
-                    package = Path(directory) / "package.tar.gz"
-                    package.write_bytes(data)
-                    python = self.root / "agent-venv" / "bin" / "python"
-                    if not python.is_file():
-                        raise ValueError("Node agent venv is missing; run node bootstrap first")
-                    self._update_command([str(python), "-m", "pip", "install", "--upgrade", "--force-reinstall",
-                                          "hydraweave[node] @ " + package.as_uri()])
-                # A separate unit survives this daemon's cgroup being stopped. The delay lets /call reply.
-                self._update_command(["systemd-run", "--user", "--collect", "--on-active=2s",
-                                      "--unit=hydraweave-node-restart-" + secrets.token_hex(6),
-                                      "--", "systemctl", "--user", "restart", "hydraweave-node.service"])
-                return {"state": "updated", "restart": "scheduled"}
-            except BaseException:
+        row = None
+        try:
+            # Share the lease publication lock across agent, SSH and systemd
+            # transports. It is released before any package/network work.
+            with node_update.root_lock(self.root):
+                self._update_idle()
+                row = node_update.begin(self.root, digest, instance=self.instance,
+                                        listen=self.server_address[0], port=self.server_port,
+                                        lab_dir=self.lab_dir, announce=self.transport is not None)
+            self._update_command(["systemctl", "--user", "is-active", "hydraweave-node.service"])
+            node_update.schedule(self.root, row, runner=self.update_runner)
+            data = self.download(origin.rstrip("/") + "/node/package.tar.gz", self.token)
+            row = node_update.stage(self.root, row, data, runner=self.update_runner)
+            self._update_idle()
+            node_update.transition(self.root, row, {"staged"}, staging=True, state="prepared")
+            return {"state": "activating", "transaction": row["id"], "sha256": digest}
+        except BaseException as error:
+            if row is not None:
+                node_update.fail_staging(self.root, row, error)
+            raise
+        finally:
+            with self.update_lock:
                 self.updating = False
-                raise
+
+    def _update_idle(self):
+        from . import node_update
+        node_update.require_quiet(self.root, self.lab_dir, call=self.call)
 
     def _update_command(self, argv):
-        result = self.runner(argv, capture_output=True, text=True, timeout=1800, **no_window())
-        if result.returncode:
-            raise ValueError("Node update failed: " + (result.stderr or result.stdout or "command failed")[-1000:])
+        from . import node_update
+        return node_update._run(argv, self.update_runner, timeout=30)
 
     def check_paths(self, payload):
         if "root" in payload and payload["root"] != str(self.root):

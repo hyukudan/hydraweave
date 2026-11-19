@@ -12,6 +12,10 @@ ENGINES = tuple(sorted({name for backend in backend_registry().values() for name
 
 
 def plan(engine, model, inputs, **params):
+    if "deployment" in params:
+        from . import deployment
+        receipt = params.pop("deployment")
+        return deployment.plan(receipt, **params)
     if engine == "minimax-rtx-prefill":
         from . import minimax
         return vramplan.plan(minimax.model(model, **params), inputs)

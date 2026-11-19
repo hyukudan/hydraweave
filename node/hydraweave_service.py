@@ -279,6 +279,10 @@ def service_run(spec_file):
     spec["lease"] = lid
     filename = lease.inside(root, "run", "spec-" + lid + ".json")
     with lease.root_lock(root):
+        import hydraweave_agent_update
+        hydraweave_agent_update.require_idle(root)
+        import hydraweave_model_jobs
+        hydraweave_model_jobs.refuse_storage_owner(root)
         # A unit restart finds its previous process gone; a second, hand-run copy finds it alive and is refused.
         settle_records(root, profile, "stale: superseded by a new start of the unit", only_stale=True)
         others = [state.get("label") for state in lease.live_records(root)]
