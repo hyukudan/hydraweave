@@ -119,11 +119,16 @@ print('ok')
         old.mkdir(parents=True)
         (old / "up-example.json").write_text("{}")
         platform = SimpleNamespace(name="nt", environ={"LOCALAPPDATA": str(self.root)})
-        with patch.object(secrets, "os", platform):
+        # secrets checks the shared paths module's state root before its platform-specific legacy fallback.
+        # Keep both roots in this fixture; another test may already have created the package sandbox's run/.
+        state = self.root / "hydraweave" / "state"
+        with patch.object(secrets, "os", platform), patch.object(secrets.paths, "state_dir", return_value=state):
             self.assertEqual(secrets.runtime_dir(), old)
             new.mkdir(parents=True)
             self.assertEqual(secrets.runtime_dir(), new)
             self.assertEqual(orchestrate._state_path("example"), old / "up-example.json")
+            (state / "run").mkdir(parents=True)
+            self.assertEqual(secrets.runtime_dir(), state / "run")
 
     def test_state_list_merges_and_current_records_win(self):
         old = self.root / "hyperloom" / "run"

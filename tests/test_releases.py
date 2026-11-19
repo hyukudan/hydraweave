@@ -240,6 +240,74 @@ def test_update_runs_real_transaction_with_fake_runner_and_health(tmp_path):
     assert result["state"] == "updated" and manager.previous == "old"
 
 
+def retry_fixture(tmp_path):
+    symlinks_or_skip(tmp_path)
+    manager = releases.ReleaseManager(tmp_path / "prefix")
+    installed(manager, "old")
+    manager.activate("old")
+
+    def run(argv, **kwargs):
+        if "venv" in argv:
+            python = Path(argv[-1]) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            python.parent.mkdir()
+            python.touch()
+        return SimpleNamespace(returncode=0)
+
+    manager.runner = Mock(side_effect=run)
+    return manager, wheel_at(tmp_path / "wheels")
+
+
+def test_same_verified_wheel_can_be_retried_after_health_rollback(tmp_path):
+    manager, wheel = retry_fixture(tmp_path)
+    with patch.object(releases, "portal_service", return_value=None):
+        first = releases.update(manager, wheel=wheel, health_fn=lambda rid: rid == "old", report=lambda _: None)
+        assert first["state"] == "rolled_back" and manager.current == "old"
+        staged_calls = manager.runner.call_count
+        health = Mock(return_value=True)
+        second = releases.update(manager, wheel=wheel, health_fn=health, report=lambda _: None)
+    assert second["state"] == "updated" and second["release"] == first["release"]
+    assert manager.runner.call_count == staged_calls  # No repeated pip/venv or destructive overwrite.
+    health.assert_called_once_with(first["release"])
+    assert manager.previous == "old"
+
+
+@pytest.mark.parametrize("field,value", [("wheel_sha256", "f" * 64), ("version", "9.9.9"),
+                                         ("extras", ["node"]), ("commit", "b" * 40)])
+def test_retry_rejects_mismatched_installed_receipt_before_activation(tmp_path, field, value):
+    manager, wheel = retry_fixture(tmp_path)
+    rid = manager.stage(wheel, offline=True)
+    record = manager.root / "releases" / rid / "release.json"
+    row = json.loads(record.read_text())
+    row[field] = value
+    record.write_text(json.dumps(row))
+    health = Mock()
+    with patch.object(releases, "portal_service", return_value=None), pytest.raises(ValueError, match="does not match"):
+        releases.update(manager, wheel=wheel, health_fn=health, report=lambda _: None)
+    assert manager.current == "old"
+    health.assert_not_called()
+
+
+def test_cancelling_reuse_does_not_delete_an_existing_release(tmp_path):
+    manager, wheel = retry_fixture(tmp_path)
+    rid = manager.stage(wheel, offline=True)
+    health = Mock()
+    with patch.object(releases, "portal_service", return_value=None), pytest.raises(ValueError, match="cancelled"):
+        releases.update(manager, wheel=wheel, health_fn=health, cancelled=Mock(side_effect=[False, True]),
+                        report=lambda _: None)
+    assert manager.current == "old" and manager.environment(rid).is_dir()
+    health.assert_not_called()
+
+
+def test_cancelling_a_new_stage_removes_only_the_new_candidate(tmp_path):
+    manager, wheel = retry_fixture(tmp_path)
+    health = Mock()
+    with patch.object(releases, "portal_service", return_value=None), pytest.raises(ValueError, match="cancelled"):
+        releases.update(manager, wheel=wheel, health_fn=health, cancelled=Mock(side_effect=[False, True]),
+                        report=lambda _: None)
+    assert manager.current == "old" and [row["id"] for row in manager.list()] == ["old"]
+    health.assert_not_called()
+
+
 def test_portal_update_job_returns_persisted_rollback(tmp_path):
     from hydraweave.web.api import API
     manager = releases.ReleaseManager(tmp_path / "prefix")

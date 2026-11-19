@@ -1,4 +1,4 @@
-"""Model library, control side: roots, the RTX big-job ledger guard and the held verification."""
+"""Model library control side: roots and the RTX big-job ledger guard."""
 from tests.portable_fixtures import read_fixture
 import hashlib
 import json
@@ -296,14 +296,6 @@ class LedgerTests(unittest.TestCase):
             holder.wait()
             holder.stdout.close()
         self.assertIsNone(self.guard().check())
-
-class HeldVerificationTests(unittest.TestCase):
-    def test_verification_is_held_on_every_machine(self):
-        """Nothing is started, read or called: no node verb, no control-machine hash (held like the copies)."""
-        self.assertFalse(any(hasattr(downloads, name) for name in ("verify_start", "watch_job", "library_job",
-                                                                   "LedgerMonitor")))
-        self.assertEqual(downloads.VERIFY_HELD, "model verification is not available in this release")
-
 
 if __name__ == "__main__":
     unittest.main()

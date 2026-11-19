@@ -35,9 +35,15 @@ release executable and compares it with the published commit's local release man
 the existing assets-verify manifest only when local size, nanosecond mtime, inode/device and configured digest
 still match. Missing/stale verification withholds the identity and records the reason; gathering never hashes
 model content or starts the engine. This remains a metadata cache, with the existing forged-metadata limitation.
-Both candidate and bound-device reports carry `engine_sha256` and `model_sha256` into the core's profile freshness
+Both candidate and bound-device reports carry `engine_revision`, `engine_sha256` and `model_sha256` into the core's profile freshness
 check. Auto selection caches identity-bearing samples separately. CPU coverage in `test_placement_session_policy.py`
 uses live gathering, the real report builders, and a real Tierstream CPU core (set `HYDRAWEAVE_TS_RECIPE`).
 All fixture identities and absolute executable paths are generated at runtime. Probe documents carrying live
 UUIDs, BDFs or executable paths are local data and must not be committed. Native GPU/driver qualification remains
 outside these fake-API tests.
+
+AMD inventory also reads a bounded physical `unique_id` and PCI slot from sysfs. Missing or zero IDs remain
+unknown, and the current kernel/ROCm versions form its driver identity. The configured asset verification lookup
+uses the actual model path, matching the assets manifest. Neither operation reads model content or benchmarks a GPU.
+For performance inputs, [performance-calibration.md](performance-calibration.md) describes the exact identity,
+measured link/residency and expiry requirements accepted by solver bundles.

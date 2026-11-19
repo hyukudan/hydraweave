@@ -37,13 +37,17 @@ def _processes(cluster, profile, settings, kind, mids, clients):
     selected.profiles[profile]["release_id"] = prepared["release_id"]
     selected.profiles[profile]["api_key_files"] = paths = prepared["node_paths"]
     result = {}
-    for spec in render.render_processes(selected, profile):
+    from .orchestrate import deployment_checks
+    processes = render.render_processes(selected, profile)
+    plans = deployment_checks(selected, processes, clients, kind, settings)
+    for spec in processes:
         machine = cluster.machines[spec.machine_id]
         port = int(spec.argv[spec.argv.index("--http-port") + 1])
         result[spec.machine_id] = {"name": _node_name(spec.machine_id), "machine": "local", "argv": spec.argv,
                                    "env": spec.env, "ready": spec.ready, "key_file": paths[spec.machine_id],
                                    "health_url": _url({"address": machine.http_address, "port": port}, "/health"),
-                                   "ready_timeout_s": 600}
+                                   "ready_timeout_s": 600,
+                                   "deployment_required": spec.machine_id in plans}
     return prepared["release_id"], result
 
 

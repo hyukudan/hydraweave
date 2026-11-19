@@ -27,6 +27,8 @@ XFER_METHOD = {"aggregation": "median", "runs": RUNS, "copies": "pinned", "bytes
                "latency_bytes": 4096, "timing": "synchronized-host-monotonic", "readers": 1}
 STORE_METHOD = {"aggregation": "median", "runs": RUNS, "io": "direct", "read_bytes": probe.DISK_CHUNK,
                 "readers": 1, "max_bytes_per_run": probe.DISK_PROBE_DEFAULT_BYTES}
+MAX_AGE_S = 24 * 3600
+CACHE_SCHEMA = "hydraweave/measurement-v2"
 
 
 def key(uuid, driver, xfer_sha256, store_id):
@@ -37,29 +39,81 @@ def key(uuid, driver, xfer_sha256, store_id):
 
 
 class Cache:
-    def __init__(self, runtime):
+    def __init__(self, runtime, *, clock=time.time):
         self.directory = Path(runtime) / "measurements"
+        self.clock = clock
 
-    def save(self, identity, mode, result):
+    def save(self, identity, mode, result, *, measured_at=None):
         identity = key(**identity)
+        method = _method(mode)
+        try:
+            if result != median(result["provenance"]["samples"], method) or result["provenance"]["method"] != method:
+                raise RecipeError("PL_E_STALE measurement does not match its samples and method")
+        except (KeyError, TypeError) as exc:
+            raise RecipeError("PL_E_STALE invalid measurement provenance") from exc
+        measured_at = self.clock() if measured_at is None else measured_at
+        if not _timestamp(measured_at):
+            raise RecipeError("PL_E_STALE measurement timestamp is required")
         content_cache._write(self.directory / (content_cache._sha([identity, mode]) + ".json"),
-                             {"key": identity, "mode": mode, "result": result})
+                             {"schema": CACHE_SCHEMA, "key": identity, "mode": mode, "result": result,
+                              "measured_at": measured_at, "expires_at": measured_at + MAX_AGE_S})
 
     def lookup(self, identity, mode):
-        """Read JSON only. Identity changes produce an unpredicted row, never a refresh."""
+        """Read JSON only. Changed, expired or legacy evidence is unpredicted, never refreshed."""
         try:
             identity = key(**identity)
             row = content_cache._read(self.directory / (content_cache._sha([identity, mode]) + ".json"), "PL_E_STALE")
             result = row["result"]
             provenance = result["provenance"]
-            method = XFER_METHOD if mode == "xfer" else STORE_METHOD
-            if provenance["method"] != method or median(provenance["samples"], method) != result:
-                row = {}
-        except (RecipeError, KeyError, TypeError):
-            row = {}
-        if row.get("key") != identity or row.get("mode") != mode:
-            return {"status": "unpredicted", "why": "no measurement for the current identity"}
-        return {"status": "measured", **row["result"]}
+            method, now = _method(mode), self.clock()
+            if (row.get("schema") != CACHE_SCHEMA or row.get("key") != identity or row.get("mode") != mode
+                    or provenance["method"] != method or median(provenance["samples"], method) != result):
+                raise RecipeError("measurement identity, samples or schema changed")
+            measured, expires = row.get("measured_at"), row.get("expires_at")
+            if (not all(_timestamp(v) for v in (measured, expires, now))
+                    or not measured <= now < expires <= measured + MAX_AGE_S):
+                return {"status": "unpredicted", "why": "measurement expired or timestamp invalid; run an explicit probe"}
+            return {"status": "measured", "measured_at": measured, "expires_at": expires, **result}
+        except (RecipeError, KeyError, TypeError, ValueError):
+            return {"status": "unpredicted", "why": "no valid measurement for the current identity; run an explicit probe"}
+
+
+def _timestamp(value):
+    return type(value) in (int, float) and math.isfinite(value) and value > 0
+
+
+def _method(mode):
+    if mode not in ("xfer", "store"):
+        raise RecipeError("PL_E_STALE unknown measurement mode")
+    return XFER_METHOD if mode == "xfer" else STORE_METHOD
+
+
+def bind_keys(probe_document, keys):
+    """An absent current driver/store/xfer identity cannot be filled by an old cache key."""
+    if not isinstance(probe_document, dict) or not isinstance(keys, dict):
+        raise RecipeError("PL_E_SCHEMA measurement probe and keys must be tables")
+    devices = probe_document.get("devices", [])
+    if not isinstance(devices, list):
+        raise RecipeError("PL_E_SCHEMA measurement probe devices must be a list")
+    current = {}
+    for sid, supplied in keys.items():
+        if (not isinstance(sid, str) or not sid or not isinstance(supplied, dict)
+                or set(supplied) != {"uuid", "driver", "xfer_sha256", "store_id"}):
+            raise RecipeError("PL_E_SCHEMA invalid measurement key")
+        identity = dict(supplied)
+        if sid == "store":
+            identity.update(uuid="host-store", driver="none")
+        else:
+            matches = [d for d in devices if isinstance(d, dict)
+                       and isinstance(d.get("uuid"), str) and isinstance(identity["uuid"], str)
+                       and grants.uuid_key(d["uuid"]) == grants.uuid_key(identity["uuid"])
+                       and d.get("present", True) is True]
+            identity["driver"] = matches[0].get("driver", "unknown") if len(matches) == 1 else "unknown"
+        identity["store_id"] = probe_document.get("file_store") or "unknown"
+        transfers = probe_document.get("xfer_sha256")
+        identity["xfer_sha256"] = (transfers.get(sid) or "unknown") if isinstance(transfers, dict) else "unknown"
+        current[sid] = identity
+    return current
 
 
 def approved(window, *, now):
@@ -85,7 +139,10 @@ def gpu_grant(cluster, row, *, now, guard=None):
 
 
 def median(samples, method):
-    if len(samples) != RUNS or not samples or any(set(s) != set(samples[0]) for s in samples):
+    fields = ({"h2d_mbps", "d2h_mbps", "h2d_lat_ns"} if method == XFER_METHOD else
+              {"file_read_mbps"} if method == STORE_METHOD else None)
+    if (fields is None or not isinstance(samples, list) or len(samples) != RUNS
+            or any(not isinstance(s, dict) or set(s) != fields for s in samples)):
         raise RecipeError("PL_E_STALE measurement needs nine runs of the same method")
     if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for s in samples for v in s.values()):
         raise RecipeError("PL_E_STALE invalid measurement sample")
@@ -232,7 +289,8 @@ def acquire(cluster, mode, *, runtime, uuid=None, xfer_sha256=None, store_id=Non
         except rtx.ServiceError as exc:
             raise RecipeError("PL_E_GRANT " + str(exc)) from exc
         gpu_grant(cluster, {"uuid": uuid, "name": ""}, now=clock(), guard=guard)
-        rows = [r for r in (inventory() if inventory is not None else probe.nvidia_gpus(placement=True))
+        inventory_reader = inventory if inventory is not None else lambda: probe.nvidia_gpus(placement=True)
+        rows = [r for r in inventory_reader()
                 if grants.uuid_key(r["uuid"]) == grants.uuid_key(uuid)]
         if len(rows) != 1:
             raise RecipeError("PL_E_UNKNOWN_DEVICE measurement UUID is absent or ambiguous")
@@ -241,10 +299,18 @@ def acquire(cluster, mode, *, runtime, uuid=None, xfer_sha256=None, store_id=Non
         identity = key(row["uuid"], row.get("driver"), xfer_sha256, store_id)
         result = gpu_runner(row, grant)
         gpu_grant(cluster, row, now=clock(), guard=guard)
+        current = [r for r in inventory_reader() if grants.uuid_key(r["uuid"]) == grants.uuid_key(uuid)]
+        if len(current) != 1 or current[0].get("driver") != row.get("driver"):
+            raise RecipeError("PL_E_STALE GPU identity or driver changed during measurement")
     else:
         # Store figures are host-only; the explicit sentinel keeps GPU and store identities disjoint.
         identity = key("host-store", "none", xfer_sha256, store_id)
+        before = probe.file_stat(files[0])
+        if before is None:
+            raise RecipeError("PL_E_STALE store measurement file is unavailable")
         result = store_runner(files[0], approval)
         approved(approval, now=clock())
-    Cache(runtime).save(identity, mode, result)
+        if before != probe.file_stat(files[0]):
+            raise RecipeError("PL_E_STALE store file changed during measurement")
+    Cache(runtime, clock=clock).save(identity, mode, result)
     return {"key": identity, **result}

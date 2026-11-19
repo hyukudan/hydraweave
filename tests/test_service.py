@@ -80,6 +80,14 @@ class NodeCase(unittest.TestCase):
                         patch.dict(os.environ, {"PATH": str(self.path_dir)})):
             patcher.start()
             self.addCleanup(patcher.stop)
+        import hydraweave_model_jobs as jobs
+        if jobs.models.fcntl is None:
+            # These service fixtures simulate POSIX processes and systemctl on
+            # Windows. Model-I/O lock refusal has a separate portable regression;
+            # only this simulated launch boundary receives a fake idle gate.
+            gate = patch.object(jobs, "refuse_storage_owner")
+            gate.start()
+            self.addCleanup(gate.stop)
 
     def policy(self, value):
         filename = self.root / "etc" / "install-policy.json"

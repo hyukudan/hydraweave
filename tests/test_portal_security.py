@@ -135,15 +135,18 @@ def test_shell_verification_success_mismatch_fallback_and_cleanup(tmp_path, veri
     curl.chmod(0o700)
     digest = hashlib.sha256(b"archive bytes").hexdigest()
     script = bootstrap.script("http://192.0.2.10:18700", digest).decode()
-    # Execute the actual download/verification block; no venv, pip, service, or network calls.
+    # Execute the actual download/verification and root-symlink guards with
+    # their real root initialization; no venv, pip, service, or network calls.
+    initialize_root = next(line for line in script.splitlines() if line.startswith("root="))
     verification = script[script.index("expected=${"):script.index('mkdir -p "$root/etc"')]
     downloads = tmp_path / "downloads"
     downloads.mkdir()
-    env = {**os.environ, "PATH": str(tools), "TMPDIR": str(downloads)}
+    env = {**os.environ, "PATH": str(tools), "TMPDIR": str(downloads),
+           "HYDRAWEAVE_ROOT": str(tmp_path / "node")}
     env.pop("HYDRAWEAVE_PKG_SHA256", None)
     if expected != "embedded":
         env["HYDRAWEAVE_PKG_SHA256"] = digest if expected == "match" else "0" * 64
-    result = subprocess.run([shell, "-c", "set -eu\n" + verification + "echo verified\n"],
+    result = subprocess.run([shell, "-c", "set -eu\n" + initialize_root + "\n" + verification + "echo verified\n"],
                             env=env, capture_output=True, text=True)
     assert result.returncode == (1 if expected == "mismatch" else 0), result.stderr
     assert ("verified" in result.stdout) == (expected != "mismatch")

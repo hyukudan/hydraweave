@@ -83,14 +83,43 @@ def _state(directory):
         return {}
 
 
+def _recover_router(directory):
+    """Finish a dead helper's owned router before replacing or clearing state."""
+    procs = _module("hydraweave.procs")
+    lock = procs.InstanceLock(directory / "router.lock")
+    lock.acquire()
+    try:
+        state = _state(directory)
+        if not state or state.get("status") == "stopped":
+            return
+        token = state.get("token")
+        if not isinstance(token, str) or len(token) != 32 or any(ch not in "0123456789abcdef" for ch in token):
+            raise RuntimeError("router recovery lacks a valid ownership token")
+        path = directory / ("router-" + token + ".json")
+        if Path(state.get("profile_config", "")).absolute() != path.absolute():
+            raise RuntimeError("router recovery config does not match its ownership token")
+        if os.name != "nt":
+            procs.stop_owned_group(state.get("process"), argument=state["profile_config"])
+        listen = state.get("listen")
+        if listen is None and path.is_file():
+            listen = json.loads(path.read_text(encoding="utf-8"))["listen"]
+        if listen:
+            procs.check_port(*_endpoint({"listen": listen}))
+        path.unlink(missing_ok=True)
+        (directory / (token + ".stop")).unlink(missing_ok=True)
+        _write(directory / "router-state.json", dict(state, status="stopped"))
+    finally:
+        lock.close()
+
+
 def _router_env():
     env = dict(os.environ)
     source = repo_root() / "third_party" / "tensormeld" / "src"
     if source.is_dir():
-        env["PYTHONPATH"] = str(source)
+        env["PYTHONPATH"] = os.pathsep.join([str(repo_root()), str(source)])
     else:
         _module("tensormeld")
-        env.pop("PYTHONPATH", None)
+        env["PYTHONPATH"] = str(repo_root())
     return env
 
 
@@ -133,6 +162,7 @@ def _router_start(args):
     directory.mkdir(parents=True, exist_ok=True)
     if _active(directory):
         raise RuntimeError("router is already running")
+    _recover_router(directory)
     token = uuid.uuid4().hex
     rendered_path = directory / ("router-" + token + ".json")
     rendered_path.write_text(json.dumps(rendered), encoding="utf-8")
@@ -170,10 +200,8 @@ def _router_start(args):
             helper.kill()
             helper.wait(timeout=5)
         raise
-    finally:
-        # The helper owns its rendered file once launched.
-        if helper.poll() is not None:
-            rendered_path.unlink(missing_ok=True)
+    # The helper owns its rendered file once launched. A hard-killed helper
+    # leaves the file as recovery evidence until router stop/start verifies it.
 
 
 def _router_run(args):
@@ -182,7 +210,7 @@ def _router_run(args):
     rendered = json.loads(path.read_text(encoding="utf-8"))
     endpoint = _endpoint(rendered)
     child = procs.LocalChild(
-        [str(Path(sys.executable).absolute()), "-m", "tensormeld", "serve-replicas", str(path)],
+        [str(Path(sys.executable).absolute()), "-m", "hydraweave.deployment", "serve-replicas", str(path)],
         _router_env(), directory, "router", port=endpoint)
     stop_path = directory / (args.token + ".stop")
     interrupted = False
@@ -194,12 +222,16 @@ def _router_run(args):
     for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
         if hasattr(signal, name):
             signal.signal(getattr(signal, name), interrupt)
-    state = {"token": args.token, "controller_pid": os.getpid(), "profile_config": str(path)}
+    state = {"token": args.token, "controller_pid": os.getpid(), "profile_config": str(path),
+             "listen": rendered["listen"]}
     started = False
     try:
         child.start()
         started = True
         state["pid"] = child.process.pid
+        identity = procs.process_identity(child.process.pid)
+        if identity is not None:
+            state["process"] = identity
         state["status"] = "starting"
         _write(directory / "router-state.json", state)
         deadline = time.monotonic() + 10
@@ -227,12 +259,24 @@ def _router_run(args):
             pass
     finally:
         if started:
-            state["status"] = "stopped"
-            # Write before releasing the instance lock, so a successor's state is safe.
+            state["status"] = "stopping"
             try:
                 _write(directory / "router-state.json", state)
             finally:
                 child.stop(5)
+            # LocalChild.stop releases its lifetime lock. Reacquire before
+            # publishing success, and never overwrite a successor's receipt.
+            lock = procs.InstanceLock(directory / "router.lock")
+            try:
+                lock.acquire()
+            except procs.ProcessError:
+                pass
+            else:
+                try:
+                    if _state(directory).get("token") == args.token:
+                        _write(directory / "router-state.json", dict(state, status="stopped"))
+                finally:
+                    lock.close()
         path.unlink(missing_ok=True)
         stop_path.unlink(missing_ok=True)
 
@@ -240,6 +284,7 @@ def _router_run(args):
 def _router_stop():
     directory = _runtime()
     if not _active(directory):
+        _recover_router(directory)
         _json({"status": "stopped"})
         return
     state = _state(directory)
@@ -253,6 +298,7 @@ def _router_stop():
         if time.monotonic() >= deadline:
             raise RuntimeError("router controller did not stop; see controller.log")
         time.sleep(0.1)
+    _recover_router(directory)
     for helper in _controllers[:]:
         helper.poll()
         if helper.returncode is not None:
@@ -332,6 +378,16 @@ from .placement import ENGINES as VRAMPLAN_ENGINES
 def _vramplan(args):
     vramplan, placement = _module("hydraweave.vramplan"), _module("hydraweave.placement")
     params = {}
+    if args.deployment_json:
+        receipt = _module("hydraweave.config").read_json(args.deployment_json)
+        plan = placement.plan(args.engine, None, None, deployment=receipt, rank=args.deployment_rank)
+        return dict(plan.to_dict(), explain=vramplan.explain(plan).splitlines())
+    if args.model is None or args.vram_cap_gib is None:
+        raise ValueError("vramplan needs --model and --vram-cap-gib, or --deployment-json")
+    if args.device_free_gib is not None:
+        if args.engine != "ds41-rtx-prefill":
+            raise ValueError("--device-free-gib is for ds41-rtx-prefill")
+        params["free_at_start_gib"] = args.device_free_gib
     if args.engine.endswith("-prefill"):
         if args.positions is None:
             raise ValueError(f"{args.engine} needs --positions")
@@ -626,8 +682,11 @@ def build_parser(parser_class=argparse.ArgumentParser):
     vplan = commands.add_parser("vramplan", help="RTX placement for a VRAM cap from the model files (prints the flags)")
     # Literal list (the parser imports nothing); hydraweave.placement.ENGINES is the same set (tested).
     vplan.add_argument("engine", choices=VRAMPLAN_ENGINES)
-    vplan.add_argument("--model", required=True, help="model file or directory (headers only are read)")
-    vplan.add_argument("--vram-cap-gib", type=float, required=True)
+    vplan.add_argument("--model", help="model file or directory (headers only are read)")
+    vplan.add_argument("--vram-cap-gib", type=float)
+    vplan.add_argument("--deployment-json", type=Path, help="engine deployment receipt with measured per-rank budgets")
+    vplan.add_argument("--deployment-rank", type=int, default=0)
+    vplan.add_argument("--device-free-gib", type=float, help="legacy DS41 predictor: measured free device memory in GiB")
     vplan.add_argument("--host-gib", type=float, help="pinned host budget (required for ds41-rtx-prefill)")
     vplan.add_argument("--positions", type=int, help="prefill engines: prompt / context positions")
     vplan.add_argument("--layers", type=int, help="minimax-rtx-prefill: the engine's --layers subset (validation)")
@@ -1036,7 +1095,13 @@ def main(argv=None):
             _router_stop()
         else:
             state = _state(_runtime())
-            state["status"] = "running" if _active(_runtime()) else "stopped"
+            if _active(_runtime()):
+                state["status"] = "running"
+            elif state and state.get("status") != "stopped":
+                state["status"] = "recovery_required"
+                state["reason"] = "controller exited; run router stop to verify cleanup"
+            else:
+                state["status"] = "stopped"
             _json(state)
         return 0
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as exc:

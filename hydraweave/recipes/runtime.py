@@ -14,6 +14,7 @@ from pathlib import Path, PureWindowsPath
 import re
 
 from . import content_cache, replica_args
+from .hashing import sha256_file
 from .reader import RecipeError
 
 PRESET = Path(__file__).resolve().parents[1] / "presets" / "rtx-decode-ds41-placement.json"
@@ -149,8 +150,7 @@ def decision(cluster, recipe, ctx, bound, effective_sha, plans, admitted):
             release.get("binaries", {}).get(binary.name) != plan["build_sha256"] or not Path(binary).is_file()):
         raise RecipeError("PL_E_STALE placement release binary or manifest is unavailable")
     try:
-        with Path(binary).open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = sha256_file(binary)
     except OSError as exc:
         raise RecipeError("PL_E_STALE placement release binary is unreadable") from exc
     if digest != plan["build_sha256"]:

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from hydraweave.recipes import core, placement, reader, session
+from hydraweave.recipes import calibration, core, placement, reader, session
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -48,7 +48,10 @@ class InvocationTests(unittest.TestCase):
             self.assertEqual(kwargs["timeout"], core.TIMEOUT_S)
             self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
             for flag in ("--probe", "--identity"):
-                self.assertEqual(json.loads(Path(argv[argv.index(flag) + 1]).read_text()), {"devices": []})
+                expected = {"devices": []}
+                if argv[1] == "solve" and flag == "--probe":
+                    expected["probe_xfer"] = {}  # No current measurement keys means no transfer figures.
+                self.assertEqual(json.loads(Path(argv[argv.index(flag) + 1]).read_text()), expected)
             Path(argv[argv.index("--json-out") + 1]).write_text('{"authoritative": true}', encoding="utf-8")
             kwargs["stdout"].write(b"core explanation\n")
             return SimpleNamespace(returncode=0)
@@ -187,8 +190,8 @@ class TierstreamParityTests(unittest.TestCase):
         recipe = self.golden / "g4/J2-recipe.toml"
         probe = json.loads((self.golden / "g4/J2-probe.json").read_text())
         probe.update(model="DeepSeek-V4.1-Flash", engine="strix-cuda-ds41-replica")
-        # SV1's costs/curves are passed unchanged. Their synthetic calibration differs from J2: the core must
-        # retain the placements and mark predictions unpredicted instead of estimating in Python.
+        # SV1's historical synthetic costs/curves have no current receipt for J2. The bridge withholds them;
+        # the core still owns placement and must keep these rows unpredicted.
         fixture = json.loads((self.golden / "sv1/SV1-solver.json").read_text())
         inputs = {key: fixture[key] for key in ("costs", "curves", "curves_applicability")}
         inputs["choices"] = [{key: choice[key] for key in ("id", "mode", "R", "ctx", "lang")}
@@ -196,7 +199,11 @@ class TierstreamParityTests(unittest.TestCase):
         for choice in inputs["choices"]:
             choice["components"] = str(self.golden / "g4/J2-components.json")
         result = placement.solve(recipe, route="decode_rtx", probe=probe, inputs=inputs, backend=self.backend)
-        direct = self.backend.solve(recipe, session.Layers(), route="decode_rtx", probe=probe, inputs=inputs, table=False)
+        effective = calibration.without_performance(inputs)
+        for choice in effective["choices"]:
+            choice["probe_xfer"] = {}
+        direct = self.backend.solve(recipe, session.Layers(), route="decode_rtx", probe=dict(probe, probe_xfer={}),
+                                    inputs=effective, table=False)
         self.assertEqual(result.document, direct.document)
         for row in result.document["rows"]:
             self.assertEqual(row["prediction"]["tag"], "unpredicted")

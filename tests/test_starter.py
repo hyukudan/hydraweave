@@ -14,7 +14,7 @@ except ImportError:  # stdlib unittest run in CI
 
 from hydraweave import config, downloads, provisioning, render
 from tests.test_gguf_merge import parts
-from tests.test_downloads import node
+from tests.test_downloads import fixture_job, node
 
 
 def cluster():
@@ -86,7 +86,8 @@ def test_node_download_merge_and_part_retention(tmp_path, bad_pin):
     directory.mkdir()
     (directory / node.ASSET_MARKER).touch()
     inputs = parts(tmp_path)
-    files = [{"destination": str(directory / path.name), "bytes": path.stat().st_size,
+    files = [{"destination": str(directory / path.name), "part": str(directory / ("." + path.name + ".hydraweave-part")),
+              "bytes": path.stat().st_size,
               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in inputs]
     spec = root / "run" / "job-test.spec.json"
     destination = directory / "out.gguf"
@@ -98,7 +99,7 @@ def test_node_download_merge_and_part_retention(tmp_path, bad_pin):
         Path(row["destination"]).write_bytes(inputs[files.index(row)].read_bytes())
 
     with patch.object(node, "fetch", side_effect=fetch), patch.object(node, "lab_quiet"), patch.object(node, "no_lease"):
-        assert node.job_main(str(spec)) == int(bad_pin)
+        assert fixture_job(spec) == int(bad_pin)
     state = node.install.read_json(root / "run" / "job-test.json")
     if bad_pin:
         assert all(Path(row["destination"]).exists() for row in files)
@@ -110,7 +111,7 @@ def test_node_download_merge_and_part_retention(tmp_path, bad_pin):
         node.install.atomic_json(spec, spec_data)
         with patch.object(node, "fetch", side_effect=AssertionError("retained part redownloaded")), \
                 patch.object(node, "lab_quiet"), patch.object(node, "no_lease"):
-            assert node.job_main(str(spec)) == 0
+            assert fixture_job(spec) == 0
     else:
         assert state["merged"]["sha256"] == hashlib.sha256(destination.read_bytes()).hexdigest()
         assert not any(Path(row["destination"]).exists() for row in files)

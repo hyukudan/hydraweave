@@ -5,6 +5,9 @@ name, its exact byte size in the file and the file it lives in.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 import json
 import os
@@ -41,7 +44,21 @@ GGML_TYPES = {
 _SCALAR = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q", 11: "<q", 12: "<d"}
 MAX_HEADER = 256 << 20  # bytes of header (metadata + tensor infos) read from one file
 MAX_DIMS = 8
-SPLIT = re.compile(r"(?P<prefix>.+)-\d{5}-of-(?P<count>\d{5})\.gguf")
+SPLIT = re.compile(r"(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<count>\d{5})\.gguf")
+_reader_override = ContextVar("model_header_reader", default=None)
+
+
+@contextmanager
+def using_reader(reader):
+    """Scope a header reader to this thread/task, preserving nested readers on exit.
+
+    A reader's exception propagates: a missing cached descriptor must never fall back to model I/O.
+    """
+    token = _reader_override.set(reader)
+    try:
+        yield
+    finally:
+        _reader_override.reset(token)
 
 
 class _Reader:
@@ -115,14 +132,17 @@ def gguf(path):
         if type(alignment) is not int or alignment <= 0 or alignment & (alignment - 1):
             raise ModelFileError(f"{path}: general.alignment must be a positive power of two")
         start = -(-stream.tell() // alignment) * alignment
-    ends = sorted(offset for *_, offset in infos) + [size - start]
+    ends = sorted(offset for *_, offset in infos)
     tensors = []
     for name, dims, kind, offset in infos:
+        if not 0 <= offset <= size - start:
+            raise ModelFileError(f"{path}: tensor {name} starts outside the file")
         elements = 1
         for d in dims:
             elements *= d
-        following = ends[ends.index(offset) + 1:]
-        room = next((e for e in following if e > offset), size - start) - offset
+        # Offset lookup must not scan/copy the remaining index for every tensor in a large MoE header.
+        following = bisect_right(ends, offset)
+        room = (ends[following] if following < len(ends) else size - start) - offset
         if kind in GGML_TYPES:
             dtype, block, per = GGML_TYPES[kind]
             nbytes = elements // block * per
@@ -165,12 +185,16 @@ def safetensors(path):
     return metadata, tensors
 
 
-def read(path):
-    """A model path: one GGUF file, a split GGUF (any shard), or a directory of safetensors / GGUF shards.
-    Returns (metadata of the first file, every tensor)."""
+def model_files(path):
+    """The ordered file set read for a model, using names and stat only.
+
+    A split GGUF must contain exactly shards 1..N of its declared name/count. Header sizing, cached descriptors
+    and fingerprints share this rule so a partially downloaded model cannot yield a smaller valid plan.
+    """
     path = Path(path)
+    groups = {}
     if path.is_dir():
-        files = sorted(p for p in path.iterdir() if p.suffix in (".safetensors", ".gguf"))
+        files = sorted(p for p in path.iterdir() if p.suffix in (".safetensors", ".gguf") and p.is_file())
         if not files:
             raise ModelFileError(f"{path}: no .safetensors or .gguf files")
     else:
@@ -178,8 +202,32 @@ def read(path):
         # A split GGUF: name-00001-of-00003.gguf (every shard of the same name and count).
         split = SPLIT.fullmatch(path.name)
         if split:
+            count, index = int(split["count"]), int(split["index"])
+            if count < 1 or not 1 <= index <= count:
+                raise ModelFileError(f"{path}: invalid split GGUF shard index/count")
+            groups[(split["prefix"], count)] = set()
             same = re.compile(re.escape(split["prefix"]) + r"-\d{5}-of-" + split["count"] + r"\.gguf")
-            files = sorted(p for p in path.parent.iterdir() if same.fullmatch(p.name))
+            files = sorted(p for p in path.parent.iterdir() if same.fullmatch(p.name) and p.is_file())
+    for file in files:
+        split = SPLIT.fullmatch(file.name)
+        if split:
+            count, index = int(split["count"]), int(split["index"])
+            if count < 1 or not 1 <= index <= count:
+                raise ModelFileError(f"{file}: invalid split GGUF shard index/count")
+            groups.setdefault((split["prefix"], count), set()).add(index)
+    for (prefix, count), indices in groups.items():
+        if len(indices) != count:
+            raise ModelFileError(f"{path}: incomplete split GGUF {prefix}: found {len(indices)} of {count} shards")
+    return files
+
+
+def read(path):
+    """A model path: one GGUF file, a split GGUF (any shard), or a directory of safetensors / GGUF shards.
+    Returns (metadata of the first file, every tensor)."""
+    reader = _reader_override.get()
+    if reader is not None:
+        return reader(path)
+    files = model_files(path)
     metadata, tensors = {}, []
     for i, f in enumerate(files):
         meta, rows = (gguf if f.suffix == ".gguf" else safetensors)(f)
@@ -195,6 +243,4 @@ def total(tensors):
 
 def fingerprint(path):
     """Names and sizes of the model files: a plan is valid for these exact files."""
-    path = Path(path)
-    files = sorted(path.iterdir()) if path.is_dir() else [path]
-    return [(f.name, os.stat(f).st_size) for f in files if f.is_file()]
+    return [(f.name, os.stat(f).st_size) for f in model_files(path)]

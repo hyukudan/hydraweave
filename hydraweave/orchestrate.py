@@ -1,6 +1,7 @@
 """Control-machine builds, bounded engine leases, and router lifecycle."""
 
 from .compat import schema as compat_schema
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
@@ -684,6 +685,85 @@ def prelaunch(cluster, profile, settings, kind, clients, mids):
             "node_paths": node_paths, "release_rows": release_rows}
 
 
+def deployment_checks(cluster, processes, clients, kind, settings):
+    """Inspect explicit deployment profiles concurrently, before requesting any GPU turn.
+
+    Legacy profiles retain their exact launch. Inspection hashes include measured
+    free memory, so the router binds the first *live* identity after native admission.
+    A pair must agree on its chosen model/topology/format/context/slots, not on a
+    hash of free-memory observations made at different instants.
+    """
+    from .deployment import parse_plan
+    selected = [spec for spec in processes if "--deploy" in spec.argv]
+    if not selected:
+        return {}
+    if len(selected) != len(processes):
+        raise OrchestrationError("deployment must cover every process in the profile")
+    pair = engines.adapter(kind).topology == "pair"
+    inventory = None
+
+    def inspect(spec, *, probe=False):
+        payload = {"root": cluster.machines[spec.machine_id].install_root,
+                   "argv": list(spec.argv), "env": dict(spec.env)}
+        if inventory is not None:
+            payload.update(inventory=inventory, topology="tp2")
+        if probe:
+            payload["inventory_only"] = True
+        return _call(clients[spec.machine_id], "deploy-check", payload, timeout=160)
+
+    def gather(*, probe=False):
+        replies = {}
+        with ThreadPoolExecutor(max_workers=min(8, len(selected))) as executor:
+            pending = {executor.submit(inspect, spec, probe=probe): spec.machine_id for spec in selected}
+            for future in as_completed(pending):
+                replies[pending[future]] = future.result()
+        return replies
+
+    if pair and all(spec.argv[spec.argv.index("--deploy") + 1] == "auto" for spec in selected):
+        probes = gather(probe=True)
+        inventory = []
+        for spec in selected:
+            reply = probes[spec.machine_id]
+            devices = (reply.get("deployment") or {}).get("devices")
+            if not reply.get("supported") or not isinstance(devices, list) or len(devices) != 1:
+                raise OrchestrationError(f"{spec.machine_id}: deployment needs a measured local device inventory")
+            inventory.append(devices[0])
+    replies = gather()
+    plans = {}
+    for spec in selected:
+        reply = replies[spec.machine_id]
+        if not reply.get("supported"):
+            raise OrchestrationError(f"{spec.machine_id}: deployment inspection unavailable")
+        try:
+            plan = parse_plan(reply.get("deployment"))
+        except ValueError as exc:
+            raise OrchestrationError(f"{spec.machine_id}: {exc}") from exc
+        chosen = plan["chosen"]
+        if (chosen["ranks"] != (2 if pair else 1)
+                or chosen["topology"] not in ({"tp2"} if pair else {"single", "replica", "replicas"})):
+            raise OrchestrationError(f"{spec.machine_id}: deployment topology requires a different lease layout")
+        inspected = reply.get("argv", list(spec.argv))
+        if inventory is None:
+            if inspected != spec.argv:
+                raise OrchestrationError("deployment inspection changed the launch arguments")
+        else:
+            index = spec.argv.index("--deploy") + 1
+            if (not isinstance(inspected, list) or len(inspected) != len(spec.argv)
+                    or inspected[:index] != spec.argv[:index] or inspected[index + 1:] != spec.argv[index + 1:]
+                    or not isinstance(inspected[index], str)
+                    or not re.fullmatch(re.escape(cluster.machines[spec.machine_id].install_root.rstrip("/"))
+                                        + r"/run/deployment-[a-f0-9]{64}\.toml", inspected[index])):
+                raise OrchestrationError("deployment inspection returned an invalid inventory file")
+        spec.argv[:] = inspected
+        plans[spec.machine_id] = plan
+    if pair:
+        signatures = {json.dumps({"model": plan.get("model"), "chosen": plan["chosen"]}, sort_keys=True)
+                      for plan in plans.values()}
+        if len(signatures) != 1:
+            raise OrchestrationError("pair deployment choices disagree across nodes")
+    return plans
+
+
 def check_launch(cluster, profile, router="local", nodes=None, *, diagnostics=None, recipe=False,
                  devices=None, vram_cap_gib=None):
     """The profile, node and router checks up makes before any I/O (also `hydraweave recipe plan`'s preflight)."""
@@ -886,6 +966,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
         # Diagnostic runs are labelled non-production everywhere they are recorded (state, leases, status).
         processes = render.render_processes(selected, profile, **(
             {"diagnostics": diagnostics, "run": state["token"][:12]} if diagnostics else {}))
+        state["deployments"] = deployment_checks(selected, processes, clients, kind, settings)
         rendered = render.render_router(selected, profile)
         if launch is not None:
             recipe_launch.verify_launch(launch, selected, profile, processes, release_rows)
@@ -928,7 +1009,10 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                     "machine": location, "argv": spec.argv, "env": spec.env,
                     "ready": spec.ready,
                     "health_url": _url({"address": address, "port": port}, engine.health_path),
-                    "key_file": node_paths.get(spec.machine_id), "ready_timeout_s": 600}
+                    # Pair readiness is checked by rank 0's owner against rank
+                    # 0's HTTP listener, including when inspecting rank 1 logs.
+                    "key_file": node_paths.get(mids[0] if pair else spec.machine_id), "ready_timeout_s": 600,
+                    "deployment_required": spec.machine_id in state["deployments"]}
 
         for index, mid in enumerate(engines.router_members(kind, mids) if pair else mids):
             payload = {"root": cluster.machines[mid].install_root, "lab_dir": _lab(cluster, mid),
@@ -1024,6 +1108,7 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
             # The wrapper sets the pinned import path itself: node spec env forbids
             # PYTHON* variables for engine processes.
             source = str(PurePosixPath(machine.install_root) / "src" / ("tensormeld-" + commit) / "src")
+            bridge = Path(__file__).with_name("deployment.py").read_text(encoding="utf-8")
             wrapper = ("import os,runpy,sys,tempfile\n"
                        "if not os.path.isfile(os.path.join(sys.argv[3],'tensormeld','__main__.py')): "
                        "raise SystemExit('pinned TensorMeld source unavailable')\n"
@@ -1031,7 +1116,8 @@ def up(cluster, profile, router="local", nodes=None, devices=None, *, deadline_s
                        "os.write(fd,sys.argv[2].encode());os.close(fd)\n"
                        "os.environ['PYTHONPATH']=sys.argv[3];sys.path.insert(0,sys.argv[3])\n"
                        "sys.argv=['tensormeld','serve-replicas',path]\n"
-                       "try: runpy.run_module('tensormeld',run_name='__main__')\n"
+                       "try: exec(" + repr(bridge.replace('if __name__ == "__main__":', 'if False:'))
+                       + ");router_main(['serve-replicas',path])\n"
                        "finally: os.unlink(path)\n")
             wrapper = "exec(" + repr(wrapper) + ")"
             payload = {"root": machine.install_root, "lab_dir": None, "kind": "none",
@@ -1137,15 +1223,28 @@ def _start_local_router(profile, rendered, keys, *, ownership=None, route_state=
 
 
 def poll_nodes_once(route_state, polled):
-    """Free RAM of every node over ssh (the node tool's read-only `gpu` verb) into ``polled``. Any failure or bad
-    answer leaves that node's last reading, which ages out (fail closed); it never raises."""
+    """Read independent node RAM facts concurrently, publishing each as it arrives.
+
+    Failed/bad answers retain that node's old reading, which ages out fail
+    closed. A slow node cannot delay fresh routing facts from another node.
+    """
     from .recipes import launch as recipe_launch
-    for mid, machine in route_state["machines"].items():
-        try:
-            result = _call(_client(SimpleNamespace(**machine), route_state["known_hosts"]), "gpu", {}, timeout=5)
-            polled[mid] = {"free_ram_gib": recipe_launch.node_ram(result), "at": time.time()}
-        except Exception:  # noqa: BLE001
-            pass
+    machines = [(mid, dict(machine)) for mid, machine in route_state["machines"].items()]
+    if not machines:
+        return
+    known_hosts = route_state["known_hosts"]
+
+    def read(machine):
+        result = _call(_client(SimpleNamespace(**machine), known_hosts), "gpu", {}, timeout=5)
+        return {"free_ram_gib": recipe_launch.node_ram(result), "at": time.time()}
+
+    with ThreadPoolExecutor(max_workers=min(8, len(machines)), thread_name_prefix="hydraweave-router-node") as pool:
+        pending = {pool.submit(read, machine): mid for mid, machine in machines}
+        for result in as_completed(pending):
+            try:
+                polled[pending[result]] = result.result()
+            except Exception:  # noqa: BLE001 - one failed node must not discard other nodes' facts
+                pass
 
 
 def local_router_run(spec_path):
@@ -1162,7 +1261,8 @@ def local_router_run(spec_path):
         env["PYTHONPATH"] = str(source)
     else:
         env.pop("PYTHONPATH", None)
-    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "tensormeld", "serve-replicas", str(config)],
+    env["PYTHONPATH"] = os.pathsep.join([str(repo_root()), env.get("PYTHONPATH", "")])
+    child = procs.LocalChild([str(Path(sys.executable).absolute()), "-m", "hydraweave.deployment", "serve-replicas", str(config)],
                              env, directory, "router", port=(rendered["listen"]["address"], rendered["listen"]["port"]))
     interrupted = False
 
@@ -1187,6 +1287,13 @@ def local_router_run(spec_path):
     poller = threading.Thread(target=poll_nodes, daemon=True) if route_state else None
     try:
         child.start()
+        started = {"state": "starting", "pid": child.process.pid}
+        identity = procs.process_identity(child.process.pid)
+        if identity is not None:
+            started["process"] = identity
+        # Persist before readiness: a helper can die while the router is still
+        # binding/loading. Linux children outlive a hard-killed controller.
+        _write(directory / "state.json", started)
         if poller is not None:
             poller.start()
         end = time.monotonic() + 15
@@ -1214,7 +1321,7 @@ def local_router_run(spec_path):
                     status = _http_json(rendered["listen"])
                     if compat_schema(status.get("schema")) != "tensormeld/replica-router-status-v1":
                         raise ValueError("unexpected router status schema")
-                    _write(directory / "state.json", {"state": "ready", "pid": child.process.pid})
+                    _write(directory / "state.json", dict(started, state="ready"))
                     ready = True
                 except (OSError, ValueError):
                     if time.monotonic() >= end:
@@ -1226,14 +1333,14 @@ def local_router_run(spec_path):
             pass
     finally:
         halt.set()
-        try:
-            child.stop(5)
-        finally:
-            for key in spec["keys"]:
-                Path(key).unlink(missing_ok=True)
-            config.unlink(missing_ok=True)
-            path.unlink(missing_ok=True)
-            _write(directory / "state.json", {"state": "stopped"})
+        child.stop(5)
+        # A failed stop must retain the config, keys and ownership evidence so
+        # a later down can retry; never publish a false stopped state.
+        for key in spec["keys"]:
+            Path(key).unlink(missing_ok=True)
+        config.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        _write(directory / "state.json", {"state": "stopped"})
 
 
 def _replicas_stopped(state):
@@ -1260,7 +1367,8 @@ def _stop_local_router(router):
     end = time.monotonic() + 15
     while time.monotonic() < end:
         path = directory / "state.json"
-        if path.exists() and _read(path).get("state") == "stopped":
+        state = _read(path) if path.exists() else {}
+        if state.get("state") == "stopped":
             for helper in _controllers[:]:
                 if helper.poll() is not None:
                     _controllers.remove(helper)
@@ -1271,14 +1379,27 @@ def _stop_local_router(router):
         except procs.ProcessError:
             pass
         else:
-            # A crashed controller's Job Object has already killed its router.
             try:
                 spec = directory / "spec.json"
+                config = directory / "router.json"
+                if os.name != "nt" and (spec.exists() or config.exists()):
+                    # Windows Job Objects kill children when their helper dies;
+                    # Linux sessions do not. Recover only a verified receipt.
+                    try:
+                        procs.stop_owned_group(state.get("process"), argument=str(config))
+                    except procs.ProcessError as exc:
+                        raise OrchestrationError(str(exc)) from exc
+                endpoint = router.get("endpoint")
+                if endpoint:
+                    try:
+                        procs.check_port(endpoint["address"], endpoint["port"])
+                    except procs.ProcessError as exc:
+                        raise OrchestrationError("local router port is still occupied; ownership retained") from exc
                 if spec.exists():
                     for key in _read(spec).get("keys", []):
                         Path(key).unlink(missing_ok=True)
                     spec.unlink()
-                (directory / "router.json").unlink(missing_ok=True)
+                config.unlink(missing_ok=True)
                 _write(directory / "state.json", {"state": "stopped"})
                 return
             finally:

@@ -43,7 +43,7 @@ def candidates(cluster, ctx, inventory, facts):
             rows.append(row)
     report = {"model": facts["model"], "devices": rows, "links": deepcopy(facts.get("links", []))}
     report.update({key: deepcopy(facts.get(key, "unknown")) for key in ("xfer_host", "file_store", "engram_store")})
-    for key in ("engine_sha256", "model_sha256"):
+    for key in ("engine_sha256", "model_sha256", "engine_revision"):
         if facts.get(key):
             report[key] = facts[key]
     return report

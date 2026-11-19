@@ -19,7 +19,7 @@ the tuned presets remains a [user decision](docs/hosting-options.md).
 **One control plane for AI inference across different machines.** Hydraweave brings a Windows workstation with an NVIDIA GPU and AMD Strix Halo Linux mini-PCs into one explicitly configured cluster. It installs pinned components, manages their lifecycle, starts a router, and gives operators a unified view of nodes, links, logs, and performance.
 
 > [!IMPORTANT]
-> **Development status — not production-ready (2026-10-25 evening):** deployment and the DeepSeek pair have passed hardware acceptance. The local portal has a hardware start/stop smoke test, with crash-cleanup acceptance still open. RTX prefill build, standalone exactness and capped placement are validated; the complete pair + RTX placement run remains pending. Recipe orchestration, the expanded portal and context-aware placement are pending integration.
+> **Development status (2026-11-19):** deployment and the DeepSeek pair have historical hardware acceptance. Recipes, placement, the expanded portal, discovery/pairing and release management now have implementations on `main`; this does not qualify every route or newer engine revision on hardware. Full pair + RTX acceptance, managed llama.cpp launches and the engine deployment-contract integration remain open. See the [implementation audit](docs/audit-2026-11-19.md) for working paths, corrections and remaining gaps.
 
 ## What problem does it solve?
 
@@ -29,7 +29,7 @@ Open **Models** to review configured profiles, their declared files and node pla
 
 ## Chat and API
 
-After a profile is running, open its chat from Models. The Chat page sends requests to the running OpenAI-compatible router and shows copyable curl, Python and JavaScript examples. Use the router URL shown there and supply your own API key when the router requires one.
+After a profile is running, open its chat from Models. Chat uses a cancellable portal job and the running router's server-side credential; the browser does not receive that key. The page shows copyable curl, Python and JavaScript examples with the router URL and an API-key placeholder. Replies appear after generation completes.
 
 Large models, fast prefill, and high-throughput decoding may need different hardware. Running each engine manually across multiple machines means coordinating versions, network endpoints, model files, launches, GPU reservations, and failures yourself.
 
@@ -59,7 +59,7 @@ flowchart LR
   R -. long-prompt prefill .-> G
 ```
 
-The CLI uses a versioned cluster configuration and pinned releases. Machines are added explicitly via SSH with host-key verification; GPU jobs run under supervised leases. The router can run locally or on a linked machine. See [architecture and lifecycle details](docs/README-technical.md#architecture).
+The CLI uses a versioned cluster configuration and pinned releases. Machines are added through verified SSH, explicit local execution or agent pairing; discovery alone grants no execution rights. Lab GPU jobs run under supervised leases. The router can run locally or on a supported linked machine. See [architecture and lifecycle details](docs/README-technical.md#architecture).
 
 Hydraweave reports the installed package version, or a Git describe version when run from a checkout. The Nodes view marks discovered agents whose release differs from the controller; local development suffixes are ignored. See [version and node compatibility](docs/install.md#versions-and-node-compatibility).
 
@@ -145,7 +145,7 @@ current and previous versions are retained for rollback. See
 | 1b — local monitoring portal | Implemented on main; real node data and Qwen start/stop exercised; portal-exit cleanup test still open |
 | 2 — validated cluster profiles and operational workflows | Accepted on real hardware (2026-10-23/24, DeepSeek pair) |
 | 3 — optional RTX prefill and heterogeneous inference extensions | 3a in progress: CUDA build and prefill service on the RTX PRO accepted (fidelity gate equal to the exact reference at 512 / 2K / 8K / 32K); pair + RTX placement through `up` pending; optional operator gate before the device is touched |
-| 4 — operational extensions | Installation/release tooling, qualified knobs, diagnostics, Prometheus export and optional non-lab service mode implemented; discovery/pairing and Windows workers remain later work |
+| 4 — operational extensions | Installation/release tooling, qualified knobs, diagnostics, Prometheus export, discovery/pairing and optional non-lab Qwen service mode implemented; Windows inference workers and wider backend qualification remain open |
 
 Linux users can run the portal as a user service with `hydraweave service install`; use `hydraweave-node pair`
 to reissue an expired node pairing code.
@@ -168,10 +168,10 @@ Pending integration follows these decisions:
 
 | Work | Design / current boundary |
 |---|---|
-| Recipes and portal deployment | Shared CLI validation, immutable launch-input snapshots and request-time resource checks. Router pin update and hardware qualification remain prerequisites; built-in recipes are not accepted deployments. |
-| Context-aware placement | The operator chooses context and a speed/context trade-off; the validated plan becomes launch input. Predictions are labelled; model/context/engine/driver/budget changes invalidate it. This extends the current [capped prefill planner](docs/vramplan.md) and is pending implementation. |
+| Recipes and portal deployment | Shared CLI validation, immutable launch-input snapshots and request-time resource checks are implemented. Route-specific pins and hardware qualification remain prerequisites; built-in recipes are not automatically accepted deployments. |
+| Context-aware placement | Descriptor-based planning, budget/context checks and cached receipts are implemented. Model/context/engine/driver/budget changes invalidate evidence. Engine-measured deployment admission and live capacity/drain integration remain in draft PR #11; see [capped prefill planning](docs/vramplan.md). |
 | Budgets and probes | Every GPU needs its own grant; pinned/pageable host budgets are separate. Probes are explicit and receipts cached; passive planning runs no GPU work and never adds another GPU automatically. |
-| Expanded portal | Telemetry history, fleet/health views, benchmarks and operations are implemented in pending branch work, awaiting integration and acceptance. |
+| Expanded portal | Telemetry history, fleet/health views, benchmarks and operations are integrated on main. End-to-end hardware and browser acceptance is recorded separately from host tests. |
 
 ## Documentation
 
@@ -191,7 +191,7 @@ Pending integration follows these decisions:
 **AMD-first inference, heterogeneous orchestration.** Hydraweave supports Strix Halo decode nodes while coordinating other resources when a profile requires them. It uses pinned upstream components rather than duplicating their kernels or inference implementations. Configuration is explicit; remote SSH commands are allow-listed; leases own GPU work; partial starts must clean up safely.
 
 For the complete security model and limitations, see [Technical overview — Security](docs/README-technical.md#security).
-LAN portal binds require a persistent access token for actions; the console prints a login URL. Loopback
+LAN portal binds require a persistent access token for protected reads and actions; the console prints a login URL. Loopback
 access is unchanged, and `--no-auth` explicitly allows unauthenticated LAN control with a warning.
 Worker bootstrap commands verify the package SHA-256 before pip installation. See
 [Installation — LAN access security](docs/install.md#lan-access-security) for token storage and HTTP trust requirements.

@@ -19,14 +19,25 @@ Clients then use `http://<host>:18710/v1` with `Authorization: Bearer $HYDRAWEAV
 | `POST /v1/*` (chat, completions, embeddings, ...) | Forwarded unchanged to an upstream that lists the `model`; streaming (`"stream": true`) passes through chunk by chunk |
 | `GET /health` | `ok` plus the upstreams that did not answer at the last refresh |
 
-- The model list is refreshed every 10 seconds. A request for an id nobody listed re-asks the upstreams
+- The model list is refreshed every 10 seconds. Up to eight independent catalog probes run concurrently;
+  a single refresh publishes one atomic snapshot. Other requests can use an existing snapshot while a refresh
+  is in flight. A request for an id nobody listed re-asks the upstreams
   (at most once a second), so a profile that just started is found without restarting the front.
-- When several upstreams list the same id (replicas), requests take turns between them.
+- When several upstreams list the same id (replicas), requests take turns between them. Refreshes preserve the
+  next replica when membership is unchanged; duplicate rows from an engine do not give it extra turns.
 - An upstream that is down is skipped in the listing; a request routed to it returns a 502
   `upstream_unavailable` error.
-- Upstreams are called without a key: engines that require their own API key are not supported by the front
-  yet. Keep the engines on a trusted network and let the front's token guard the shared endpoint.
+- Each upstream may have its own bearer key, independent of the client-facing token. Bind it by name using
+  `--upstream-key-env qwen=QWEN_ROUTER_KEY` or `--upstream-key-file deepseek=/path/to/router-key` (repeatable on
+  both `serve` and `models`). Keys are read by the front; the client's Authorization header is never relayed.
+  A missing, malformed or duplicate key binding is rejected. Do not embed credentials in upstream URLs.
 - `hydraweave front models --upstream ...` prints the aggregated list once, with any upstream errors.
 
 The front adds no model logic: request and response bodies are the engines' own. The shared OpenAI contract
 test (`tests/openai_contract.py`) is run against it in `tests/test_frontdoor.py`.
+
+POST bodies need one unambiguous Content-Length and are limited to 32 MiB. Chunked request bodies are not
+accepted. Request query strings and end-to-end response headers are preserved; connection-specific fields are
+removed on each hop. If an upstream closes before its declared response length, the front closes its response
+without a successful chunk terminator, so clients can detect the truncation. It never retries a partially
+forwarded generation. IPv4 and IPv6 loopback listeners are supported.

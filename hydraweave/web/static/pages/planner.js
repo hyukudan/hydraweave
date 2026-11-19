@@ -353,6 +353,10 @@
 
   function solverCard() {
     const s = V.s, result = s.answer?.result;
+    const calibration = result?.calibration;
+    const evidence = calibration ? `<p class="hint" role="status">${calibration.status === "calibrated" ?
+      `Performance evidence: current for this exact configuration, valid until ${esc(when(calibration.expires_at))}. No extrapolation.` :
+      `Performance evidence: ${esc(calibration.status || "unpredicted")}. ${esc(calibration.why || "Supply current measurements to predict performance.")}`}</p>` : "";
     const table = result?.rows ? H().table(["Row", "Choice", "Placement / refusal", "Prediction", "Estimates", "Pick"],
       result.rows.map(row => {
         const id = row.id || row.choice?.id || "";
@@ -370,7 +374,7 @@
       <div class="field"><label for="solver-bundle">Cached input bundle</label><input class="inp" id="solver-bundle" data-page-action="planner-solver-input" data-key="bundle" value="${esc(s.bundle)}"></div>
       ${pageButton("Solve selected recipe", "planner-solver-run", {disabled: s.busy || !V.recipe || !s.route || !s.bundle ? "Choose a recipe, route and input bundle" : ""})}</div>
       <div class="field"><label for="solver-layer">Save picked row as layer</label><input class="inp" id="solver-layer" data-page-action="planner-solver-input" data-key="name" value="${esc(s.name)}"></div>
-      ${s.error ? `<p class="field-error" role="alert">${esc(s.error)}</p>` : ""}${table}${s.answer ? cli(s.answer) : ""}
+      ${s.error ? `<p class="field-error" role="alert">${esc(s.error)}</p>` : ""}${evidence}${table}${s.answer ? cli(s.answer) : ""}
       ${s.saved ? `<p role="status">Saved ${esc(s.saved.result?.name || "picked overrides")}</p>` : ""}`);
   }
 

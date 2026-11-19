@@ -288,31 +288,29 @@ class InventoryTests(LibraryCase):
         self.assertEqual((units["delta"]["manifest"]["status"], units["delta"]["manifest"]["invalid"]),
                          ("partial", 1))
 
-    def test_the_copy_verbs_are_not_part_of_this_release(self):
+    def test_copy_requires_a_complete_request_before_any_job_is_created(self):
         before = tree(self.root)
         for verb in ("copy-plan", "copy"):
             with self.subTest(verb):
                 reply = node.run(verb, {"root": str(self.root), "name": "alpha"})
-                self.assertEqual(reply["error"], "copies between machines are not available in this release")
+                self.assertIn("error", reply)
         self.assertEqual(tree(self.root), before)
         self.assertFalse(any(hasattr(node, name) for name in ("plan", "start_copy", "publish", "receive_main",
                                                               "send_main", "Staging")))
 
-    def test_verification_and_its_node_jobs_are_not_part_of_this_release(self):
-        """Held like the copies: nothing is written on the node (no job records, locks, logs or stop files) and no
-        background process starts (no detached whole-model hash outside a lease or a GPU turn)."""
+    def test_invalid_verification_and_unrelated_job_ids_start_nothing(self):
+        """Malformed names and unrelated historical job kinds never authorize work."""
         install.atomic_json(self.root / "run" / "job-j1.json", {"job": "j1", "kind": "model-verify",
                                                                 "state": "running", "created": time.time()})
         before = tree(self.root), tree(self.models)
-        with patch.object(node.os, "open", side_effect=AssertionError("opened a file")), \
-                patch.object(subprocess, "Popen", side_effect=AssertionError("started a process")):
+        with patch.object(subprocess, "Popen", side_effect=AssertionError("started a process")):
             for verb, payload in (("model-verify", {"root": str(self.root), "model_root": str(self.models),
-                                                    "name": "alpha"}),
+                                                    "name": "../alpha"}),
                                   ("copy-job", {"root": str(self.root), "job": "j1"}),
                                   ("copy-cancel", {"root": str(self.root), "job": "j1"})):
                 with self.subTest(verb):
                     reply = node.run(verb, payload)
-                    self.assertEqual(reply["error"], "model verification is not available in this release")
+                    self.assertIn("error", reply)
         self.assertEqual((tree(self.root), tree(self.models)), before)
         self.assertFalse(any(hasattr(node, name) for name in ("spawn", "job_main", "start_verify", "job_state",
                                                               "cancel", "Pauser", "Locked", "transition")))

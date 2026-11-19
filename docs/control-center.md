@@ -1,14 +1,15 @@
 # Control center: setup, node roles and updates
 
-This change builds on `rename/hydraweave` (`adead58`), which contains the project rename and the three-headed
-Hydra logo. The GitHub repository is `hyukudan/hydraweave`; `hyperloom` is the compatibility name. The rename
-is the existing PR #8, separate from the control-center work.
+The GitHub repository is `hyukudan/hydraweave`; `hyperloom` remains a compatibility name. The rename,
+control-center, discovery/pairing, node hardware inventory and authenticated portal reads are integrated on
+`main`. See the [2026-11-19 audit](audit-2026-11-19.md) for implementation and acceptance boundaries.
 
 ## The intended deployment
 
 One controller owns the workspace configuration, trusted host keys, component cache, job history and portal.
-Each Linux inference node runs the small existing node helper through pinned SSH. The helper installs builds,
-supervises engine processes and reports observations. No additional unauthenticated node HTTP API is needed.
+Each Linux inference node runs the node helper through pinned SSH, local execution or an explicitly paired
+agent. The helper installs builds, supervises engine processes and reports observations. Discovery alone never
+authorizes commands; agent credentials and SSH host identities are separate trust mechanisms.
 
 The controller, request router and inference rank 0 are different roles:
 
@@ -16,13 +17,13 @@ The controller, request router and inference rank 0 are different roles:
 |---|---|---|
 | Controller | Hydraweave CLI, portal (loopback by default), configuration and control jobs | Windows workstation or Linux machine |
 | Router | TensorMeld request endpoint and routing | Controller or supported configured Linux SSH node |
-| Inference worker | Engine, model files and GPU allocations | Configured Linux SSH worker |
+| Inference worker | Engine, model files and GPU allocations | Configured Linux SSH/local worker or paired agent |
 | Rank 0 | First worker of a paired engine; usually the pair's HTTP endpoint | Chosen by the deployment profile |
 | Rank 1 | Other worker participating in tensor parallelism | Other node in that profile |
 
 For a dedicated cluster, a Linux machine that stays on is a useful controller. It can also be a worker, but
-the worker still needs an explicit SSH entry: the current installer requires SSH even when that host also
-runs the controller. The `local` entry describes the controller; it is not an automatic GPU grant.
+the worker still needs an explicit machine/profile entry. A local worker can execute the same node helper
+without SSH to itself. The `local` controller entry alone is not an automatic GPU grant.
 
 For interactive work, the Windows workstation remains a valid controller. A remote router can avoid
 putting the inference data path through the workstation, subject to the selected engine's constraints.
@@ -38,8 +39,9 @@ hydraweave ui --listen 0.0.0.0 --port 18700 --no-browser
 
 Then open `http://<node address>:18700` from any machine on the LAN. `--listen` takes `0.0.0.0` or `::` for every
 interface, or one interface address. The same value can be saved as `pc.ui_listen` (for example `"0.0.0.0:18700"`);
-the command-line options win. **There is no login**: anyone who can reach that address can configure and start or
-stop the cluster, and the portal prints a warning saying so. Use it only on a trusted network. The portal still
+the command-line options win. **Network binds require the portal access token** for protected reads and actions;
+use the sign-in page and the token issued by the controller. Mutations also require the portal's CSRF/Origin
+checks. `--no-auth` explicitly disables access-token protection and prints a warning. The portal still
 refuses requests whose `Host` is a DNS name other than this machine's own names (IP addresses are accepted), so a web
 page elsewhere cannot rebind its name to the portal.
 
@@ -64,9 +66,10 @@ implemented.
 
 ## First-run workflow
 
-1. Open **Home** and follow the four-step setup wizard. It creates the workspace, checks this computer,
-   offers discovered machines and supported model presets, then shows start progress and links to Chat
-   and the API. The wizard can be resumed from Home. It creates no invented GPUs, model files, hashes,
+1. Open **Home** and follow the setup steps. It creates the workspace, checks this computer,
+   offers discovered machines and supported model presets, then opens the actual profile editor and launch
+   tools. Progress follows saved configuration rather than a browser-only selected-preset flag.
+   The wizard can be resumed from Home. It creates no invented GPUs, model files, hashes,
    releases or deployed workers.
 2. Add Linux nodes using the visual form. Set the host, SSH target, installation folder and the lab directory
    used by the bounded GPU turn manager for a normal **Start profile** launch.
@@ -74,7 +77,8 @@ implemented.
    For a pair, add both nodes first, then add the node-side SSH alias from the intended rank 0/build node
    to its peer. Before the first installation, an unknown node state permits only adding new aliases;
    existing aliases and all identity fields stay protected. Saving an alias does not test the connection.
-3. Create an engine profile from a supported preset. Choose one or more replicas or the two ordered ranks.
+3. Create an engine profile from a supported preset. Choose one or more replicas or the two ordered ranks;
+   eligible paired agents are offered alongside SSH machines.
 4. Assign the model assets by node: absolute paths, expected sizes and SHA-256 identities. These are declarations;
    a saved form is not proof the file exists or was verified.
 5. Review **Components**. Update node helpers and install the profile. The existing installer fetches its exact
@@ -85,6 +89,12 @@ implemented.
 
 The navigation keeps operational pages close at hand and groups specialist diagnostics under advanced tools.
 Existing benchmarks, recipes, telemetry, USB4 diagnostics and other feature pages remain accessible.
+
+Chat uses an admitted, cancellable portal job against the saved running router. The server resolves the router's
+own key and model catalog; browser requests stay on the portal's origin and never receive that key. Replies are
+shown when the job completes. API snippets use the router endpoint and an explicit API-key placeholder. The
+portal's own `/v1` is not an inference endpoint. Model acquisition remains the confirmed CLI asset-download flow;
+the Models page does not yet download assets in the browser.
 
 **Current node prerequisite:** the regular launch path acquires bounded GPU turns using the existing lab
 scripts. Preparing node tools does not create a turn manager. Register its actual `lab_dir` on each lab node;
@@ -134,7 +144,8 @@ Changing the default does not migrate a live router; stop the owned profile befo
 ## Engine controls and compatibility
 
 The engine upstream has grown beyond the older revisions qualified by these Hydraweave presets. In the audit,
-engine `main` was `51b42906ebbb55edf126dc3471e58b6e5892d85b` (2026-11-10); local earlier audit checkouts were older.
+the original control-center comparison used engine `51b42906ebbb55edf126dc3471e58b6e5892d85b` (2026-11-10).
+This is historical evidence, not a statement of today's engine head or the deployed pin.
 Its `--describe-json`, `--describe-capabilities-json`, `--print-effective-config`, `/v1/capabilities` and platform
 probe are the next integration contracts. They must be tested per executable and revision; not every family
 implements the same flags, defaults or lifecycle.
@@ -171,8 +182,8 @@ driver is loaded, and does not alter the user's nodes from the development envir
 Host-side tests cover configuration persistence and stale forms, existing runtime-state guards, router
 precedence, renderer parity, fixed context bounds, source revisions, dirty checkouts, cancellation and partial
 failure. A JSDOM walkthrough exercises first-run navigation and working forms against the real portal,
-with hardware access disabled in the fixture. Chromium could not start in the development environment
-because its local socket creation is prohibited, so visual browser acceptance is still pending. These checks
+with hardware access disabled in the fixture. The original implementation's visual-browser acceptance remained
+open; current audit results and environment limits are recorded separately in the audit report. These checks
 do not validate ROCm builds, USB4 performance, numerical fidelity or an actual multi-node activation.
 
 Remaining hardware acceptance is explicit: bootstrap a real node, build one supported profile, verify its assets,

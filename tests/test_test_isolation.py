@@ -11,6 +11,7 @@ from unittest import mock
 
 import tests
 from hydraweave import cli
+from hydraweave import paths, secrets
 from hydraweave.recipes import service
 from hydraweave.web.api import API
 from tests.ui import smoke
@@ -36,6 +37,52 @@ class TestIsolationTests(unittest.TestCase):
             self.assertEqual(os.environ["HYDRAWEAVE_ADMISSION_DB"], ":memory:")
         self.assertFalse(tests._inside_real_config(os.environ["HYDRAWEAVE_ADMISSION_DB"]))
         self.assertFalse(tests._test_root.is_relative_to(Path(__file__).resolve().parents[1]))
+        for root in (paths.config_dir(), paths.state_dir(), paths.data_dir(), secrets.runtime_dir()):
+            self.assertTrue(root.is_relative_to(tests._test_root), str(root))
+
+    def test_inherited_state_data_and_product_roots_are_guarded_and_redirected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outside = Path(directory)
+            state, data, product = (outside / name for name in ("state", "data", "product"))
+            real_roots = [state / "hydraweave", data / "hydraweave", product]
+            for root in real_roots:
+                root.mkdir(parents=True)
+                (root / "sentinel.json").write_text('{"real": true}', encoding="utf-8")
+            code = '''
+import json, os, subprocess, sys
+from pathlib import Path
+import tests
+from hydraweave import paths, secrets
+resolved = [paths.config_dir(), paths.state_dir(), paths.data_dir(), secrets.runtime_dir()]
+assert all(path.is_relative_to(tests._test_root) for path in resolved), resolved
+for path in resolved:
+    assert not (path / "sentinel.json").exists(), path
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "test-only.json").write_text("{}", encoding="utf-8")
+for path in json.loads(os.environ["HYDRAWEAVE_AUDIT_PROBE_ROOTS"]):
+    assert tests._inside_real_config(path), path
+    with tests.expected_guard_trips():
+        try:
+            (Path(path) / "must-not-write.json").write_text("{}", encoding="utf-8")
+        except tests.RealConfigWrite:
+            pass
+        else:
+            raise AssertionError("original root was writable: " + path)
+# A plain CLI interpreter has no tests audit hook: the inherited environment itself must keep it isolated.
+child = subprocess.run([sys.executable, "-c", "import json; from hydraweave import paths, secrets; "
+    "print(json.dumps([str(paths.config_dir()), str(paths.state_dir()), str(paths.data_dir()), str(secrets.runtime_dir())]))"],
+    capture_output=True, text=True, check=True, timeout=20)
+assert json.loads(child.stdout) == [str(path) for path in resolved], child.stdout
+print("isolated")
+'''
+            child = _child(code, XDG_STATE_HOME=str(state), XDG_DATA_HOME=str(data), HYDRAWEAVE_HOME=str(product),
+                           HYDRAWEAVE_AUDIT_PROBE_ROOTS=json.dumps([str(root) for root in real_roots]),
+                           **{tests._GUARD_ROOTS: None})
+            self.assertEqual(child.returncode, 0, child.stderr)
+            self.assertEqual(child.stdout.strip(), "isolated")
+            for root in real_roots:
+                self.assertEqual([path.name for path in root.iterdir()], ["sentinel.json"])
+                self.assertEqual((root / "sentinel.json").read_text(encoding="utf-8"), '{"real": true}')
 
     def test_cli_child_inherits_isolation(self):
         child = subprocess.run([sys.executable, "-c",

@@ -342,8 +342,10 @@ def test_bootstrap_render_never_executes_sudo_and_shell_syntax(tmp_path):
     assert "sudo" not in before
     assert "trap 'rm -rf \"$package_dir\"' EXIT" in script
     assert 'rm -rf "$root"' not in script and "systemctl --system" not in script
-    assert "agent-venv" in script and "--upgrade" in script
-    assert "--force-reinstall" in script  # Checkout builds can retain the same project version.
+    assert "agent-releases" in script and "--upgrade" in script
+    assert "--force-reinstall" not in script  # Each candidate is a fresh environment, including same-version builds.
+    assert '"$candidate/bin/python" -I -m hydraweave.node_update --bootstrap' in script
+    assert "systemctl --user is-active" in script
     path = tmp_path / "bootstrap.sh"
     path.write_bytes(script.encode())
     bash = shutil.which("bash")
@@ -427,9 +429,9 @@ def test_service_start_stop_remove_and_status_exit_code(tmp_path):
         assert node_agent.service_command("start", run=runner) == 2
 
 
-def test_bootstrap_retries_pairing_and_keeps_messages_on_one_line():
+def test_bootstrap_waits_for_proven_readiness_and_keeps_messages_on_one_line():
     script = bootstrap.script("http://127.0.0.1:18700").decode()
-    assert "until \"$root/agent-venv/bin/hydraweave-node\" pair" in script
+    assert '"$candidate/bin/python" -I -m hydraweave.node_update --wait-ready --root "$root"' in script
     assert "Reissue pairing code: hydraweave-node pair" in script
     for line in script.splitlines():
         if 'missing="$missing' in line:

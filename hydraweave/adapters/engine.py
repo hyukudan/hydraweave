@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 import math
 
-from . import Reader, check_schema, prom
+from . import AdapterError, Reader, check_schema, prom
+from ..deployment import parse_capacity, parse_plan
 
 
 SCHEMA = "strix-serve-status-v1"
@@ -47,6 +48,8 @@ class EngineStatus:
     prefill: dict | None
     group: dict | None
     why: dict[str, str]
+    capacity: dict | None = None
+    deployment_id: str | None = None
     ttft_label: str = TTFT_LABEL
 
 
@@ -75,6 +78,13 @@ def parse_status(obj) -> EngineStatus:
     values = {key: r.get(key, kind) for key, kind in {
         "model": str, "engine": str, "state": str, "context_tokens": int,
         "uptime_seconds": float}.items()}
+    values["deployment_id"] = r.get("deployment_id", str) if "deployment_id" in obj else None
+    values["capacity"] = None
+    if "capacity" in obj:
+        try:
+            values["capacity"] = parse_capacity(obj["capacity"])
+        except ValueError as exc:
+            r.why["capacity"] = str(exc)
     values["queue"] = r.record("queue", dict.fromkeys(
         ("queued", "running", "completed", "failed", "cancelled"), int))
     values["totals"] = r.record("totals", {**dict.fromkeys(
@@ -101,6 +111,13 @@ def parse_status(obj) -> EngineStatus:
         "world": int, "state": str, "transport": str, "exchanges": int,
         "bytes_sent": int, "exchange_seconds": float, "mean_exchange_us": float})
     return EngineStatus(**values, why=r.why)
+
+
+def parse_deployment(obj):
+    try:
+        return parse_plan(obj)
+    except ValueError as exc:
+        raise AdapterError(str(exc)) from exc
 
 
 def parse_metrics(text) -> EngineMetrics:

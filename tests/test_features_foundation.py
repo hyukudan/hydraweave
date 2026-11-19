@@ -448,6 +448,45 @@ class APIDispatchTests(unittest.TestCase):
         self.assertEqual((self.api._holds, self.api._heartbeat), ({}, None))
         self.assertEqual(self.api.admission_db.holds(), [])
 
+    def test_renewal_thread_retires_after_last_hold_and_restarts_for_new_work(self):
+        self.api._hold("first", "bench", {"node-x"}, "first")
+        first = self.api._heartbeat
+        self.assertTrue(first.is_alive())
+        self.api._unhold("first")
+        first.join(1)
+        self.assertFalse(first.is_alive(), "an idle heartbeat retains the API forever")
+        self.assertIsNone(self.api._heartbeat)
+        self.api._hold("second", "bench", {"node-x"}, "second")
+        second = self.api._heartbeat
+        self.assertIsNot(second, first)
+        self.assertTrue(second.is_alive())
+        self.api._unhold("second")
+        second.join(1)
+        self.assertFalse(second.is_alive())
+
+    def test_closing_portal_keeps_renewing_unfinished_core_work(self):
+        from hydraweave.web import api as api_module
+        renewed = threading.Event()
+        real = self.api.admission_db.renew
+
+        def renew(hold):
+            result = real(hold)
+            renewed.set()
+            return result
+
+        with mock.patch.object(api_module, "HOLD_RENEW_S", .02), \
+                mock.patch.object(self.api.admission_db, "renew", side_effect=renew):
+            self.api._hold("core", "core", {"node-x"}, "core")
+            thread = self.api._heartbeat
+            try:
+                self.assertEqual(self.api.close_features(timeout_s=0), 0)
+                self.assertTrue(renewed.wait(1))
+                self.assertTrue(thread.is_alive())
+            finally:
+                self.api._unhold("core")
+                thread.join(1)
+        self.assertFalse(thread.is_alive())
+
     def _try(self, call):
         try:
             self.api.mutate(*call)
@@ -476,13 +515,18 @@ class APIDispatchTests(unittest.TestCase):
                 self.assertEqual(caught.exception.status, 503)
                 self.assertEqual((self.api._holds, self.api._active, self.api._heartbeat), ({}, None, None))
                 self.assertEqual(self.api.admission_db.holds(), [])
-        self.wait(self.api.mutate("down", {"profile": "qwen"})["id"])      # starts the renewal thread
-        self.assertIsNotNone(self.api._heartbeat)
+        self.wait(self.api.mutate("down", {"profile": "qwen"})["id"])
+        real_start = api_module.threading.Thread.start
+
+        def fail_worker_start(thread):
+            if thread.name == "hydraweave-admission":
+                return real_start(thread)
+            raise RuntimeError("can't start new thread")
+
         for action, arguments in (("demo/bench", {"on": ["halo-1"]}), ("demo/exclusive", {}),
                                   ("down", {"profile": "qwen"})):
             with self.subTest(action=action):
-                with mock.patch.object(api_module.threading.Thread, "start",
-                                       side_effect=RuntimeError("can't start new thread")):
+                with mock.patch.object(api_module.threading.Thread, "start", fail_worker_start):
                     with self.assertRaises(APIError) as caught:
                         self.api.mutate(action, arguments)
                 self.assertEqual(caught.exception.status, 503)

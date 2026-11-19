@@ -99,18 +99,20 @@ def plan(cluster, profile, asset, machine_id):
             "next": f"hydraweave assets download {profile} {asset} --machine {machine.id} --confirm {result['confirm']}"}
 
 
-def start(cluster, profile, asset, machine_id, confirm):
+def start(cluster, profile, asset, machine_id, confirm, *, owned=False):
     if not isinstance(confirm, str) or not re.fullmatch(r"[0-9a-f]{12}", confirm):
         raise ValueError("--confirm takes the 12-character code printed by the plan")
     machine, payload, row = _request(cluster, profile, asset, machine_id)
-    result = orchestrate._call(orchestrate._client(machine), "download", dict(payload, confirm=confirm))
+    result = orchestrate._call(orchestrate._client(machine), "download", dict(payload, confirm=confirm, **({"owned": True} if owned else {})))
     return {"machine": machine.id, "job": result["job"], "log": result["log"], "after": row.get("after")}
 
 
-def job(cluster, machine_id, job_id, cancel=False):
+def job(cluster, machine_id, job_id, cancel=False, *, owned=False):
     machine = cluster.machines[machine_id]
     payload = {"root": machine.install_root, "job": job_id}
-    return orchestrate._call(orchestrate._client(machine), "download-cancel" if cancel else "job", payload)
+    if owned and not cancel:
+        payload["renew"] = True
+    return orchestrate._call(orchestrate._client(machine), "download-cancel" if cancel else "download-status" if owned else "job", payload)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -718,9 +720,5 @@ def ledger_guard(config_path, store=None):
     return LedgerGuard(_Path(config_path).parent, configured_ledger(config_path))
 
 
-# --- verification (held) --------------------------------------------------------------------------------------
-
-# Held, like copies between machines: a whole-model hash has no design that runs inside a lease or a GPU turn yet,
-# so the portal and the command line start nothing, and the node verbs (model-verify, copy-job, copy-cancel) answer
-# the same before anything is read or written.
-VERIFY_HELD = "model verification is not available in this release"
+# Managed verification/copy coordination is in hydraweave.library_jobs; inventory
+# stays passive here. Both portal and CLI enter through its admitted job contract.

@@ -59,10 +59,9 @@ class DocumentTests(LibraryFeatureCase):
         self.assertIn("not open", document["why"]["inventory"])
         rows = {m["id"]: m for m in document["machines"]}
         self.assertEqual(rows["halo-1"]["roots"], [{"path": "/opt/assets", "source": "config"}])
-        self.assertEqual(document["copy"], {"available": False,
-                                            "why": "copies between machines are not available in this release"})
-        self.assertEqual(document["verify_job"], {"available": False,
-                                                  "why": "model verification is not available in this release"})
+        self.assertTrue(document["copy"]["available"])
+        self.assertIn("pinned", document["copy"]["why"])
+        self.assertTrue(document["verify_job"]["available"])
         self.assertEqual(document["ledger"]["configured"], False)
         self.assertEqual(sorted(p.name for p in Path(self.dir.name).iterdir()), before)
         with self.assertRaises(APIError):
@@ -99,12 +98,10 @@ class PostTests(LibraryFeatureCase):
         self.assertEqual(states.count("succeeded"), 1)
         self.assertEqual(states.count("refused"), 5)
 
-    def test_verification_and_its_node_jobs_are_refused(self):
-        """Held like the copies: no route starts a verification or reads or cancels a node job, so nothing reaches
-        a node (the node gate is never taken) and no job runs."""
+    def test_raw_node_job_access_is_not_a_portal_route(self):
+        """Only an admitted portal job may follow/cancel the node job it created."""
         self.api.telemetry = self.store
-        for action, arguments in (("library/verify", {"machine": "halo-1", "model_root": "/opt/assets", "name": "m"}),
-                                  ("library/job", {"machine": "halo-1", "job": "a" * 32}),
+        for action, arguments in (("library/job", {"machine": "halo-1", "job": "a" * 32}),
                                   ("library/cancel", {"machine": "halo-1", "job": "a" * 32})):
             with self.subTest(action):
                 with self.assertRaises(APIError) as caught:
@@ -227,12 +224,16 @@ class LibraryPageInBrowser(unittest.TestCase):
         failed, unresolved = by_name["ds-trellis-k5"], by_name["draft-small.gguf"]
         self.assertEqual(failed[2], "failed")                          # not the stale "paused" of its node record
         self.assertIn("paused for more than 10 minutes", failed[3])
-        self.assertIn("not available in this release", self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-copy\"]').title"))     # copy: disabled, says why
-        self.assertIn("not available in this release", self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-verify\"]').title"))   # verify: disabled, says why
+        # halo-1 still has /opt/models configured; halo-2's cached scan of it is stale.
+        self.assertIn("configured", self.client.evaluate(
+            "document.querySelector('[data-page-action=\"library-copy\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').title"))
+        self.assertIn("configured", self.client.evaluate(
+            "document.querySelector('[data-page-action=\"library-verify\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').title"))
         self.assertFalse(self.client.evaluate(
-            "document.querySelector('[data-page-action=\"library-verify\"]').disabled === false"))
+            "document.querySelector('[data-page-action=\"library-verify\"][data-machine=\"halo-2\"]"
+            "[data-root=\"/opt/models\"]').disabled === false"))
         self.assertEqual(unresolved[2], "unresolved")
         self.assertIn("could not be read", unresolved[3])
         self.assertEqual(len(unresolved), 5)                          # history only: no cancel control
@@ -273,15 +274,18 @@ class PageAndCLITests(unittest.TestCase):
             with self.subTest(argv):
                 parser.parse_args(argv)
 
-    def test_cli_verify_is_refused_before_anything_is_read_or_called(self):
+    def test_cli_verify_uses_the_admitted_portal_job_contract(self):
         from hydraweave import cli
-        err = io.StringIO()
-        with mock.patch.object(cli, "_cluster", side_effect=AssertionError("configuration read")), \
-                mock.patch.object(downloads, "_node", side_effect=AssertionError("node called")), \
-                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        api = mock.Mock()
+        api.mutate.return_value = {"id": "verify-1"}
+        api.read.return_value = {"state": "succeeded", "result": {"ok": True}}
+        with mock.patch("hydraweave.web.api.API", return_value=api), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             code = cli.main(["models", "verify", "halo-1", "/opt/assets", "m"])
-        self.assertEqual(code, 1)
-        self.assertIn("model verification is not available in this release", err.getvalue())
+        self.assertEqual(code, 0)
+        api.mutate.assert_called_once_with("library/verify", {"machine": "halo-1", "model_root": "/opt/assets", "name": "m"})
+        api.renew_jobs.assert_called_once_with({"jobs": ["verify-1"]})
+        api.close_features.assert_called_once()
 
     def test_cli_list_without_a_store_says_why(self):
         from hydraweave import cli

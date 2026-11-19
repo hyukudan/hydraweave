@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import mmap
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
@@ -236,7 +238,11 @@ class DiskCache:
 
     def _load(self):
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            with self.path.open("rb") as stream:
+                raw = stream.read(4 * MIB + 1)
+            if len(raw) > 4 * MIB:
+                return {}
+            data = json.loads(raw)
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
             return {}
@@ -244,22 +250,30 @@ class DiskCache:
     @staticmethod
     def key(machine, path, stat, method="direct", chunk=DISK_CHUNK):
         """Machine + volume/device id + path + size + mtime + probe method + request size."""
-        return f"{machine}|{stat['device']}|{path}|{stat['size']}|{int(stat['mtime'])}|{method}|{chunk}"
+        stamp = stat["mtime_ns"] if "mtime_ns" in stat else int(stat["mtime"] * 1e9)
+        return f"v2|{machine}|{stat['device']}|{stat.get('inode', 'unknown')}|{path}|{stat['size']}|{stamp}|{method}|{chunk}"
 
     def get(self, key, now=None):
         entry = self._load().get(key)
         now = time.time() if now is None else now
-        if not isinstance(entry, dict) or now - entry.get("measured_at", 0) > CACHE_TTL_S:
+        measured = entry.get("measured_at") if isinstance(entry, dict) else None
+        if (not isinstance(entry, dict) or type(measured) not in (int, float) or not math.isfinite(measured)
+                or not 0 <= now - measured <= CACHE_TTL_S or entry.get("method") != "direct"
+                or type(entry.get("gbytes_ps")) not in (int, float) or not 0 < entry["gbytes_ps"] < 1e6):
             return None
         return entry
 
     def put(self, key, result, now=None):
-        data = self._load()
-        data[key] = dict(result, measured_at=time.time() if now is None else now)
+        self.update(key, dict(result, measured_at=time.time() if now is None else now))
+
+    def update(self, key, value):
+        """Merge one receipt under the shared file lock; readers see an atomic complete document."""
+        from ..store import ConfigLock, atomic_write
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
+        with ConfigLock(self.path):
+            data = self._load()
+            data[key] = value
+            atomic_write(self.path, json.dumps(data, indent=1, sort_keys=True, allow_nan=False).encode("utf-8"))
 
 
 def file_stat(path):
@@ -268,7 +282,8 @@ def file_stat(path):
         st = os.stat(path)
     except OSError:
         return None
-    return {"device": st.st_dev, "size": st.st_size, "mtime": st.st_mtime}
+    return {"device": st.st_dev, "inode": st.st_ino, "size": st.st_size, "mtime": st.st_mtime,
+            "mtime_ns": st.st_mtime_ns}
 
 
 def disk_fact(cache, machine, path, stat, measure, measurer):
@@ -282,8 +297,11 @@ def disk_fact(cache, machine, path, stat, measure, measurer):
             result = measurer()
         except (OSError, ProbeError) as exc:
             return missing(f"disk probe failed: {exc}")
-        if result["method"] != "direct":
-            return missing(f"unverified: {result['method']} read ({result['gbytes_ps']:.2f} GB/s may come from the cache)")
+        if (not isinstance(result, dict) or type(result.get("gbytes_ps")) not in (int, float)
+                or not 0 < result["gbytes_ps"] < 1e6):
+            return missing("disk probe returned invalid bandwidth")
+        if result.get("method") != "direct":
+            return missing(f"unverified: {result.get('method', 'unknown')} read ({result['gbytes_ps']:.2f} GB/s may come from the cache)")
         cache.put(key, result)
         return fact(result["gbytes_ps"], "probed") | {"method": result["method"]}
     entry = cache.get(key)
@@ -312,12 +330,23 @@ def node_device(gpu_result):
         out["name"] = fact(name, "probed") if name else missing("product_name not reported")
         out["memory_gib"] = (fact(((vram or 0) + (gtt or 0)) / GIB, "probed") if vram is not None or gtt is not None
                              else missing("VRAM/GTT totals not reported"))
+        unique = _ok(card.get("unique_id"))
+        if (isinstance(unique, str) and re.fullmatch(r"(?:0x)?[0-9a-fA-F]{1,64}", unique)
+                and int(unique, 16) != 0):
+            out["uuid"] = fact("AMD-" + unique.lower().removeprefix("0x"), "probed")
+        else:
+            out["uuid"] = missing("nonzero physical AMD unique_id not reported")
+        from . import topology
+        pci = topology.pci(_ok(card.get("pci")))
+        out["pci"] = fact(pci, "probed") if pci != "unknown" else missing("PCI identity not reported")
     else:
         out["name"] = out["memory_gib"] = missing("no AMD GPU reported")
     out["host_ram_gib"] = (fact(ram["total_bytes"] / GIB, "probed") if "total_bytes" in ram
                            else missing("RAM not reported"))
     out["host_free_ram_gib"] = (fact(ram["available_bytes"] / GIB, "probed") if ram.get("available_bytes") is not None
                                 else missing("MemAvailable not reported"))
+    kernel = _ok(checks.get("kernel"))
+    out["kernel"] = fact(kernel, "probed") if isinstance(kernel, str) and kernel else missing("kernel not reported")
     return out
 
 

@@ -48,7 +48,9 @@ def facts(model, profile, **availability):
 
 class Isolated:
     """A temporary configuration directory (cluster.json, recipes/, run/) that both this process and CLI children
-    use: APPDATA/LOCALAPPDATA/HOME point into it, and the stub reader is selected unless a core is configured."""
+    use: platform config/state/data roots point into it, and the stub reader is selected unless a core is configured.
+    Inherited XDG and product-root overrides cannot escape the temporary directory.
+    """
 
     def __init__(self, core=None):
         # The recipe core when HYDRAWEAVE_TS_RECIPE (else HYDRAWEAVE_SS_RECIPE) names it, as core.locate reads them (the
@@ -59,7 +61,9 @@ class Isolated:
         self.temporary = tempfile.TemporaryDirectory(prefix="hl-recipes-test-")
         self.root = Path(self.temporary.name)
         env = {"APPDATA": str(self.root / "appdata"), "LOCALAPPDATA": str(self.root / "local"),
-               "HOME": str(self.root / "home"), "XDG_CONFIG_HOME": str(self.root / "home" / ".config")}
+               "HOME": str(self.root / "home"), "XDG_CONFIG_HOME": str(self.root / "home" / ".config"),
+               "XDG_STATE_HOME": str(self.root / "home" / ".local" / "state"),
+               "XDG_DATA_HOME": str(self.root / "home" / ".local" / "share"), "HYDRAWEAVE_HOME": ""}
         env.update(HYDRAWEAVE_RECIPE_STUB="1")      # `up --recipe` on the stub is allowed (non-production) in tests
         if not core:
             env.update(HYDRAWEAVE_TS_RECIPE="", HYDRAWEAVE_SS_RECIPE="")
@@ -76,6 +80,7 @@ class Isolated:
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(cluster_document()), encoding="utf-8")
         service.use_config(self.config)
+        assert service.runtime_dir().is_relative_to(self.root), "recipe fixture runtime escaped its temporary root"
 
     def save_facts(self, name, model, profile, **availability):
         directory = service.facts_dir()

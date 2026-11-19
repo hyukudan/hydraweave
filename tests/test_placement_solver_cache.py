@@ -25,6 +25,7 @@ def test_12_solver_snapshots_matching_measurements(tmp_path, identity):
         key = measurements.key(identity, "600", "a" * 64, "store")
         bundle["measurement_keys"] = {"anchor": key}
         bundle["probe"]["devices"] = [dict(id=identity, uuid=identity, driver="600")]
+        bundle["probe"].update(file_store="store", xfer_sha256={"anchor": "a" * 64})
         helper.bundle.write_bytes(json.dumps(bundle).encode())
         measured = measurements.median([dict(h2d_mbps=1, d2h_mbps=2, h2d_lat_ns=3)] * 9,
                                         measurements.XFER_METHOD)

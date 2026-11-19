@@ -248,7 +248,7 @@
       const isRunning = running.has(id), bytes = related.reduce((n, a) => n + Number(a.manifest?.bytes || a.bytes || 0), 0);
       const stateText = related.length ? (present ? "Files present" : related.some(a => ["partial"].includes(a.presence)) ? "Files partial" : "Files missing") : "Files state unavailable";
       const action = isRunning ? `<a class="btn pri" href="#/chat?model=${encodeURIComponent(id)}">Open chat</a>` : present ? button("Start", "start-dialog", {style: "pri", disabled: profileStartBlocker(p) || mutationReason() || capability("up"), extra: `data-profile="${esc(id)}"`}) : button("Get files", "files-info", {style: "pri", disabled: "This portal has no browser download workflow for model assets"});
-      return `<article class="accel model-card"><div class="row between"><h2>${esc(p.label || id)}</h2>${statusPill(p.state, reason(p, "state"))}</div><p>${display(bytes || p.size_bytes, "Size unavailable", "bytes")} · ${esc(rows(p.nodes).map(n => typeof n === "string" ? n : n.machine || n.id).join(", ") || "node placement unavailable")}</p><p>${esc(stateText)}</p>${isRunning ? `<p>Running at <span class="mono">${esc(rows(p.processes).map(x => x.endpoint).find(Boolean) || "URL unavailable")}</span></p>` : ""}<div class="row">${action}${isRunning ? button("Copy API snippet", "copy-api", {extra: `data-profile="${esc(id)}"`}) : ""}</div></article>`;
+      return `<article class="accel model-card"><div class="row between"><h2>${esc(p.label || id)}</h2>${statusPill(p.state, reason(p, "state"))}</div><p>${display(bytes || p.size_bytes, "Size unavailable", "bytes")} · ${esc(rows(p.nodes).map(n => typeof n === "string" ? n : n.machine || n.id).join(", ") || "node placement unavailable")}</p><p>${esc(stateText)}</p>${isRunning ? `<p>Running at <span class="mono">${esc(window.HydraweaveChat?.endpoint(p) || "Router URL unavailable")}</span></p>` : ""}<div class="row">${action}${isRunning ? button("Copy API snippet", "copy-api", {extra: `data-profile="${esc(id)}"`}) : ""}</div></article>`;
     }).join("");
     return cards || empty("No models are configured", "Choose a model profile in Engine settings.", `<a class="btn pri" href="#/engine-settings">Choose a model</a>`);
   }
@@ -784,9 +784,12 @@
     if (action === "cancel-job") { const id = state.job?.id || state.job?.job; if (id) mutate("cancel", {job:id}, true).catch(error => announce(error.message)); return; }
     if (action === "refresh") { refresh(); window.HydraweaveRecipes?.refresh(); pageOf(route())?.refresh?.(); return; }
     if (action === "copy-api") {
-      const p = profiles().find(item => profileId(item) === control.dataset.profile), endpoint = rows(p?.processes).map(item => item.endpoint).find(Boolean);
-      const snippet = `curl ${JSON.stringify((endpoint || "<router-base-url>").replace(/\/$/, "") + "/v1/chat/completions")} -H 'Content-Type: application/json' -d '{"model":"${profileId(p)}","messages":[{"role":"user","content":"Hello"}]}'`;
-      navigator.clipboard?.writeText(snippet).then(() => announce("API snippet copied"), () => announce(snippet)); return;
+      const p = profiles().find(item => profileId(item) === control.dataset.profile);
+      if (!p || !window.HydraweaveChat) { announce("Open Chat for this profile to view its API examples."); return; }
+      const snippet = window.HydraweaveChat.snippets(p);
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(snippet).then(() => announce("API snippets copied"), () => announce(snippet));
+      else announce(snippet);
+      return;
     }
     if (control.dataset.recipeAction || control.dataset.pageAction) return;      // recipes.js and feature pages handle their own controls
     if (action === "export-csv") { exportCSV(); return; }

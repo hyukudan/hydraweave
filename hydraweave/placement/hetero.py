@@ -16,6 +16,9 @@ the measured points of the heterogeneous-decode runs (October 2026, 1 user, R1, 
 
 Every candidate says whether it is a measured point or a model output (`estimate`). The pair's weights never move
 (Strix weights come only from local NVMe): only activations cross the link.
+
+These are historical comparisons, not current hardware calibration. Current
+solver performance uses identity-bound recipes.calibration receipts instead.
 """
 from __future__ import annotations
 
@@ -50,7 +53,8 @@ class Candidate:
     def to_dict(self):
         return {"family": self.family, "flags": self.flags, "ms_per_token": round(self.ms_per_token, 2),
                 "tok_s": round(self.tok_s, 1), "estimate": self.estimate, "extrapolated": self.extrapolated,
-                "measured_point": self.measured_point, "calibration": self.calibration, "detail": self.detail}
+                "measured_point": self.measured_point, "calibration": self.calibration, "detail": self.detail,
+                "current_hardware": False, "scope": "historical October 2026 DS41 lab comparison"}
 
 
 def _pipe_fit():
@@ -90,8 +94,11 @@ def _interp(curve, x):
 
 
 def _check_curve(curve):
-    if not curve or any(len(p) != 2 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in p)
-                        or not 0 <= p[1] <= 1 for p in curve):
+    if (not isinstance(curve, (list, tuple)) or not curve
+            or any(not isinstance(p, (list, tuple)) or len(p) != 2
+                   or not all(type(v) in (int, float) and math.isfinite(v) for v in p)
+                   or p[0] < 0 or not 0 <= p[1] <= 1 for p in curve)
+            or len({p[0] for p in curve}) != len(curve)):
         raise PlanError("hit-rate curve: expected (expert GiB, layer_all_local in 0..1) finite points")
 
 
@@ -99,7 +106,7 @@ def hot(expert_gib, curve):
     """Dense + hot experts with `expert_gib` of statically resident experts; curve = [(expert GiB, layer_all_local)]
     held out from the routes (replica mode)."""
     _check_curve(curve)
-    if not isinstance(expert_gib, (int, float)) or not math.isfinite(expert_gib) or expert_gib < 0:
+    if type(expert_gib) not in (int, float) or not math.isfinite(expert_gib) or expert_gib < 0:
         raise PlanError("hot placement: expert GiB must be a finite number >= 0 (no room after the 9.55 GiB reserve?)")
     local = _interp(curve, expert_gib)
     remote = LAYERS * (1 - local)
@@ -110,7 +117,7 @@ def hot(expert_gib, curve):
                      {"remote_layers_per_token": round(remote, 1), "layer_all_local": round(local, 3),
                       "dynamic_copies": "not modelled (measured: 80 GiB static + 10 GiB dynamic, 16 copies/token, "
                                         "40.1 tok/s)"},
-                     extrapolated=not low <= remote <= high,
+                     extrapolated=not low <= remote <= high or not min(p[0] for p in curve) <= expert_gib <= max(p[0] for p in curve),
                      measured_point={"tok_s": 33.6, "expert_budget_gib": 80, "placement": "W1 placement-pro80"}
                      if abs(expert_gib - (80 - HOT["reserve_gib"])) < 0.05 else None)
 
@@ -118,13 +125,15 @@ def hot(expert_gib, curve):
 def candidates(vram_cap_gib, *, curve, front_k, margin_gib=None, link="1g"):
     """Every family at this cap, best first. front_k: the pipeline K that fits the cap (vramplan ds41-rtx-front);
     0 when not even one layer fits. The margin is never below max(2 GiB, 3 % of the cap)."""
-    if not isinstance(vram_cap_gib, (int, float)) or not math.isfinite(vram_cap_gib) or vram_cap_gib <= 0:
+    if type(vram_cap_gib) not in (int, float) or not math.isfinite(vram_cap_gib) or vram_cap_gib <= 0:
         raise PlanError("vram cap must be a positive number of GiB")
-    if margin_gib is not None and (not isinstance(margin_gib, (int, float)) or not math.isfinite(margin_gib)
+    if margin_gib is not None and (type(margin_gib) not in (int, float) or not math.isfinite(margin_gib)
                                    or margin_gib < 0):
         raise PlanError("margin must be a finite number of GiB >= 0")
-    if type(front_k) is not int or front_k < 0:
-        raise PlanError("front_k must be an integer >= 0")
+    if type(front_k) is not int or not 0 <= front_k <= LAYERS:
+        raise PlanError(f"front_k must be an integer in 0..{LAYERS}")
+    if link not in LINKS:
+        raise PlanError(f"link must be one of {LINKS}")
     margin = max(2.0, 0.03 * vram_cap_gib, margin_gib or 0.0)
     out = [Candidate("pair-only", {}, 1000 / PAIR_ONLY_TOK_S, "measured P15 27.2 tok/s", {"rtx": "unused"},
                      estimate=False, measured_point={"tok_s": PAIR_ONLY_TOK_S})]

@@ -1,7 +1,9 @@
 """``hydraweave models``: the model library from the command line (the same functions as the portal's library page).
 
     hydraweave models list [--machine M] [--refresh]       model units per machine (cached scan, or scan now)
-    hydraweave models verify M ROOT NAME                    refused: not available in this release
+    hydraweave models verify M ROOT NAME                  owned verification, waits and cancels on Ctrl+C
+    hydraweave models copy-plan M ROOT NAME DEST DEST_ROOT
+    hydraweave models copy M ROOT NAME DEST DEST_ROOT --confirm CODE
     hydraweave models roots M [--set DIR ...] [--clear]
     hydraweave models ledger-accept                         accept the current RTX big-job ledger as the baseline
 """
@@ -9,6 +11,7 @@
 import json
 from pathlib import Path
 import sys
+import time
 
 
 def _store(create=False):
@@ -32,10 +35,8 @@ def _print(value):
 def run(args):
     from hydraweave import cli, downloads
     operation = args.models_operation
-    if operation == "verify":
-        # Held like copies between machines: refused before the configuration is read or any machine is called.
-        print("hydraweave: " + downloads.VERIFY_HELD, file=sys.stderr)
-        return 1
+    if operation in ("verify", "copy-plan", "copy"):
+        return _model_job(args)
     if operation == "registry":
         from hydraweave.backends import model_registry
         _print(model_registry(user_dir=cli.config_path().parent / "models"))
@@ -87,6 +88,43 @@ def run(args):
             store.close()
 
 
+def _model_job(args):
+    from hydraweave import cli
+    from hydraweave.web.api import API
+    from hydraweave.web.features import library
+    api = API(cli.config_path())
+    arguments = {key: getattr(args, key) for key in ("machine", "model_root", "name")}
+    if args.models_operation != "verify":
+        arguments.update(destination=args.destination, destination_root=args.destination_root)
+    if args.models_operation == "copy-plan":
+        _print(library.copy_plan(api, arguments))
+        return 0
+    if args.models_operation == "copy":
+        arguments["confirm"] = args.confirm
+    job = None
+    try:
+        job = api.mutate("library/" + args.models_operation, arguments)
+        identifier = job["id"]
+        progress = None
+        while True:
+            api.renew_jobs({"jobs": [identifier]})
+            row = api.read("jobs/" + identifier)
+            if row.get("progress") != progress:
+                progress = row.get("progress")
+                if progress:
+                    print("hydraweave: " + str(progress), file=sys.stderr)
+            if row["state"] != "running":
+                _print(row)
+                return 0 if row["state"] == "succeeded" else 1
+            time.sleep(.25)
+    except KeyboardInterrupt:
+        if job:
+            api.mutate("cancel", {"job": job["id"]})
+        return 130
+    finally:
+        api.close_features()
+
+
 def add(commands):
     models = commands.add_parser("models", help="model library: inventory")
     operations = models.add_subparsers(dest="models_operation", required=True)
@@ -94,10 +132,16 @@ def add(commands):
     listing.add_argument("--machine")
     listing.add_argument("--refresh", action="store_true", help="scan now (read-only on every machine)")
     operations.add_parser("registry", help="list declared model metadata")
-    verify = operations.add_parser("verify", help="not available in this release (refused)")
+    verify = operations.add_parser("verify", help="verify a model manifest as an owned cancellable job")
     verify.add_argument("machine")
     verify.add_argument("model_root")
     verify.add_argument("name")
+    for operation in ("copy-plan", "copy"):
+        copy = operations.add_parser(operation, help="review or run a direct, verified node-to-node copy")
+        for key in ("machine", "model_root", "name", "destination", "destination_root"):
+            copy.add_argument(key)
+        if operation == "copy":
+            copy.add_argument("--confirm", required=True)
     roots = operations.add_parser("roots", help="show or set a machine's extra model roots")
     roots.add_argument("machine")
     roots.add_argument("--set", nargs="+", metavar="DIR")

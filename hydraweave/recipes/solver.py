@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import threading
 
-from . import commands, content_cache, core, placement, reader, service, session
+from . import calibration, commands, content_cache, core, placement, reader, service, session
 from .reader import RecipeError
 
 SCHEMA = "hydraweave/solver-selection-v1"
@@ -46,12 +46,15 @@ def rows(document):
         refusal = placed.get("refusal")
         prediction = row.get("prediction") or {}
         requires = row.get("requires") or []
+        extrapolated = (prediction.get("extrapolated") is True or row.get("extrapolated") is True
+                        or "extrapolat" in str(prediction.get("tag", "")).lower())
         result.append(dict(deepcopy(row), id=row.get("id") or (row.get("choice") or {}).get("id"), refusal=refusal,
                            estimates=prediction.get("estimates", row.get("estimates", [])),
                            tag=prediction.get("tag", "unpredicted"),
-                           saveable=not refusal and not requires,
+                           saveable=not refusal and not requires and not extrapolated,
                            save_refused=("row refused" if refusal else "requires: " + ", ".join(requires)
-                                         if requires else None)))
+                                         if requires else "extrapolated performance needs current calibration"
+                                         if extrapolated else None)))
     return result
 
 
@@ -60,24 +63,29 @@ def _bundle(name):
     return commands.runtime_dir() / "solver-inputs" / (name + ".json")
 
 
-def _materialize(value, sources, *, directory):
+def _materialize(value, sources, *, directory, depth=0):
     """Freeze JSON document references before planning. Never read models or acquire descriptors/measurements."""
+    if depth > 32:
+        raise RecipeError("PL_E_SCHEMA solver JSON references are cyclic or too deeply nested")
+    def materialize(value, directory=directory):
+        return _materialize(value, sources, directory=directory, depth=depth + 1)
     if isinstance(value, dict):
-        return {k: {lang: _materialize(doc, sources, directory=directory) for lang, doc in v.items()}
+        return {k: {lang: materialize(doc) for lang, doc in v.items()}
             if k == "usage_lang" and isinstance(v, dict) else
-            _materialize(v, sources, directory=directory) if k in (
+            materialize(v) if k in (
             "components", "desc", "context", "usage", "costs", "curves") else
-            [_materialize(v_, sources, directory=directory) for v_ in v] if k == "choices" and isinstance(v, list)
+            [materialize(v_) for v_ in v] if k == "choices" and isinstance(v, list)
             else deepcopy(v) for k, v in value.items()}
     if isinstance(value, str):
         path = Path(value)
         path = path if path.is_absolute() else directory / path
-        return _materialize(_read_source(path, sources), sources, directory=path.parent)
+        return materialize(_read_source(path, sources), directory=path.parent)
     return deepcopy(value)
 
 
 def _read_source(path, sources):
-    raw = Path(path).read_bytes()
+    with Path(path).open("rb") as stream:
+        raw = stream.read(content_cache.MAX_JSON_BYTES + 1)
     if len(raw) > content_cache.MAX_JSON_BYTES:
         raise RecipeError("PL_E_SCHEMA solver JSON input too large")
     doc = json.loads(raw)
@@ -93,11 +101,15 @@ def _capture(cluster, ref, route, bundle, layers):
     recipe_bytes = path.read_bytes()
     sources = {str(path.resolve()): hashlib.sha256(recipe_bytes).hexdigest()}
     request = _read_source(bundle_path, sources)
-    if set(request) - {"probe", "inputs", "desc", "context", "identity", "measurement_keys"} or not {"probe", "inputs"} <= request.keys():
+    if set(request) - {"probe", "inputs", "desc", "context", "identity", "measurement_keys", "calibration"} or not {"probe", "inputs"} <= request.keys():
         raise RecipeError("PL_E_SCHEMA solver input bundle needs probe and inputs")
-    for key in ("probe", "inputs", "desc", "context", "identity", "measurement_keys"):
+    for key in ("probe", "inputs", "desc", "context", "identity", "measurement_keys", "calibration"):
         if key in request:
             request[key] = _materialize(request[key], sources, directory=bundle_path.parent)
+    if not isinstance(request["probe"], dict) or not isinstance(request["inputs"], dict):
+        raise RecipeError("PL_E_SCHEMA solver probe and inputs must be tables")
+    calibration.performance(request["inputs"])
+    performance_receipt = request.pop("calibration", None)
     measurement_keys = request.pop("measurement_keys", {})
     measurement_probe = deepcopy(request["probe"])
     measurement_keys = _measurement_keys(measurement_probe, measurement_keys)
@@ -118,39 +130,33 @@ def _capture(cluster, ref, route, bundle, layers):
             data = layer.read_bytes()
             sources[str(layer.resolve())] = hashlib.sha256(data).hexdigest()
             layer_docs.append({"role": role, "text": data.decode("utf-8"), "suffix": layer.suffix})
+    if performance_receipt is not None:
+        calibration_status = calibration.validate(performance_receipt, request["probe"], request["inputs"],
+            route=route, workload=layers.workload, context=request.get("context") or {},
+            recipe_sha256=hashlib.sha256(recipe_bytes).hexdigest(), settings=calibration.layer_settings(layers))
+    else:
+        figures = calibration.performance(request["inputs"])
+        request["inputs"] = calibration.without_performance(request["inputs"])
+        calibration_status = {"status": "unpredicted", "withheld": sorted(figures),
+                              "why": "costs and curves require an exact current calibration receipt" if figures
+                              else "no calibrated performance inputs were supplied"}
     return {"schema": SCHEMA, "recipe": recipe_bytes.decode("utf-8"), "recipe_ref": str(ref), "route": route,
             "request": request, "sources": sources, "layers": layer_docs, "sets": layers.sets,
             "workload": layers.workload, "config_sha256": service.config_sha256(),
             "cached_components": cached_components, "measurement_keys": measurement_keys,
-            "measurement_probe": measurement_probe}
+            "measurement_probe": measurement_probe, "performance_receipt": performance_receipt,
+            "calibration": calibration_status}
 
 
 def _measurement_keys(probe, keys):
     """Bind core-supplied xfer identities to the current probe's physical GPU/driver and store identity."""
-    if not isinstance(keys, dict):
-        raise RecipeError("PL_E_SCHEMA measurement_keys must be a table")
-    current = {}
-    for sid, supplied in keys.items():
-        if not isinstance(supplied, dict) or set(supplied) != {"uuid", "driver", "xfer_sha256", "store_id"}:
-            raise RecipeError("PL_E_SCHEMA invalid measurement key")
-        identity = deepcopy(supplied)
-        if sid == "store":
-            identity.update(uuid="host-store", driver="none")
-        else:
-            devices = [d for d in probe.get("devices", []) if str(d.get("uuid", "")).lower() ==
-                       str(identity["uuid"]).lower()]
-            identity["driver"] = devices[0].get("driver", "unknown") if len(devices) == 1 else "unknown"
-        store = probe.get("file_store")
-        xfer = probe.get("xfer_sha256", {}).get(sid) if isinstance(probe.get("xfer_sha256"), dict) else None
-        if store is not None:
-            identity["store_id"] = store
-        if xfer is not None:
-            identity["xfer_sha256"] = xfer
-        current[sid] = identity
-    return current
+    from .measurements import bind_keys
+    return bind_keys(probe, keys)
 
 
 def _check(snapshot):
+    if "calibration" not in snapshot:
+        raise RecipeError("PL_E_STALE solver evidence format changed; solve again")
     if snapshot.get("config_sha256") != service.config_sha256():
         raise RecipeError("PL_E_STALE solver configuration changed; solve again")
     for path, expected in snapshot["sources"].items():
@@ -169,6 +175,12 @@ def _check(snapshot):
         current = placement.cached_measurements(snapshot["measurement_probe"], snapshot["measurement_keys"])
         if current != snapshot["request"]["probe"]:
             raise RecipeError("PL_E_STALE solver measurements changed; solve again")
+    if snapshot.get("performance_receipt") is not None:
+        calibration.validate(snapshot["performance_receipt"], snapshot["request"]["probe"], snapshot["request"]["inputs"],
+            route=snapshot["route"], workload=snapshot["workload"], context=snapshot["request"].get("context") or {},
+            recipe_sha256=hashlib.sha256(snapshot["recipe"].encode("utf-8")).hexdigest(),
+            settings={"sets": snapshot["sets"], "layers": [{"role": layer["role"],
+                      "sha256": hashlib.sha256(layer["text"].encode("utf-8")).hexdigest()} for layer in snapshot["layers"]]})
 
 
 def _run(snapshot, backend, *, pick=None):
@@ -187,7 +199,9 @@ def _run(snapshot, backend, *, pick=None):
                 layers.overrides.append(target)
         request = deepcopy(snapshot["request"])
         return placement.solve(path, route=snapshot["route"], layers=layers, backend=backend,
-                               **request, **({"pick": pick} if pick is not None else {}))
+                               **request, measurement_keys=snapshot["measurement_keys"],
+                               performance_receipt=snapshot.get("performance_receipt"),
+                               **({"pick": pick} if pick is not None else {}))
 
 
 def solve(cluster, ref, route, bundle, *, layers=None, backend=None):
@@ -200,6 +214,7 @@ def solve(cluster, ref, route, bundle, *, layers=None, backend=None):
     record = {"snapshot": snapshot, "result": result.document, "table": result.text}
     _save_plan(digest, record)
     return {"selection": digest, "solver": result.document, "rows": shown, "table": result.text,
+            "calibration": snapshot["calibration"],
             "saved": False, "note": "Choose a row explicitly; no assist or grant is enabled by solving."}
 
 

@@ -2,15 +2,22 @@
 
 `hydraweave solve RECIPE --route ROUTE --bundle NAME` runs the packaged `ts-recipe solve` on cached CPU inputs.
 `NAME` names a local `run/solver-inputs/NAME.json` containing `probe`, `inputs`, and optional `desc`, `context`, and
-`identity` and `measurement_keys`. The inputs use Tierstream's solver input schema; each configuration supplies its exact cached components.
+`identity`, `measurement_keys` and `calibration`. The inputs use Tierstream's solver input schema; each configuration supplies its exact cached components.
 JSON document references are relative to the bundle. This command never acquires descriptors or measurements.
+
+Performance costs and curves require an exact current calibration receipt. Without one, the solver withholds
+those figures and keeps feasible placements unpredicted. Supplied expired or foreign evidence is refused;
+see [performance-calibration.md](performance-calibration.md) for identities, expiry and how to supply completed
+own-engine measurements. The web card and API expose the calibration status. Historical snapshots must be solved
+again, and extrapolated rows cannot be saved.
 
 `measurement_keys` maps executing set ids (plus `store` for host storage) to local
 `{uuid, driver, xfer_sha256, store_id}` identities. The xfer SHA is Tierstream's xfer-v1 identity. Current probe
 UUID/driver, `file_store`, and per-set `xfer_sha256` take precedence over old cache keys; unknown identities and
 exact-key misses supply no figures. Solving replaces inline transfer figures with matching cache hits, freezes
 those figures and provenance in its snapshot, and passes them to every core choice. Pick rechecks that snapshot;
-changed cached measurements require another solve. Missing measurements remain `unpredicted`.
+changed or expired cached measurements require another solve. Missing measurements remain `unpredicted`.
+Transfer/store entries expire after 24 hours; absent current identities cannot inherit an old key's values.
 
 The CLI and web planner display the core's original row order, placement/refusal, predictions, estimates and
 `unpredicted`. Solving saves a local selection snapshot, not a recipe. To save a reviewed row, use

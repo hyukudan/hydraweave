@@ -11,7 +11,7 @@ import re
 import sys
 
 from . import engines, knobs
-from .config import ConfigError, family, listen, preset, validate_overrides
+from .config import ConfigError, deployment_spec, family, listen, preset, validate_overrides
 from .paths import repo_root
 
 
@@ -118,7 +118,20 @@ def render_processes(cluster, profile_name, *, diagnostics=(), run=None) -> list
                 raise ConfigError("golden: manifest does not match the qualified preset")
         tokens = _tokens(assets["calibration_tokens"]) if "{tokens}" in data["argv"] else []
         argv = []
-        for token in data["argv"]:
+        launch_tokens = list(data["argv"])
+        deploy = deployment_spec(profile, data)
+        if deploy is not None:
+            # Only the engine-selected capacity defaults are removed. Explicit
+            # profile overrides below retain the operator's requested limits.
+            filtered, index = [], 0
+            while index < len(launch_tokens):
+                if launch_tokens[index] in ("--slots", "--capacity", "--context"):
+                    index += 2
+                else:
+                    filtered.append(launch_tokens[index])
+                    index += 1
+            launch_tokens = filtered + ["--deploy", deploy]
+        for token in launch_tokens:
             if token == "{tokens}":
                 argv.extend(tokens)
             else:

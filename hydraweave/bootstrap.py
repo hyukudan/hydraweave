@@ -76,26 +76,32 @@ if [ "$actual" != "$expected" ]; then
     printf '%s\\n' "Package SHA-256 mismatch: expected $expected, got $actual; installation aborted." >&2
     exit 1
 fi
-mkdir -p "$root/etc" "$root/incoming" "$root/lab-arm" "$root/log" "$root/releases"
-if [ ! -x "$root/agent-venv/bin/python" ]; then
-    "$python" -m venv "$root/agent-venv"
-fi
-"$root/agent-venv/bin/python" -m pip install --upgrade --force-reinstall "hydraweave[node] @ file://$package"
-if [ -n "${HYDRAWEAVE_LAB_DIR:-}" ]; then
-    "$root/agent-venv/bin/hydraweave-node" install-service --root "$root" --lab-dir "$HYDRAWEAVE_LAB_DIR"
+[ ! -L "$root" ] && [ ! -L "$root/agent-releases" ] || {
+    printf '%s\\n' 'Node root/release directories must not be symlinks.' >&2
+    exit 1
+}
+mkdir -p "$root/etc" "$root/incoming" "$root/lab-arm" "$root/log" "$root/releases" "$root/agent-releases"
+candidate="$root/agent-releases/bootstrap-$expected-$$"
+mkdir "$candidate"
+"$python" -m venv "$candidate"
+"$candidate/bin/python" -I -m pip install --upgrade "hydraweave[node] @ file://$package"
+"$candidate/bin/python" -I -m pip check
+if systemctl --user is-active --quiet hydraweave-node.service 2>/dev/null; then
+    # Legacy agents cannot implement transactional updates themselves. The new
+    # candidate runs an independent supervisor and retains the old unit/venv.
+    "$candidate/bin/python" -I -m hydraweave.node_update --bootstrap --root "$root" --sha256 "$expected"
+elif [ -e "$HOME/.config/systemd/user/hydraweave-node.service" ]; then
+    printf '%s\\n' 'Existing node service is stopped. Start it before migration so its rollback readiness can be verified.' >&2
+    exit 1
 else
-    "$root/agent-venv/bin/hydraweave-node" install-service --root "$root"
-fi
-printf '%s\\n' 'Agent installed.'
-attempt=0
-until "$root/agent-venv/bin/hydraweave-node" pair 2>/dev/null; do
-    attempt=$((attempt + 1))
-    if [ "$attempt" -ge 15 ]; then
-        printf '%s\\n' 'Agent is still starting; run hydraweave-node pair to show the pairing code.'
-        break
+    if [ -n "${HYDRAWEAVE_LAB_DIR:-}" ]; then
+        "$candidate/bin/hydraweave-node" install-service --root "$root" --lab-dir "$HYDRAWEAVE_LAB_DIR"
+    else
+        "$candidate/bin/hydraweave-node" install-service --root "$root"
     fi
-    sleep 1
-done
+fi
+"$candidate/bin/python" -I -m hydraweave.node_update --wait-ready --root "$root"
+printf '%s\\n' 'Agent installed; the previous environment has been retained.'
 printf '%s\\n' 'Reissue pairing code: hydraweave-node pair'
 """).encode()
 

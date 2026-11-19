@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from .. import modelfiles
+from ..store import atomic_write
 
 
 class DescriptorError(RuntimeError):
@@ -22,17 +23,8 @@ class DescriptorError(RuntimeError):
 
 def _files(path, *, nanoseconds=False):
     """The files a model path reads (same rule as modelfiles.read), with their identity."""
-    path = Path(path)
-    if path.is_dir():
-        files = sorted(p for p in path.iterdir() if p.suffix in (".safetensors", ".gguf"))
-    else:
-        files = [path]
-        split = modelfiles.SPLIT.fullmatch(path.name)
-        if split:
-            files = sorted(p for p in path.parent.iterdir()
-                           if p.name.startswith(split["prefix"] + "-") and p.name.endswith("-of-" + split["count"] + ".gguf"))
     out = []
-    for f in files:
+    for f in modelfiles.model_files(path):
         st = os.stat(f)
         out.append({"file": str(f), "device": st.st_dev, "size": st.st_size,
                     **({"mtime_ns": st.st_mtime_ns} if nanoseconds else {"mtime": int(st.st_mtime)})})
@@ -61,10 +53,7 @@ class Store:
                   "tensors": [[t.name, t.bytes, t.file, t.dtype, list(t.shape)] for t in tensors]}
         if self.schema is not None:
             record["schema"] = self.schema
-        self.directory.mkdir(parents=True, exist_ok=True)
-        temporary = self._path(model).with_suffix(".tmp")
-        temporary.write_text(json.dumps(record), encoding="utf-8")
-        temporary.replace(self._path(model))
+        atomic_write(self._path(model), json.dumps(record).encode("utf-8"))
         return {"model": str(model), "files": len(identity), "tensors": len(tensors)}
 
     def load(self, model):
@@ -81,7 +70,7 @@ class Store:
             # Also read the short-lived nanosecond records written before legacy comparison was restored.
             current = _files(model, nanoseconds=self.nanoseconds or
                              (bool(record["files"]) and "mtime_ns" in record["files"][0]))
-        except OSError as exc:
+        except (OSError, modelfiles.ModelFileError) as exc:
             raise DescriptorError(f"{model}: unavailable: {exc}") from exc
         if current != record["files"]:
             raise DescriptorError(f"{model}: the model files changed since their headers were saved; run "
@@ -102,13 +91,6 @@ class PlacementStore(Store):
 
 @contextmanager
 def saved_only(store):
-    """Inside this block every modelfiles.read() is served from saved descriptors (and refused when there is none)."""
-    original = modelfiles.read
-
-    def read(path):
-        return store.load(path)
-    modelfiles.read = read
-    try:
+    """Serve this thread/task's model reads from saved descriptors, refusing any missing or stale entry."""
+    with modelfiles.using_reader(store.load):
         yield
-    finally:
-        modelfiles.read = original

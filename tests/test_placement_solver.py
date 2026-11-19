@@ -161,7 +161,8 @@ class SolverTests(unittest.TestCase):
         result = self.solve()
         plan = json.loads((self.root / "solver-plans" / (result["selection"] + ".json")).read_bytes())
         frozen = plan["snapshot"]["request"]["inputs"]
-        self.assertEqual(frozen["costs"]["value"], 1)
+        self.assertNotIn("costs", frozen)
+        self.assertEqual(result["calibration"]["withheld"], ["costs"])
         self.assertEqual(frozen["usage_lang"]["en"]["value"], 1)
         self.assertEqual(frozen["choices"][0]["components"]["value"], 1)
         for path in (directory / "components.json", directory / "costs.json", directory / "language.json"):

@@ -7,6 +7,7 @@ nvidia-smi and the OS. Disk bandwidth is read from the probe cache unless the op
 from __future__ import annotations
 
 from ..compat import schema as compat_schema
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +17,7 @@ import time
 from .. import engines, render, rtx
 from ..config import ConfigError
 from . import apply, probe
+from .hashing import sha256_file
 from .reader import RecipeError
 
 # The model id each engine family serves (equals `match.model` of its recipes) and the asset that holds the model.
@@ -270,6 +272,20 @@ def _ok(result):
     return isinstance(result, dict)
 
 
+def _node_reports(nodes, call):
+    """Read independent nodes concurrently, keeping each node's verb order and failure isolated."""
+    def report(mid):
+        try:
+            return call(mid, "gpu"), call(mid, "doctor"), None
+        except Exception as exc:  # a failed read must not discard another node's available facts
+            return None, None, str(exc)
+
+    if len(nodes) < 2:
+        return [(mid, report(mid)) for mid in nodes]
+    with ThreadPoolExecutor(max_workers=min(8, len(nodes))) as executor:
+        return list(zip(nodes, executor.map(report, nodes)))
+
+
 def gather(cluster, ctx, *, call, gpus=None, memory=None, pro_busy=None, cache=None, measure_disks=False,
            measurer=None, now=None, release_executable=None, release_commit=None, sysmem_reader=None,
            transfer_identity=None, placement=False):
@@ -319,19 +335,25 @@ def gather(cluster, ctx, *, call, gpus=None, memory=None, pro_busy=None, cache=N
             avail_devices[gpu["uuid"]] = {"available": False, "why": "not the profile's prefill device"}
         devices[gpu["uuid"]] = row
     lan, usb4 = {}, {}
-    for mid in ctx.nodes:
-        try:
-            gpu_result = call(mid, "gpu")
-            doctor_result = call(mid, "doctor")
-        except Exception as exc:  # any remote failure is the node being unavailable
+    for mid, (gpu_result, doctor_result, error) in _node_reports(ctx.nodes, call):
+        if error is not None:
             devices[mid] = {"name": None, "memory_gib": None, "present": False}
-            avail_devices[mid] = {"available": False, "why": f"node unreachable: {exc}"}
+            avail_devices[mid] = {"available": False, "why": f"node unreachable: {error}"}
             hosts[mid] = {"free_ram_gib": None}
-            lan[mid] = {"up": False, "why": f"node unreachable: {exc}"}
+            lan[mid] = {"up": False, "why": f"node unreachable: {error}"}
             continue
         node = probe.node_device(gpu_result)
         devices[mid] = {"name": node["name"]["value"], "memory_gib": _gtt(gpu_result),
                         "host_ram_gib": node["host_ram_gib"]["value"]}
+        if placement:
+            for key in ("uuid", "pci"):
+                if node.get(key, {}).get("value") is not None:
+                    devices[mid][key] = node[key]["value"]
+            kernel = node["kernel"]["value"]
+            rocm = probe._ok(((doctor_result or {}).get("checks") or {}).get("rocm_version"))
+            devices[mid]["driver"] = (f"kernel={kernel};rocm={rocm}"
+                                      if isinstance(kernel, str) and kernel and isinstance(rocm, str) and rocm else "unknown")
+            devices[mid]["platform"] = "linux-hip"
         model = cluster.assets.get(mid, {}).get(FAMILY_MODELS_BY_ID.get(ctx.model, ""), {}).get("path")
         evidence = cache.evidence(mid, model, now) if cache is not None and model else None
         if evidence is not None:
@@ -378,17 +400,18 @@ def _identities(cluster, ctx, executable, commit, notes):
         expected = release.get("binaries", {}).get(binary.name)
         if not content_cache._digest(expected) or (commit is not None and release.get("engine_commit") != commit):
             raise ValueError("release manifest differs from the selected build")
-        with binary.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = sha256_file(binary)
         if digest != expected:
             raise ValueError("release binary differs from its verified digest")
         identities["engine_sha256"] = digest
+        if isinstance(release.get("engine_commit"), str) and re.fullmatch(r"[0-9a-f]{40}", release["engine_commit"]):
+            identities["engine_revision"] = release["engine_commit"]
     except (OSError, ValueError, RecipeError) as exc:
         notes.append("engine identity unavailable: " + str(exc))
     try:
         name = FAMILY_MODELS_BY_ID.get(ctx.model)
         asset = cluster.assets.get(ctx.pc, {}).get(name)
-        entry = assets.read_manifest().get(ctx.pc, {}).get(name)
+        entry = assets.read_manifest().get(ctx.pc, {}).get(asset["path"]) if asset is not None else None
         if asset is None or entry is None:
             raise ValueError("run assets verify for the selected model")
         stat = Path(asset.get("control_path", asset["path"])).stat()
@@ -503,22 +526,20 @@ class Cache(probe.DiskCache):
             if type(value) is not int or not 0 <= value < MAX_DECLARED_BYTES:
                 raise probe.ProbeError(f"{receipt_path}: {key} must be an integer in [0, 2^50)")
             fields[key] = value
-        data = self._load()
         key = f"describe|{machine}|{launch}"
-        data[key] = dict(fields, launch_sha256=launch, rank=rank, receipt=str(receipt_path),
+        entry = dict(fields, launch_sha256=launch, rank=rank, receipt=str(receipt_path),
                          receipt_sha256=hashlib.sha256(raw).hexdigest(),
                          executable_sha256=executable)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
-        return data[key]
+        self.update(key, entry)
+        return entry
 
     def evidence(self, machine, model_path, now=None):
         """The node's saved disk measurement for this model path, when it is younger than the cache TTL."""
         entry = self._load().get(f"evidence|{machine}|{model_path}")
         now = time.time() if now is None else now
-        if not isinstance(entry, dict) or entry.get("path") != model_path or now - entry.get("measured_at", 0) > probe.CACHE_TTL_S:
+        measured = entry.get("measured_at") if isinstance(entry, dict) else None
+        if (not isinstance(entry, dict) or entry.get("path") != model_path or type(measured) not in (int, float)
+                or not 0 <= now - measured <= probe.CACHE_TTL_S):
             return None
         return entry
 
@@ -536,12 +557,12 @@ class Cache(probe.DiskCache):
         value = receipt["disk_read_gbytes_ps"]
         if type(value) not in (int, float) or not 0 < value < 1e6:   # NaN, infinities and huge integers fail too
             raise probe.ProbeError(f"{receipt_path}: disk_read_gbytes_ps must be a finite number in (0, 1e6)")
-        data = self._load()
+        measured = receipt.get("measured_at")
+        if type(measured) not in (int, float) or not 0 <= time.time() - measured <= probe.CACHE_TTL_S:
+            raise probe.ProbeError(f"{receipt_path}: measured_at must be the measurement's recent Unix timestamp; "
+                                   "importing an old receipt does not refresh it")
         key = f"evidence|{machine}|{model_path}"
-        data[key] = {"disk_read_gbytes_ps": float(value), "method": "receipt", "receipt": str(receipt_path),
-                     "receipt_sha256": hashlib.sha256(raw).hexdigest(), "path": model_path, "measured_at": time.time()}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
-        return data[key]
+        entry = {"disk_read_gbytes_ps": float(value), "method": "receipt", "receipt": str(receipt_path),
+                 "receipt_sha256": hashlib.sha256(raw).hexdigest(), "path": model_path, "measured_at": measured}
+        self.update(key, entry)
+        return entry

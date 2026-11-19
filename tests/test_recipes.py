@@ -730,7 +730,8 @@ class ProbeTests(unittest.TestCase):
     def test_node_evidence_must_name_host_and_path(self):
         cache = facts.Cache(self.dir / "cache.json")
         receipt = self.dir / "r.json"
-        receipt.write_text(json.dumps({"disk_read_gbytes_ps": 6.1, "method": "direct", "host": "n1", "path": "/m.gguf"}))
+        receipt.write_text(json.dumps({"disk_read_gbytes_ps": 6.1, "method": "direct", "host": "n1", "path": "/m.gguf",
+                                      "measured_at": time.time()}))
         self.assertEqual(cache.put_evidence("n1", "/m.gguf", receipt)["method"], "receipt")
         self.assertEqual(cache.evidence("n1", "/m.gguf")["disk_read_gbytes_ps"], 6.1)
         self.assertIsNone(cache.evidence("n1", "/other.gguf"))                       # bound to the model path

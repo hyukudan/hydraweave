@@ -657,6 +657,7 @@ class LocalRouterTests(unittest.TestCase):
                                    "keys": [str(key)], "deadline": time.time() + (60 if stopped else -1),
                                    "ownership": {"leases": [{"role": "engine"}]}})
                 child = Mock()
+                child.process.pid = 987654321
                 child.alive.return_value = True
                 with patch.object(orch.procs, "LocalChild", return_value=child), patch.object(
                         orch, "_replicas_stopped", return_value=stopped), patch.object(
